@@ -12,27 +12,23 @@ One command that exercises the real behaviour on the real phone and exits 0 or n
 
 1. `e2e/run_e2e.py`, standard library only. It orchestrates: start and stop the server, read
    `adb logcat`, assert.
-2. Helper: `wait_for_marker(marker, timeout)` — stream `adb logcat -s DeskPanel` in a
-   subprocess, return `True` on match, `False` on timeout. Clear the buffer with `adb logcat -c`
-   before each scenario or you will match stale lines.
-3. The five scenarios:
+2. Helper: `wait_for_marker(marker, timeout)` — poll `adb logcat -d -s DeskPanel` until the
+   marker appears or the timeout expires, and clear the buffer with `adb logcat -c` before each
+   scenario or you will match stale lines. `-d` dumps and exits; streaming without it is how a
+   suite hangs forever on a marker that never arrives.
+3. The five scenarios, their assertions and their timing allowances are in
+   [docs/TESTING.md](../docs/TESTING.md#end-to-end), which is the single source. This file,
+   that one and `e2e/README.md` each carried a copy and they had already drifted on scenario 5.
+   Implement what is there; if a scenario needs to change, change it there first.
 
-   | # | Action | Assertion |
-   |---|---|---|
-   | 1 | Server running | `state=online` within 5s |
-   | 2 | Stop the server | `state=offline` and `screen=sleep` within 20s |
-   | 3 | Start the server | `state=online` and `screen=wake` within 20s |
-   | 4 | `/quotes` serving a fixture | Rendered values match (delegate to TT.7) |
-   | 5 | Phone Wi-Fi off 30s, then on | No crash in logcat; recovers unaided |
-
-   The 20s allowances exist because T5.3's backoff caps at 15s. Tighter windows produce flaky
-   failures that are not bugs.
+   Scenario 4 delegates the render assertion to TT.7, so TT.7 is a prerequisite of a complete
+   run — not of writing the suite.
 4. `dumpsys power` may be used as an **optional corroborating check**, in one clearly named
    function with a comment saying it is AOSP-derived and undocumented. If it disagrees, print a
    warning — **do not fail the run**.
 5. Print a per-scenario summary and exit non-zero if any scenario failed.
-6. `e2e/README.md`: what each scenario covers, and the prerequisites (phone on adb, app
-   installed, server configured).
+6. `e2e/README.md` already exists and describes the suite ahead of time. Update it rather than
+   creating it, and keep it pointing at `docs/TESTING.md` for the scenario table.
 
 ## Acceptance
 

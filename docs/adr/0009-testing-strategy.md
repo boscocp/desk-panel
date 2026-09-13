@@ -14,14 +14,18 @@ turns out to have no documented answer.
 
 ## Decision
 
-### Four layers, all standard library
+### Five layers
+
+Three install nothing: server, web and end-to-end. The two Android layers take JUnit and
+Espresso, which the platform gives no way around; both resolve inside the container, so the
+host stays clean either way.
 
 | Layer | Tool | Command |
 |---|---|---|
 | Server | `unittest` + `unittest.mock` | `python -m unittest discover -s server/tests -t .` |
 | Web | `node:test` + `node:assert`, stable since Node 20 | `node --test "web/test/**/*.test.js"` |
 | Android unit | JUnit on the JVM | `./gradlew test` |
-| Android instrumented | Espresso, including Espresso-Web | `./gradlew connectedAndroidTest` |
+| Android instrumented | Espresso, including Espresso-Web | `make connected` |
 | End-to-end | Python + adb | `python e2e/run_e2e.py` |
 
 ### The E2E does not read screen state from the OS

@@ -2,6 +2,8 @@
 
 Size: M · Prereqs: TT.1, TT.2, T2.1 · Files: `.github/workflows/ci.yml`
 
+Requires: a pushed branch and the gh CLI authenticated
+
 ## Goal
 
 Every push runs everything that does not need a phone.

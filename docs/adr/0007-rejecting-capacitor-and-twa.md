@@ -26,13 +26,20 @@ Android toolchain: its own setup docs require Android Studio and the Android SDK
 APK, which is the heavy part we were trying to escape (ADR 0003). Brightness control is not in
 the first-party plugin list; it comes from the community plugin
 `@capacitor-community/screen-brightness`, which is itself a thin wrapper over the same
-`Window.setAttributes` call we would write ourselves. So the trade is: add Node, npm, a plugin
+`Window.setAttributes` call we would write ourselves. So the trade is: add npm, a plugin
 ecosystem and a third-party dependency, in exchange for not writing about a hundred lines of
 Java — while still installing the SDK either way.
 
+To be fair to the rejected option: **Node is not part of that cost.** This project already
+requires it — `make test-web`, the `web` CI job and four task acceptances all call `node`, and
+[ADR 0006](0006-no-framework-web-layer.md) chose `node:test` precisely because it needs no
+dependency tree. What Capacitor adds is npm as a *dependency manager* and a plugin ecosystem on
+the critical path, not the runtime.
+
 ## Consequences
 
-- One toolchain (Docker + Gradle) instead of two (Docker + Gradle + Node/npm/Capacitor).
+- One build toolchain (Docker + Gradle) instead of two (Docker + Gradle + npm/Capacitor).
+  Node stays either way, as the web layer's test runner.
 - No third-party dependency on the critical path of the core feature.
 - The owner writes Java, which they already know, rather than TypeScript that compiles into a
   plugin call into Java.
