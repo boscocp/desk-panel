@@ -10,7 +10,7 @@ All four layers use standard library tooling. No test dependency is installed an
 
 ```bash
 make check                                       # everything that needs no phone
-make test-server                                 # python -m unittest discover -s server/tests
+make test-server                                 # python -m unittest discover -s server/tests -t .
 make test-web                                    # node --test "web/test/**/*.test.js"
 make test-android                                # ./gradlew test, in the container
 ./gradlew connectedAndroidTest                   # Espresso, needs the phone

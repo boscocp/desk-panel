@@ -18,7 +18,7 @@ turns out to have no documented answer.
 
 | Layer | Tool | Command |
 |---|---|---|
-| Server | `unittest` + `unittest.mock` | `python -m unittest discover -s server/tests` |
+| Server | `unittest` + `unittest.mock` | `python -m unittest discover -s server/tests -t .` |
 | Web | `node:test` + `node:assert`, stable since Node 20 | `node --test "web/test/**/*.test.js"` |
 | Android unit | JUnit on the JVM | `./gradlew test` |
 | Android instrumented | Espresso, including Espresso-Web | `./gradlew connectedAndroidTest` |

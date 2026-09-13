@@ -1,6 +1,6 @@
 # TT.5 — `PcState` extracted and tested on the JVM
 
-Size: M · Pairs with: T4.2, T5.3 · Files:
+Size: M · Prereqs: T2.1 · Pairs with: T4.2, T5.3 · Files:
 `android/app/src/main/java/dev/bosco/deskpanel/PcState.java`,
 `android/app/src/test/java/dev/bosco/deskpanel/PcStateTest.java`
 

@@ -1,7 +1,7 @@
 # Entry point for humans, CI and agents alike. Every target exits non-zero on failure.
 DC := docker compose -f docker/compose.yml run --rm build
 
-.PHONY: help check test-server test-web test-android build apk contract e2e clean
+.PHONY: help check lint-tasks test-server test-web test-android connected build apk contract e2e clean
 
 help:
 	@echo "check         run everything that does not need the phone"
@@ -10,9 +10,15 @@ help:
 	@echo "test-android  gradle JVM unit tests (container)"
 	@echo "build apk     assemble the debug APK (container)"
 	@echo "contract      hit the real upstream APIs (network, opt-in)"
+	@echo "connected     Espresso tests on the phone (container + host adb)"
 	@echo "e2e           full end-to-end, needs the phone on adb"
+	@echo "lint-tasks    every acceptance criterion is a command with an exit code"
+	@echo "clean         remove build output"
 
-check: test-server test-web test-android
+check: lint-tasks test-server test-web test-android
+
+lint-tasks:
+	python scripts/check_acceptance.py
 
 test-server:
 	python -m unittest discover -s server/tests -t .
@@ -25,6 +31,12 @@ test-android:
 
 build apk:
 	$(DC) ./gradlew assembleDebug
+
+# Gradle runs in the container; adb runs on the host. The container reaches the
+# host's adb server over TCP instead of owning the USB device - see TT.7.
+connected:
+	adb start-server
+	$(DC) ./gradlew connectedAndroidTest -PadbHost=host.docker.internal
 
 contract:
 	RUN_CONTRACT_TESTS=1 python -m unittest discover -s server/tests -t . -p "contract_*.py"
