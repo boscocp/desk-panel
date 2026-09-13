@@ -74,6 +74,24 @@ A firewall prompt that never appears when testing locally will appear here. That
 
 ## Linux
 
-`install_task.ps1` is Windows-only by nature. If the server ever needs to run on Linux, the
-equivalent is a systemd **user** unit with `WantedBy=default.target`, which starts on user login
-and carries the same semantics. Not implemented — recorded so the intent is not lost.
+`install_task.ps1` is Windows-only by nature. The Linux equivalent is a systemd **user** unit —
+but bound to `graphical-session.target`, not `default.target`, and with `PartOf=` as well as
+`WantedBy=`. Installed by `server/install_user_unit.sh` (T3.9).
+
+This document used to recommend `WantedBy=default.target` and call it equivalent. It is not.
+With `loginctl enable-linger` on, the user manager starts at boot with nobody logged in and
+reaches `default.target`, so the server would answer at the greeter — the exact failure the
+"never a Windows Service" rule exists to prevent. An SSH session reaches it too, even with
+lingering off. `PartOf=` matters for the other end: without it the unit survives logout,
+because logind defaults to `KillUserProcesses=no`.
+
+Full reasoning in [ADR 0010](adr/0010-login-signal-is-session-scoped.md).
+
+There is no firewall step here. Desktop distros usually ship no inbound filter, and when they
+do it is firewalld *or* ufw *or* nftables — T3.9 detects and instructs rather than configuring.
+
+## macOS
+
+A LaunchAgent in `~/Library/LaunchAgents` with `LimitLoadToSessionType = Aqua` (T3.10). Never a
+LaunchDaemon, and never `/Library/LaunchAgents`. Written but **unverified** — there is no Mac
+to run it on, and the task is `blocked` rather than pretending otherwise.

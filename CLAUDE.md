@@ -11,9 +11,14 @@
    served from `https://appassets.androidplatform.net/`, so talking to a `http://` LAN address
    from JS would be mixed content. Native polling sidesteps it; keep
    `MIXED_CONTENT_NEVER_ALLOW`.
-2. **The PC server is the login signal.** It is started by a Windows Scheduled Task with an
-   "At log on" trigger, so "it answers" means "the user is logged in". Never convert it into a
-   Windows Service — that would answer without a login and report the wrong thing.
+2. **The PC server is the login signal.** It is launched by, and dies with, the **graphical
+   session of a human user** — a Scheduled Task with an "At log on" trigger on Windows, a
+   systemd user unit bound to `graphical-session.target` on Linux, a LaunchAgent with
+   `LimitLoadToSessionType=Aqua` on macOS. So "it answers" means "the user is logged in".
+   Never move it to anything of system scope — a Windows Service, a systemd system unit, a
+   LaunchDaemon, `@reboot`, **or a Docker container**. Each answers without a login and reports
+   the wrong thing. A systemd *user* unit on `default.target` is in that class too, and looks
+   like it is not: see [ADR 0010](docs/adr/0010-login-signal-is-session-scoped.md).
 3. **Screen state is driven by PC state, never by a timeout.** Online: hold
    `FLAG_KEEP_SCREEN_ON`. Offline: clear it and let Android sleep, then wake with
    `setTurnScreenOn(true)` + `setShowWhenLocked(true)`. Fallback if MIUI misbehaves:
