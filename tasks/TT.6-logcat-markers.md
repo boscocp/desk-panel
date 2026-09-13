@@ -17,19 +17,39 @@ versions without notice. So the app reports its own state
 
 ## Steps
 
-1. One tag, `DeskPanel`. Exactly four markers, emitted **only on transition**, never on every
-   poll:
+1. One tag, `DeskPanel`. Two kinds of marker, and the distinction is the whole design:
+
+   **Transition markers** — emitted only when the state changes, never on every poll. These are
+   what the E2E suite asserts on.
 
    ```java
-   Log.i("DeskPanel", "state=online");
-   Log.i("DeskPanel", "state=offline");
-   Log.i("DeskPanel", "screen=wake");
-   Log.i("DeskPanel", "screen=sleep");
+   Log.i("DeskPanel", "state=online");    // PcPoller,  T4.2
+   Log.i("DeskPanel", "state=offline");   // PcPoller,  T4.2
+   Log.i("DeskPanel", "screen=wake");     // MainActivity, T4.3
+   Log.i("DeskPanel", "screen=sleep");    // MainActivity, T4.3
+   Log.i("DeskPanel", "night=on");        // MainActivity, T6.4
+   Log.i("DeskPanel", "night=off");       // MainActivity, T6.4
    ```
 
-2. Put the emitting in one small method so the strings exist in exactly one place.
+   **Heartbeat markers** — emitted per cycle, at a bounded rate, because several acceptance
+   criteria are "this is still running" and there is no other way to assert that:
+
+   ```java
+   Log.i("DeskPanel", "tick=" + epochSeconds);      // the clock is alive,  T2.4
+   Log.i("DeskPanel", "ping=" + outcome);           // one poll attempt,    T5.3
+   Log.i("DeskPanel", "data=ok" | "data=err");      // one data cycle,      T5.1
+   Log.i("DeskPanel", "battery=" + level);          // on broadcast,        T5.4
+   ```
+
+   `tick=` is once a minute, not once a second: the point is survival over hours, and a
+   per-second line would be the log spam T4.2 forbids.
+
+2. Put the emitting in one small class — `Markers.java` — so every string exists in exactly one
+   place. The acceptance greps for that, because a marker duplicated inline is how the E2E
+   suite starts passing against a stale copy.
 3. Keep these at `Log.i` — they must survive a release build. Do not demote them to `Log.d`.
-4. Document the four markers in `docs/TESTING.md` and note that they are a contract.
+4. Document the vocabulary in `docs/TESTING.md` and note that it is a contract: renaming one
+   breaks the E2E suite, and `T5.3`'s rate assertions depend on the heartbeat cadence.
 
 ## Acceptance
 

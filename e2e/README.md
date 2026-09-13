@@ -31,4 +31,5 @@ documented by Android — the field is known from reading AOSP source and can ch
 notice. So the app emits its own markers on the `DeskPanel` logcat tag and this suite asserts on
 those. Reasoning in [ADR 0009](../docs/adr/0009-testing-strategy.md).
 
-Those four markers are a contract. Renaming one breaks this suite.
+The markers are a contract, listed in [docs/TESTING.md](../docs/TESTING.md#end-to-end).
+Renaming one breaks this suite.
