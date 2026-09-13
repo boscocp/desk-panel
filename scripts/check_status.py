@@ -8,6 +8,7 @@ that does. Three things must hold:
   - every task file has a row in the index
   - every row with an id has a file, or is listed as bootstrap work
   - every `Prereqs:` names a task that exists
+  - the prerequisite graph has no cycle
 
 Exit codes: 0 clean, 1 disagreement, 2 usage error.
 
@@ -41,6 +42,7 @@ def main(argv: list[str]) -> int:
     rows = set(ROW_RE.findall(status.read_text(encoding="utf-8")))
 
     problems: list[str] = []
+    graph: dict[str, list[str]] = {tid: [] for tid in files}
 
     for tid in sorted(set(files) - rows):
         problems.append(f"{files[tid].name}: no row in STATUS.md")
@@ -59,6 +61,28 @@ def main(argv: list[str]) -> int:
                 continue
             if dep not in files:
                 problems.append(f"{path.name}: prereq {dep} does not exist")
+            else:
+                graph[tid].append(dep)
+
+    # A cycle is how T4.1 and T4.2 each ended up waiting on the other: T4.1's
+    # acceptance needed a native caller, and the only caller declared T4.1 as its
+    # prerequisite. Existence checks do not catch that.
+    WHITE, GREY, BLACK = 0, 1, 2
+    colour = {tid: WHITE for tid in graph}
+
+    def walk(tid: str, path: list[str]) -> None:
+        colour[tid] = GREY
+        for dep in graph[tid]:
+            if colour.get(dep) == GREY:
+                cycle = path[path.index(dep):] if dep in path else [dep]
+                problems.append("cycle in prereqs: " + " -> ".join(cycle + [tid, dep]))
+            elif colour.get(dep) == WHITE:
+                walk(dep, path + [tid])
+        colour[tid] = BLACK
+
+    for tid in sorted(graph):
+        if colour[tid] == WHITE:
+            walk(tid, [])
 
     for problem in problems:
         print(f"  {problem}")
