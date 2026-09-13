@@ -2,6 +2,8 @@
 
 Size: L · Prereqs: TT.6, T5.1 · Files: `e2e/run_e2e.py`, `e2e/README.md`
 
+Requires: phone (on adb), PC server stoppable
+
 ## Goal
 
 One command that exercises the real behaviour on the real phone and exits 0 or non-zero.

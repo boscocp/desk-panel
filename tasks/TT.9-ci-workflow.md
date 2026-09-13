@@ -23,8 +23,24 @@ Every push runs everything that does not need a phone.
 
 ## Acceptance
 
-Push a branch and confirm all three jobs pass in the Actions tab. Then break one test
-deliberately and confirm the right job goes red.
+```bash
+python -c "import sys,pathlib; sys.exit(0 if pathlib.Path('.github/workflows/ci.yml').is_file() else 1)"
+python scripts/check_workflow.py
+gh workflow run ci.yml --ref "$(git branch --show-current)"
+gh run watch "$(gh run list --workflow=ci.yml --limit 1 --json databaseId -q '.[0].databaseId')" --exit-status
+```
+
+`check_workflow.py` parses the workflow and asserts the three jobs exist and run the same
+commands the Makefile does — that is the part that keeps CI and `make check` from drifting,
+which they already have. `gh run watch --exit-status` turns "confirm in the Actions tab" into
+an exit code.
+
+Note that `gh workflow run` needs the branch pushed, and `git push` is deliberately outside
+the agent allowlist (`.claude/README.md`). A human runs this one, or authorises the push.
+
+## Manual check
+
+Break one test deliberately and confirm the right job — and only that job — goes red.
 
 ## Notes
 

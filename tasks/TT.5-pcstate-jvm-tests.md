@@ -34,10 +34,11 @@ Exit code 0, and it finishes in seconds. If a test sleeps, the timing is in the 
 `nextIntervalMs()` returns a number; the test asserts on the number, it does not wait for it.
 
 ```bash
-grep -n "android\." android/app/src/main/java/dev/bosco/deskpanel/PcState.java
+! grep -q "android\." android/app/src/main/java/dev/bosco/deskpanel/PcState.java
 ```
 
-Returns nothing.
+`PcState` must stay free of the Android framework or it cannot be tested on the JVM. Negated,
+because a bare `grep` exits 1 exactly when the file is clean.
 
 ## Notes
 
