@@ -66,6 +66,12 @@ that warns rather than fails. Full reasoning in [ADR 0009](adr/0009-testing-stra
 
 Those markers are a contract. Renaming one breaks the suite.
 
+Two kinds, defined in `Markers.java` (TT.6). **Transitions** — `state=online|offline`,
+`screen=wake|sleep`, `night=on|off` — fire only when something changes; a steady state logs
+nothing, and T4.2 asserts exactly that. **Heartbeats** — `tick=`, `ping=`, `data=ok|err`,
+`battery=` — fire per cycle at a bounded rate, because "still running" and "at most four polls
+a minute" cannot be asserted any other way.
+
 **This table is the source.** `e2e/README.md` and `tasks/TT.8-e2e-suite.md` link here rather
 than restating it — three copies had already drifted apart on scenario 5.
 
