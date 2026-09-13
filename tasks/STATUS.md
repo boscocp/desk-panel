@@ -7,15 +7,28 @@ A coding task is not `done` until its paired test task is green.
 
 Legend: `todo` · `wip` · `blocked` · `done`
 
+Two conventions the task files now carry, both enforced by `make lint-tasks`:
+
+- **`Requires:`** in the header says what a task needs beyond a checkout — the phone, a
+  reachable PC, a dark room. The `verifier` agent uses it to say "not verified" instead of
+  guessing.
+- **`## Acceptance`** is commands only. Anything a human has to look at lives under
+  `## Manual check`, and is not pretended to have an exit code.
+
+Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, recorded for history.
+`/task` and the `verifier` cannot address them; that is expected, not a gap.
+
 ## Phase 0 — Foundation
 
 | # | Task | State | Notes |
 |---|---|---|---|
 | T0.0 | Git identity and repository creation | done | Bootstrap session, 2026-09-13 |
-| T0.1 | **Containerised Android toolchain** | todo | ⬅ **start here.** Blocks all of phase 2. Big one |
+| T0.1 | Containerised Android toolchain | todo | Rewritten for a Linux host. Blocks all of phase 2. Big one |
 | T0.2 | Repository skeleton, README, gitignore, gitattributes | done | Bootstrap session |
 | T0.3 | The nine ADRs | done | Bootstrap session |
 | T0.4 | CLAUDE.md files, STATUS.md, `.claude/` | done | Bootstrap session |
+| T0.5 | **Spec remediation** | wip | ⬅ **start here.** 28 of 36 acceptance blocks were not commands |
+| T0.6 | Two-agent setup: `reasonix.toml`, model pinning | todo | Landed by PR #1 outside the task system; ADR 0011 |
 
 ## Phase 1 — Web in isolation (needs only Chrome)
 
@@ -32,6 +45,7 @@ Legend: `todo` · `wip` · `blocked` · `done`
 | T2.1 | Minimal Gradle project in Java | todo | Needs T0.1 |
 | T2.2 | WebView + WebViewAssetLoader | todo | 🏁 **Milestone A** — first sign of life |
 | T2.3 | Keep screen on, landscape, immersive | todo | |
+| T7.1 | Release keystore and signing | todo | Moved here from phase 7 — see below |
 | T2.4 | MIUI smoke test: autostart, battery, reboot | todo | Deliberately early. Riskiest unknown |
 
 ## Phase 3 — Python server (parallel with phase 2)
@@ -42,12 +56,17 @@ Legend: `todo` · `wip` · `blocked` · `done`
 | T3.2 | Config loading | todo | |
 | T3.3 | `/quotes` proxy | todo | ⚠️ Subtask 0: confirm brapi FX and crypto endpoints |
 | T3.4 | `/weather` proxy | todo | |
-| T3.5 | Scheduled Task, firewall, static IP | todo | Acceptance must be tested from the LAN |
+| T3.5 | Login-scoped autostart: contract + `probe.py` | todo | Platform-neutral. Rewritten — see ADR 0010 |
+| T3.8 | Windows: Scheduled Task, firewall, static IP | todo | Primary platform. Tested from the LAN |
+| T3.9 | Linux: systemd user unit (graphical-session) | todo | Dev box. Beware `Linger=yes` |
+| T3.10 | macOS: LaunchAgent | blocked | No Mac. Plist and docs ship anyway |
+| T3.11 | Server portability hardening | todo | UTF-8, cwd, `allow_reuse_address` — Windows bugs |
 | T3.6 | Serve the APK at `/app` | todo | |
 | T3.7 | `POST /action/{id}` stub returning 501 | todo | v2 placeholder |
 | TT.2 | Server unit tests + fixtures | todo | Pairs with T3.3, T3.4 |
 | TT.3 | Two HTTP integration tests on port 0 | todo | |
 | TT.4 | Contract tests, opt-in | todo | |
+| TT.10 | Login-scope verifier tests, from fixtures | todo | Makes T3.10 checkable without a Mac |
 
 ## Phase 4 — The core behaviour
 
@@ -83,25 +102,37 @@ Legend: `todo` · `wip` · `blocked` · `done`
 
 | # | Task | State | Notes |
 |---|---|---|---|
-| T7.1 | Release keystore and signing | todo | Do this early — mixing keys forces an uninstall |
 | T7.2 | Wireless adb from the container | todo | May fall back to host platform-tools |
 | T7.3 | Pre-public review: secrets, README, screenshots | todo | Before flipping the repo public |
 | TT.8 | `e2e/run_e2e.py`, five scenarios | todo | Needs TT.6 |
 | TT.9 | CI workflow | todo | |
 
+## Why T7.1 sits in phase 2
+
+The task says "do this **early**" in its own first paragraph, and `docs/BUILD.md` says "use the
+release keystore from the start, including for local builds" — while the table had it last, in
+phase 7, after T2.4 has already installed a debug-signed APK. Android refuses to install a
+differently-signed APK over an existing one, so the only way out is an uninstall, which throws
+away the device state and every MIUI permission T2.4 spent a session granting. That is exactly
+what T7.1 exists to prevent, and the old ordering guaranteed it.
+
 ## Shortest path to seeing something work
 
-`T0.1 → T1.1 → T2.1 → T2.2` puts a running clock on the phone. No network, no server, no MIUI
-hardening — it validates the container, Gradle, `WebViewAssetLoader` and rendering in one go.
+`T1.1 → T0.1 → T2.1 → T7.1 → T2.2` puts a running clock on the phone, signed with the key it
+will keep. T1.1 comes first now: it needs only `node`, so it does not wait on the container.
 
-Then `T3.1 → T3.5 → T4.1 → T4.2 → T4.3` delivers the actual product behaviour. Quotes and
-weather come afterwards; they are the least risky part and the easiest to defer.
+Then `T3.1 → T3.5 → T3.8|T3.9 → T4.1 → T4.2 → T4.3` delivers the actual product behaviour.
+Quotes and weather come afterwards; they are the least risky part and the easiest to defer.
 
 ## Open questions
 
 - **brapi FX and crypto endpoints are unconfirmed.** Resolved as subtask 0 of T3.3. Fallbacks
   without a key: Binance public API for crypto, AwesomeAPI for FX.
-- **adb from inside the container is undocumented.** Resolved in T7.2. Fallback is
-  `tools/platform-tools/` on the host.
+- **adb from inside the container is undocumented.** Answered: the container does not own the
+  USB device. Gradle runs in the container and talks to the **host's** adb server over TCP —
+  `make connected`, defined in TT.7. T7.2 covers wireless adb, which is a different question.
 - **Whether MIUI wakes the screen reliably** decides whether ADR 0005 keeps its primary design
-  or falls back. Resolved in T4.4.
+  or falls back. Resolved in T4.4, which must write the outcome into the ADR before it closes —
+  0005 is marked `accepted` today with its central mechanism still undecided.
+- **Whether the local model can carry a task end to end** is what the two-agent setup is for.
+  Resolved per task, by reviewing the PR. See ADR 0011 and `docs/LOCAL-MODELS.md`.

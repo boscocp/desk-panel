@@ -1,6 +1,7 @@
 # 0004 — The PC server is both the login signal and the data proxy
 
-Status: accepted · 2026-09-13
+Status: accepted · 2026-09-13 · Amended by [0010](0010-login-signal-is-session-scoped.md),
+which restates the login-signal rule for Linux and macOS
 
 ## Context
 

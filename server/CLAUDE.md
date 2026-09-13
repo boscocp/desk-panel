@@ -1,8 +1,12 @@
 # Server layer
 
-Python 3.13, **standard library only**. No pip, no virtualenv, no requirements.txt. That is a
-hard constraint: the server must run on a clean Windows box with nothing installed, and adding
-a dependency breaks that promise.
+Python **3.11 or newer**, standard library only. No pip, no virtualenv, no requirements.txt.
+That is a hard constraint: the server must run on a clean box with nothing installed, and
+adding a dependency breaks that promise.
+
+A floor, not a pin. It read "3.13"; the development machine has 3.14 and macOS ships no
+`python3` at all. T3.11 guards the floor with a `sys.version_info` check, because otherwise a
+too-old interpreter surfaces as a restart loop in journald rather than as a message.
 
 ## Rules specific to this layer
 
