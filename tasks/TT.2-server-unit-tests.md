@@ -1,7 +1,7 @@
 # TT.2 — Server unit tests and fixtures
 
-Size: M · Pairs with: T3.3, T3.4 · Files: `server/tests/test_*.py`,
-`server/tests/fixtures/*.json`
+Size: M · Prereqs: T3.2 · Pairs with: T3.3, T3.4 · Files: `server/__init__.py`, `server/tests/__init__.py`,
+`server/tests/test_*.py`, `server/tests/fixtures/*.json`
 
 ## Goal
 

@@ -1,6 +1,6 @@
 # TT.4 — Contract tests against the real APIs
 
-Size: S · Pairs with: T3.3, T3.4 · Files: `server/tests/contract_upstream.py`
+Size: S · Prereqs: T3.3, T3.4 · Pairs with: T3.3, T3.4 · Files: `server/tests/contract_upstream.py`
 
 ## Goal
 

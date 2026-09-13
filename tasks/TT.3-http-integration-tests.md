@@ -1,6 +1,6 @@
 # TT.3 — Two HTTP integration tests
 
-Size: S · Pairs with: T3.3 · Files: `server/tests/test_http.py`
+Size: S · Prereqs: T3.3, T3.7 · Pairs with: T3.3 · Files: `server/tests/test_http.py`
 
 ## Goal
 

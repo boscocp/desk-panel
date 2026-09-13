@@ -1,6 +1,6 @@
 # TT.6 — Logcat markers
 
-Size: S · Pairs with: T4.4 · Files: `MainActivity.java`, `PcPoller.java`,
+Size: S · Prereqs: T4.2, T4.3 · Pairs with: T4.4 · Files: `MainActivity.java`, `PcPoller.java`,
 `docs/TESTING.md`
 
 Requires: phone (on adb), PC server stoppable

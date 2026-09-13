@@ -35,7 +35,7 @@
 ## Commands
 ```bash
 make check                                       # everything that needs no phone
-python -m unittest discover -s server/tests      # server
+python -m unittest discover -s server/tests -t . # server
 node --test "web/test/**/*.test.js"              # web
 docker compose -f docker/compose.yml run --rm build ./gradlew test          # Android, JVM
 docker compose -f docker/compose.yml run --rm build ./gradlew assembleDebug # APK
