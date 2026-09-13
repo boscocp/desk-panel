@@ -1,0 +1,50 @@
+# Reasonix project config — the counterpart of .claude/settings.json.
+#
+# Reasonix reads CLAUDE.md (root and nested) and .claude/skills/ unchanged, so
+# this file exists for the one thing it does not read: settings.json. Reasonix
+# deliberately skips it because the hook and permission schemas differ
+# (internal/config/paths.go, ConventionDirs).
+#
+# Keep the two files in step. If you add a command to .claude/settings.json,
+# add it here too, in Reasonix syntax:
+#   - Bash(cmd:*) is canonical; Claude Code's Bash(cmd *) also parses.
+#   - Edit(path) covers every file-mutating tool (write_file, edit_file, ...).
+#   - Read(path) does NOT map — Reasonix's reader is read_file. Secrets are
+#     protected by [sandbox] forbid_read below, which also covers `cat`.
+
+[permissions]
+mode = "ask"
+
+allow = [
+  # Inspection.
+  "Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)",
+  "Bash(grep:*)", "Bash(rg:*)", "Bash(find:*)", "Bash(tree:*)", "Bash(file:*)",
+  "Bash(which:*)", "Bash(pwd:*)", "Bash(diff:*)",
+
+  # Test layers — every acceptance criterion in tasks/ is one of these.
+  "Bash(make check:*)", "Bash(make test-server:*)", "Bash(make test-web:*)",
+  "Bash(make test-android:*)",
+  "Bash(python -m unittest:*)", "Bash(python3 -m unittest:*)",
+  "Bash(python -m json.tool:*)", "Bash(python3 -m json.tool:*)",
+  "Bash(node --test:*)", "Bash(node --check:*)",
+  "Bash(docker compose -f docker/compose.yml run --rm build:*)",
+
+  # Git, read side plus staging and committing.
+  "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
+  "Bash(git branch:*)", "Bash(git add:*)", "Bash(git commit:*)",
+  "Bash(git check-ignore:*)",
+
+  # Phone, read-only.
+  "Bash(adb devices:*)", "Bash(adb logcat:*)",
+]
+
+deny = [
+  # Secrets, mutation side. The read side is [sandbox] forbid_read.
+  "Edit(server/config.json)",
+  "Edit(keystore.properties)",
+]
+
+[sandbox]
+# Hard read block: covers read_file, grep and `cat` alike, unlike a permission
+# rule. server/config.json holds the brapi token; the keystore signs the APK.
+forbid_read = ["server/config.json", "keystore.properties"]
