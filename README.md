@@ -66,6 +66,7 @@ See [docs/INSTALL-PHONE.md](docs/INSTALL-PHONE.md).
 | [SERVER-SETUP.md](docs/SERVER-SETUP.md) | Scheduled Task, firewall, static IP, BIOS |
 | [DEVICE-CARE.md](docs/DEVICE-CARE.md) | Battery, heat and burn-in — and the honest limits |
 | [TESTING.md](docs/TESTING.md) | Four test layers, all standard library |
+| [LOCAL-MODELS.md](docs/LOCAL-MODELS.md) | Driving the repo with a local model instead of Opus — which one, and its limits |
 | [adr/](docs/adr/) | Decision records, including the options that were rejected |
 
 Work is tracked as self-contained task files under [tasks/](tasks/), indexed by
