@@ -11,7 +11,9 @@ section for:
   - at least one fenced command block
   - no criterion whose real assertion is prose ("no output", "Returns nothing")
   - no command that never terminates (`adb logcat` without -d, a bare server start)
-  - no command that exits 0 regardless of the result (curl -w with nothing reading it)
+  - no command that exits 0 regardless of the result: `curl -w` with nothing reading
+    it, or a grep that matches a label while its comment carries the real assertion
+  - no prose telling a human what to look at - that belongs under `## Manual check`
   - a `Requires:` header field whenever the acceptance touches the phone
 
 Exit codes: 0 clean, 1 violations found, 2 usage error.
@@ -49,7 +51,23 @@ ALWAYS_ZERO = [
         re.compile(r"curl[^\n|]*-w[^\n|]*$", re.M),
         "`curl -w` prints the code but always exits 0 - pipe it into `grep -qx`",
     ),
+    (
+        # `... | grep -i "mCurrentFocus"   # names this activity` matches the field
+        # label on every device, whatever is focused. The assertion lives in the
+        # comment, where the shell cannot reach it.
+        re.compile(r"\|\s*grep\b[^\n#]*#[^\n]*\b(names?|shows?|prints?|must|should|appears?)\b", re.I),
+        "the grep matches a label while the assertion sits in its comment - grep for the value",
+    ),
 ]
+
+# Prose that tells a human what to look at. Not wrong - but it belongs under
+# `## Manual check`, where nothing pretends it has an exit code.
+HUMAN_VERDICT = re.compile(
+    r"^\s*(?:Then[, ]+)?(?:Open|Confirm|Observe|Watch|Judged|Leave it|Install it|Browse)\b"
+    r"|\bplausible\b|\bvisibly\b|\bby eye\b|\bnothing (?:clips|overlaps)\b"
+    r"|\bconsole is clean\b|\bNetwork tab\b|\bstill advancing\b|\btrack reality\b",
+    re.M | re.I,
+)
 
 # Acceptance that can only run with the phone attached.
 PHONE = re.compile(r"\badb\b|connectedAndroidTest")
@@ -87,6 +105,13 @@ def check_file(path: Path) -> list[str]:
     for pattern, message in NON_TERMINATING + ALWAYS_ZERO:
         if pattern.search(commands):
             problems.append(f"{path.name}: {message}")
+
+    hit = HUMAN_VERDICT.search(prose)
+    if hit:
+        problems.append(
+            f"{path.name}: Acceptance asks a human to look ({hit.group(0).strip()!r}) "
+            "- move it to `## Manual check`"
+        )
 
     if PHONE.search(commands) and not re.search(r"^Requires:.*\bphone\b", text, re.M | re.I):
         problems.append(
