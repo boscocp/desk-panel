@@ -3,6 +3,8 @@
 Size: M · Prereqs: T3.2 · Pairs with: T3.3, T3.4 · Files: `server/__init__.py`, `server/tests/__init__.py`,
 `server/tests/test_*.py`, `server/tests/fixtures/*.json`
 
+Requires: none
+
 ## Goal
 
 Cover the server's logic with no network access at all, so CI is fast and deterministic.

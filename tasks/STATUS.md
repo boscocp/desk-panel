@@ -27,8 +27,8 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 | T0.2 | Repository skeleton, README, gitignore, gitattributes | done | Bootstrap session |
 | T0.3 | The nine ADRs | done | Bootstrap session |
 | T0.4 | CLAUDE.md files, STATUS.md, `.claude/` | done | Bootstrap session |
-| T0.5 | **Spec remediation** | wip | ⬅ **start here.** 28 of 36 acceptance blocks were not commands |
-| T0.6 | Two-agent setup: `reasonix.toml`, model pinning | todo | Landed by PR #1 outside the task system; ADR 0011 |
+| T0.5 | Spec remediation | done | 28 of 36 acceptance blocks were not commands. `make lint-tasks` keeps it that way |
+| T0.6 | **Two-agent setup: `reasonix.toml`, model pinning** | todo | ⬅ **start here.** Landed by PR #1 outside the task system; ADR 0011 |
 
 ## Phase 1 — Web in isolation (needs only Chrome)
 

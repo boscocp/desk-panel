@@ -1,7 +1,13 @@
 # 0005 — Let the screen really sleep; dim-to-black is the fallback
 
-Status: accepted · 2026-09-13
+Status: accepted, primary mechanism **unvalidated** · 2026-09-13
 Supersedes an earlier draft of this project that specified dim-to-black as the primary approach.
+
+Whether MIUI actually honours `setTurnScreenOn(true)` from a background Activity is not known
+yet. T4.4 decides it and must write the outcome here before it closes: either this ADR keeps
+its primary design, or it falls back to `screenBrightness = 0f` and this line changes to say
+so. `docs/DEVICE-CARE.md` already asserts the behaviour as fact — that sentence is downstream
+of this one and gets corrected with it.
 
 ## Context
 

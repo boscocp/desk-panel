@@ -3,6 +3,8 @@
 Size: S · Prereqs: T1.1 · Pairs with: T1.2 · Files: `web/js/format.js`, `web/test/format.test.js`,
 `web/js/app.js`
 
+Requires: node on the host
+
 ## Goal
 
 Get the logic out of the DOM code and under test. Node's built-in runner has no DOM, which is
