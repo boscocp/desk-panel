@@ -22,6 +22,17 @@ Put machine-specific additions in `settings.local.json`, which is gitignored.
 
 - `/task T3.3` — loads that task file and executes it, then updates `tasks/STATUS.md`.
 - `/handoff` — writes down where things stand when a task is stopping mid-way.
+- `/tlc-spec-driven` — a full specify → design → tasks → execute workflow for a feature that has
+  no task file yet and does not fit one. Vendored from
+  [tech-leads-club/agent-skills](https://github.com/tech-leads-club/agent-skills) (CC-BY-4.0) and
+  adapted; `SKILL.md` ends with the list of local changes, so an upstream re-sync has something
+  to re-apply. It writes to `.specs/`, which is additive — `tasks/` stays the default flow, and
+  anything worth keeping afterwards ends up as an ADR or a task file.
+
+All three set `disable-model-invocation: true`: they run when you type them, never because the
+model decided a message looked relevant. `/tlc-spec-driven` in particular is heavy — several
+phases, sub-agents, its own validation scripts — and would be wrong to trigger on a passing
+mention of the word "design".
 
 ## Agents
 
