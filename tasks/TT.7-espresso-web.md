@@ -3,6 +3,8 @@
 Size: M · Pairs with: T5.1 · Files:
 `android/app/src/androidTest/java/dev/bosco/deskpanel/PanelRenderTest.java`
 
+Requires: phone (on adb)
+
 ## Goal
 
 Prove that data arriving from native actually reaches the DOM and renders — the one seam that
@@ -22,10 +24,18 @@ unit tests on either side cannot cover.
 ## Acceptance
 
 ```bash
-./gradlew connectedAndroidTest
+adb devices | grep -qw device
+make connected
 ```
 
 Exit code 0 with the phone connected. This does **not** run in CI — it needs real hardware.
+
+`./gradlew connectedAndroidTest` printed bare in the original could not work: the JDK lives
+only inside the container ([ADR 0003](../docs/adr/0003-containerized-toolchain.md)) and the
+container cannot see the phone's adb socket. `make connected` is the target that resolves it,
+by running Gradle in the container against the host's adb server over TCP. Defining that
+target is part of this task, and `STATUS.md`'s open question about adb-from-container is
+answered here.
 
 ## Notes
 

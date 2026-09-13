@@ -3,6 +3,8 @@
 Size: S · Pairs with: T4.4 · Files: `MainActivity.java`, `PcPoller.java`,
 `docs/TESTING.md`
 
+Requires: phone (on adb), PC server stoppable
+
 ## Goal
 
 Give the E2E suite something reliable to assert on. This is a silent prerequisite for the whole
@@ -31,12 +33,24 @@ versions without notice. So the app reports its own state
 
 ## Acceptance
 
+Kill the server on the PC, wait, then:
+
 ```bash
-adb logcat -c && adb logcat -s DeskPanel
+adb logcat -c && sleep 20 && adb logcat -d -s DeskPanel > /tmp/desk-panel-markers.log
+grep -q 'state=offline' /tmp/desk-panel-markers.log
+grep -q 'screen=sleep'  /tmp/desk-panel-markers.log
+test "$(grep -c 'state=offline' /tmp/desk-panel-markers.log)" -eq 1
 ```
 
-Kill the server: `state=offline` then `screen=sleep`. Start it: `state=online` then
-`screen=wake`. Each appears once per transition, not repeatedly.
+Start it again, wait, then the same three with `state=online` and `screen=wake`. The count is
+the point: each marker appears once per transition, not on every poll.
+
+```bash
+! grep -rn 'state=\|screen=' android/app/src/main/java --include=*.java | grep -v 'Markers.java'
+```
+
+The strings live in exactly one place. This is what makes the E2E suite's assertions stable
+([ADR 0009](../docs/adr/0009-testing-strategy.md)).
 
 ## Notes
 

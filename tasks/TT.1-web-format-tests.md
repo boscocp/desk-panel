@@ -26,10 +26,12 @@ exactly the constraint that forces this separation — and the separation is an 
 
 ```bash
 node --test "web/test/**/*.test.js"
+! grep -qE 'document\.|window\.' web/js/format.js
 ```
 
-Exit code 0. And `grep -rn "document\.\|window\." web/js/format.js` returns nothing — if it
-does, the function belongs in `app.js`, not here.
+The second line is the purity gate: a DOM reference in `format.js` means the function belongs
+in `app.js`. Written as a bare `grep` whose verdict was prose, it passed only when it found
+a DOM reference — backwards.
 
 ## Notes
 
