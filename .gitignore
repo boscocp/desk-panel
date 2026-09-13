@@ -1,0 +1,24 @@
+# --- secrets: never commit ---
+server/config.json
+*.keystore
+*.jks
+keystore.properties
+.env
+
+# --- build output ---
+out/
+build/
+.gradle/
+local.properties
+*.apk
+*.aab
+
+# --- tooling pulled in locally, not installed system-wide ---
+tools/
+
+# --- per-machine agent overrides ---
+.claude/settings.local.json
+
+# --- OS noise ---
+Thumbs.db
+.DS_Store

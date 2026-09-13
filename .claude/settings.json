@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m unittest *)",
+      "Bash(python -m json.tool *)",
+      "Bash(node --test *)",
+      "Bash(node --check *)",
+      "Bash(make check)",
+      "Bash(make test-server)",
+      "Bash(make test-web)",
+      "Bash(make test-android)",
+      "Bash(docker compose -f docker/compose.yml run --rm build *)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git check-ignore *)",
+      "Bash(adb logcat *)",
+      "Bash(adb devices)",
+      "WebFetch(domain:developer.android.com)",
+      "WebFetch(domain:docs.python.org)",
+      "WebFetch(domain:nodejs.org)",
+      "WebFetch(domain:brapi.dev)",
+      "WebFetch(domain:open-meteo.com)"
+    ],
+    "deny": [
+      "Read(./server/config.json)",
+      "Read(./keystore.properties)",
+      "Read(./*.keystore)",
+      "Edit(./server/config.json)",
+      "Edit(./keystore.properties)"
+    ]
+  }
+}

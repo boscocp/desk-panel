@@ -1,0 +1,50 @@
+# Skeleton. Runs on manual dispatch only until the suites exist — see tasks/TT.9, which
+# switches the trigger to push/pull_request. A workflow that goes red on an empty repository
+# teaches you to ignore the red.
+name: ci
+
+on:
+  workflow_dispatch:
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # No install step by design: the server uses only the standard library.
+      # If this job ever needs pip, that is a design regression worth catching here.
+      - run: python -m unittest discover -s server/tests -t .
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      # No npm ci by design: there is no package.json.
+      - run: node --test "web/test/**/*.test.js"
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew test
+        working-directory: android
+      - run: ./gradlew assembleDebug
+        working-directory: android
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desk-panel-debug
+          path: out/*.apk
+      # connectedAndroidTest is deliberately absent: it needs the physical phone.
+      # android-actions/setup-android is avoided because it is third-party and not
+      # GitHub-certified; setup-java plus the Gradle wrapper covers what we need.

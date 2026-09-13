@@ -1,0 +1,15 @@
+# Normalize to LF in the repo. The working tree is Windows today and CachyOS
+# tomorrow; without this the history fills with phantom CRLF diffs.
+* text=auto eol=lf
+
+# Never touch binaries.
+*.png   binary
+*.jpg   binary
+*.apk   binary
+*.keystore binary
+*.jks   binary
+
+# Gradle wrapper must stay LF and executable on Linux.
+gradlew text eol=lf
+*.sh    text eol=lf
+*.bat   text eol=crlf
