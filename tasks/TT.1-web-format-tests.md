@@ -1,6 +1,6 @@
 # TT.1 — Extract `format.js` and test it
 
-Size: S · Pairs with: T1.2 · Files: `web/js/format.js`, `web/test/format.test.js`,
+Size: S · Prereqs: T1.1 · Pairs with: T1.2 · Files: `web/js/format.js`, `web/test/format.test.js`,
 `web/js/app.js`
 
 ## Goal

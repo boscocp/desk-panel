@@ -1,10 +1,21 @@
 {
   "port": 8777,
   "brapi_token": "",
-  "quotes": ["PETR4", "VALE3", "ITUB4"],
-  "crypto": ["BTC", "ETH"],
-  "fx": ["USD-BRL", "EUR-BRL"],
+  "quotes": [
+    "PETR4",
+    "VALE3",
+    "ITUB4"
+  ],
+  "crypto": [
+    "BTC",
+    "ETH"
+  ],
+  "fx": [
+    "USD-BRL",
+    "EUR-BRL"
+  ],
   "city": "Sao Paulo",
+  "timezone": "America/Sao_Paulo",
   "quotes_interval_s": 300,
   "weather_interval_s": 900,
   "night_start": "22:00",

@@ -1,6 +1,6 @@
 # TT.7 — Espresso-Web assertions
 
-Size: M · Pairs with: T5.1 · Files:
+Size: M · Prereqs: T5.1, T2.2, T0.1 · Pairs with: T5.1 · Files:
 `android/app/src/androidTest/java/dev/bosco/deskpanel/PanelRenderTest.java`
 
 Requires: phone (on adb)
