@@ -44,13 +44,17 @@ Three decisions carry the design, and each has an ADR:
 
 ## Getting started
 
-The Android toolchain runs entirely in Docker — no JDK, no Android SDK and no Android Studio
-on the host. See [docs/BUILD.md](docs/BUILD.md).
+**Nothing is built yet.** This repository is currently specification: ADRs, a task breakdown in
+`tasks/`, and the index in [tasks/STATUS.md](tasks/STATUS.md). The commands below are what will
+work, not what works today — start from `STATUS.md` instead.
+
+The Android toolchain runs entirely in Docker — no JDK and no Android SDK on the host. See
+[docs/BUILD.md](docs/BUILD.md).
 
 ```bash
+make check                                       # the specification gates that do run today
 docker compose -f docker/compose.yml run --rm build ./gradlew assembleDebug
 python server/server.py
-make check
 ```
 
 Then install on the phone by browsing to `http://<pc-ip>:8777/app` — no cable, no adb.
@@ -63,9 +67,9 @@ See [docs/INSTALL-PHONE.md](docs/INSTALL-PHONE.md).
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | The full picture and the three invariants |
 | [BUILD.md](docs/BUILD.md) | Containerised toolchain, building, signing |
 | [INSTALL-PHONE.md](docs/INSTALL-PHONE.md) | Installing, and the MIUI toggles that matter |
-| [SERVER-SETUP.md](docs/SERVER-SETUP.md) | Scheduled Task, firewall, static IP, BIOS |
+| [SERVER-SETUP.md](docs/SERVER-SETUP.md) | Login-scoped autostart on Windows, Linux and macOS; firewall, static IP, BIOS |
 | [DEVICE-CARE.md](docs/DEVICE-CARE.md) | Battery, heat and burn-in — and the honest limits |
-| [TESTING.md](docs/TESTING.md) | Four test layers, all standard library |
+| [TESTING.md](docs/TESTING.md) | Five test layers, and which of them install anything |
 | [LOCAL-MODELS.md](docs/LOCAL-MODELS.md) | Driving the repo with a local model instead of Opus — which one, and its limits |
 | [adr/](docs/adr/) | Decision records, including the options that were rejected |
 

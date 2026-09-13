@@ -4,6 +4,8 @@ Size: M · Prereqs: T2.1 · Pairs with: T4.2, T5.3 · Files:
 `android/app/src/main/java/dev/bosco/deskpanel/PcState.java`,
 `android/app/src/test/java/dev/bosco/deskpanel/PcStateTest.java`
 
+Requires: the build container (T0.1)
+
 ## Goal
 
 Test the online/offline machine and the backoff schedule without a device, an emulator or a

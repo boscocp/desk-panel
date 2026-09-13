@@ -2,6 +2,8 @@
 
 Size: S · Prereqs: T3.3, T3.7 · Pairs with: T3.3 · Files: `server/tests/test_http.py`
 
+Requires: none
+
 ## Goal
 
 Cover the actual HTTP path — routing, status codes, headers, serialisation — which the pure

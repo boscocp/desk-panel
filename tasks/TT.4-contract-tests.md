@@ -2,6 +2,8 @@
 
 Size: S · Prereqs: T3.3, T3.4 · Pairs with: T3.3, T3.4 · Files: `server/tests/contract_upstream.py`
 
+Requires: network, and the real upstream APIs reachable
+
 ## Goal
 
 Catch upstream schema changes — without letting the network into normal CI runs.

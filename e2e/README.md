@@ -1,6 +1,7 @@
 # End-to-end suite
 
-Drives the real phone over adb. Built in task TT.8.
+Drives the real phone over adb. The suite itself is built in task TT.8; this file describes
+it ahead of time, which is why nothing here runs yet.
 
 ## Prerequisites
 
@@ -19,16 +20,9 @@ Slow by design — over a minute — so it is not part of `make check`.
 
 ## Scenarios
 
-| # | Action | Assertion |
-|---|---|---|
-| 1 | Server running | `state=online` within 5s |
-| 2 | Stop the server | `state=offline` and `screen=sleep` within 20s |
-| 3 | Start the server | `state=online` and `screen=wake` within 20s |
-| 4 | `/quotes` serving a fixture | Rendered values match |
-| 5 | Phone Wi-Fi off 30s, then on | No crash; recovers unaided |
-
-The 20s allowances exist because the offline backoff caps at 15s (T5.3). Tighter windows produce
-flaky failures that are not bugs.
+The five scenarios and their timing allowances live in
+[docs/TESTING.md](../docs/TESTING.md#end-to-end). They are not repeated here: this file, that
+one and `tasks/TT.8-e2e-suite.md` each carried a copy, and they had already drifted.
 
 ## Why this does not read screen state from the OS
 

@@ -10,7 +10,11 @@ Three things are **not** in it, on purpose:
 - **`git push`** — publishing is a decision, not a step. Add it yourself if you want that.
 - **`defaultMode: "auto"`** — full autonomous execution is a choice worth making explicitly
   rather than inheriting from a bootstrap commit.
-- **Anything destructive** — no `rm`, no `reset --hard`, no `clean`.
+- **Anything destructive** — no `rm`, no `reset --hard`, no `git clean`.
+
+`make clean` is the one sanctioned exception in spirit and is still not allowlisted: it runs
+`rm -rf out` and `./gradlew clean`, so it prompts. That is the intended friction — deleting
+build output is cheap to redo and easy to confuse with deleting something else.
 
 Secrets are denied at read level, not just write: `server/config.json` holds the brapi token
 and `keystore.properties` holds signing passwords. An agent has no reason to read either, and

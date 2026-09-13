@@ -4,7 +4,11 @@ Every acceptance criterion is a command with an exit code. Nothing in this proje
 by looking at output and deciding it seems fine — if a task cannot be checked by a command, the
 task file is wrong.
 
-All four layers use standard library tooling. No test dependency is installed anywhere.
+**Five layers.** Three use standard library tooling and install nothing: the server
+(`unittest`), the web layer (`node:test`) and the end-to-end suite (Python + adb). The two
+Android layers do take a test dependency — JUnit for the JVM tests, Espresso for the
+instrumented ones — because the platform ships no alternative. Nothing is installed on the
+host for them; they resolve inside the container.
 
 ## Running
 
@@ -13,12 +17,15 @@ make check                                       # everything that needs no phon
 make test-server                                 # python -m unittest discover -s server/tests -t .
 make test-web                                    # node --test "web/test/**/*.test.js"
 make test-android                                # ./gradlew test, in the container
-./gradlew connectedAndroidTest                   # Espresso, needs the phone
+make connected                                   # Espresso, needs the phone
 make e2e                                         # python e2e/run_e2e.py
 make contract                                    # hits the real APIs, opt-in
 ```
 
-`make check` is what CI and agents call.
+`make check` is what agents call. **CI does not call it** — `.github/workflows/ci.yml` invokes
+`python -m unittest`, `node --test` and `./gradlew` directly, because the Android job has no
+Docker. That divergence is deliberate and TT.9 owns keeping the two in step; `check_workflow.py`
+asserts the commands match.
 
 ## Server — `unittest`
 
@@ -59,6 +66,9 @@ that warns rather than fails. Full reasoning in [ADR 0009](adr/0009-testing-stra
 
 Those markers are a contract. Renaming one breaks the suite.
 
+**This table is the source.** `e2e/README.md` and `tasks/TT.8-e2e-suite.md` link here rather
+than restating it — three copies had already drifted apart on scenario 5.
+
 | # | Action | Assertion |
 |---|---|---|
 | 1 | Server up | `state=online` within 5s |
@@ -66,6 +76,12 @@ Those markers are a contract. Renaming one breaks the suite.
 | 3 | Start the server | `state=online` and `screen=wake` within 20s |
 | 4 | `/quotes` serving a known fixture | Rendered values match, via Espresso-Web |
 | 5 | Phone Wi-Fi off for 30s | No crash in logcat; recovers unaided |
+
+The 20s allowances exist because the offline backoff caps at 15s (T5.3). Tighter windows
+produce flaky failures that are not bugs.
+
+Scenario 5 may need permissions MIUI withholds. If it does, it is marked manual rather than
+deleted — the scenario is real, the automation is what is missing.
 
 ## Contract tests
 
