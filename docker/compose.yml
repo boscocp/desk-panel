@@ -1,0 +1,23 @@
+# One service. No ports, no privileged mode: this container builds, it does not
+# serve. The phone is reached by the host's adb, never from in here - see TT.7.
+services:
+  build:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: desk-panel/android-toolchain:36
+    # Without this every Gradle artefact in out/ and android/build/ lands
+    # root-owned and `make clean` fails from the host. This was invisible on
+    # Docker Desktop for Windows and is immediate on Linux.
+    user: "${UID:-1000}:${GID:-1000}"
+    working_dir: /workspace
+    volumes:
+      - ..:/workspace
+      # Named volume, not a bind mount: a bind mount is noticeably slower, and
+      # the Gradle cache is the hottest directory in the build.
+      - gradle-home:/gradle
+    environment:
+      GRADLE_USER_HOME: /gradle
+
+volumes:
+  gradle-home:

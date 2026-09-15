@@ -23,7 +23,7 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 | # | Task | State | Notes |
 |---|---|---|---|
 | T0.0 | Git identity and repository creation | done | Bootstrap session, 2026-09-13 |
-| T0.1 | Containerised Android toolchain | todo | Rewritten for a Linux host. Blocks all of phase 2. Big one |
+| T0.1 | Containerised Android toolchain | done | 2026-09-14. JDK 21.0.5 + SDK 36, 1.45 GB image; host still has no `java`. Given to the local model first and it failed twice — `docs/harness-notes/2026-09-14-T0.1.md` |
 | T0.2 | Repository skeleton, README, gitignore, gitattributes | done | Bootstrap session |
 | T0.3 | The nine ADRs | done | Bootstrap session |
 | T0.4 | CLAUDE.md files, STATUS.md, `.claude/` | done | Bootstrap session |
