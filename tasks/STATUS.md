@@ -52,7 +52,7 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 
 | # | Task | State | Notes |
 |---|---|---|---|
-| T3.1 | `/ping` | done | 2026-09-16. `server/server.py` (`/ping` + 404) and `server/probe.py` (stdlib-only HTTP probe, `--serve` starts/stops the server). Both acceptance commands exit 0 |
+| T3.1 | `/ping` | blocked | 2026-09-16. Code is complete and was green when it landed; T3.2 then made a missing `config.json` fatal, so `probe.py --serve` now exits 2. Same `cp` unblocks it — see below |
 | T3.2 | Config loading | blocked | 2026-09-16. `load_config(path)` in `server/server.py`: defaults for missing keys, `ConfigError` for malformed JSON, hard fail (exit 1, message points at `config.example.json`) when the file is absent — deliberately, per the task's own guidance against a silently-empty start. 3 of 4 acceptance commands pass; `probe.py --serve --expect up` fails in this checkout because `server/config.json` (gitignored, per-machine) does not exist here and creating it is outside what this session is permitted to touch. Needs a human to `cp server/config.example.json server/config.json` once (`docs/SERVER-SETUP.md`), then re-run |
 | T3.3 | `/quotes` proxy | todo | ⚠️ Subtask 0: confirm brapi FX and crypto endpoints |
 | T3.4 | `/weather` proxy | todo | |
@@ -106,6 +106,22 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 | T7.3 | Pre-public review: secrets, README, screenshots | todo | Before flipping the repo public |
 | TT.8 | `e2e/run_e2e.py`, five scenarios | todo | Needs TT.6 |
 | TT.9 | CI workflow | todo | |
+
+## Nothing re-runs an earlier task's acceptance
+
+T3.1 was accepted with both its commands exiting 0. T3.2 then landed the hard fail on a missing
+`config.json`, and T3.1's `probe.py --serve --expect up` started exiting 2 — without a line of
+T3.1's own code changing, and without anything reporting it. It was found only because a
+verifier was pointed at the whole branch rather than at one task.
+
+That is a gap in the workflow, not bad luck. `/task` runs a task's acceptance once, at the
+moment that task is executed, and nothing ever runs it again. `make check` runs the **test
+suites**, not the `## Acceptance` blocks, so a later task can silently invalidate an earlier
+task's criterion and the index will keep saying `done`.
+
+Worth a task of its own: a `make verify-accepted` that re-runs the acceptance block of every row
+marked `done` and fails on the first non-zero exit. Until that exists, treat `done` as "passed
+once", not as "passes now".
 
 ## Why `probe.py` moved from T3.5 to T3.1
 
