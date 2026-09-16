@@ -87,6 +87,7 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 | T5.2 | Timeouts, retry, failure tolerance | todo | |
 | T5.3 | Adaptive polling with backoff | todo | Requirement, not polish — see ADR 0008 |
 | T5.4 | Battery telemetry | todo | |
+| T5.5 | Thermal screen cutoff | todo | New. Temperature becomes a second authority over the screen — ADR 0012 amends invariant 3. Must land **after** T4.3/T4.4, which build the screen-state machine |
 | TT.7 | Espresso-Web assertions | todo | |
 
 ### Tooling: `e2e/layout/` (no task number — it arrived with T6.1)
