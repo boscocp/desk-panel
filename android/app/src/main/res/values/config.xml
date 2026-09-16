@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The PC's LAN address, for the one piece of Java that opens a socket.
+
+  It lives in res/ rather than in PcPoller.java so that it rides the existing
+  substitution: build.gradle.kts copies src/main/res to a generated tree with
+  the placeholder replaced by PC_IP from .env, and the APK packages that copy
+  (ADR 0013). One mechanism, one address — the host PcPoller dials is by
+  construction the same host network_security_config.xml permits in cleartext,
+  and neither of them is the real address in git.
+
+  CHANGE PC_IP IN .env, never this file. 192.168.1.100 is the repository's
+  agreed placeholder (T7.3) and reaches no PC.
+-->
+<resources>
+    <string name="pc_host" translatable="false">192.168.1.100</string>
+</resources>

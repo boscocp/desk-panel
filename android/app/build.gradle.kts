@@ -1,19 +1,158 @@
 import com.android.build.api.artifact.SingleArtifact
-import java.util.Properties
 
 plugins {
     id("com.android.application")
 }
 
-// Signing material for release builds. The file sits at the repository root and
-// is gitignored along with the keystore itself, so it is absent on a fresh clone
-// and in CI — see the fallback in buildTypes below.
-val keystorePropertiesFile = rootProject.file("../keystore.properties")
-val keystoreProperties = Properties().apply {
-    if (keystorePropertiesFile.exists()) {
-        keystorePropertiesFile.inputStream().use { load(it) }
+// ---------------------------------------------------------------------------
+// .env — build-time local configuration (ADR 0013)
+//
+// Two values cannot be anything but build-time: the PC's LAN address, which the
+// APK must be allowed to reach in cleartext, and the key the APK is signed with.
+// Both live in a gitignored .env at the repository root, with .env.example
+// committed beside it. Everything the owner might want to change at will —
+// tickers, city, intervals — is runtime config in server/config.json instead,
+// because a change to what the panel shows must never need a rebuild.
+//
+// NEVER add an API token here. A value Gradle reads is a value compiled into the
+// APK, and an APK is a zip file.
+//
+// Parsed here rather than sourced by a shell wrapper on purpose: exporting this
+// file would put the signing passwords into the environment of every process the
+// build spawns.
+// ---------------------------------------------------------------------------
+val dotenvFile = rootProject.file("../.env")
+val dotenv: Map<String, String> = buildMap {
+    if (dotenvFile.exists()) {
+        dotenvFile.readLines().forEach { raw ->
+            val line = raw.trim()
+            // Only a whole-line comment. There are no inline comments, so a
+            // password may legitimately contain '#'.
+            if (line.isEmpty() || line.startsWith("#")) return@forEach
+            val eq = line.indexOf('=')
+            if (eq <= 0) return@forEach
+            val key = line.substring(0, eq).trim()
+            var value = line.substring(eq + 1).trim()
+            // One matching pair of surrounding quotes, since .env is
+            // shell-shaped by convention and people quote out of habit.
+            if (value.length >= 2 &&
+                (value.first() == '"' || value.first() == '\'') &&
+                value.last() == value.first()
+            ) {
+                value = value.substring(1, value.length - 1)
+            }
+            put(key, value)
+        }
     }
 }
+
+fun dotenvValue(key: String): String? = dotenv[key]?.takeIf { it.isNotBlank() }
+
+// ---------------------------------------------------------------------------
+// Cleartext pinning
+//
+// res/xml/network_security_config.xml keeps the placeholder in git — T7.3's
+// pre-public sweep requires that no real LAN address appears in committed
+// non-doc source, and making that structurally true beats an operator
+// remembering not to commit an edit. The substitution therefore happens on a
+// generated copy of res/, which is what the APK packages; the tracked file is
+// never rewritten.
+// ---------------------------------------------------------------------------
+val cleartextPlaceholder = "192.168.1.100"
+val pcIp = dotenvValue("PC_IP")
+// Octets are range-checked, not just counted: \d{1,3} accepts 192.168.1.256,
+// and the build would then bake an unreachable address into both the pin and
+// pc_host while printing the reassuring line below. A panel that cannot reach
+// its PC looks exactly like a panel whose PC is off, which is the ambiguity
+// this whole mechanism exists to remove.
+val ipv4Octet = "(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])"
+if (pcIp != null && !Regex("^" + ipv4Octet + "(\\." + ipv4Octet + "){3}$").matches(pcIp)) {
+    throw GradleException("PC_IP in .env is not an IPv4 address: '$pcIp'")
+}
+val cleartextHost = pcIp ?: cleartextPlaceholder
+
+// Printed at configuration time, so it appears on every build including one
+// where every task is up to date. An APK silently built against the placeholder
+// is indistinguishable from a network fault, and that ambiguity is the reason
+// .env exists at all.
+logger.lifecycle(
+    if (pcIp != null) {
+        "desk-panel: cleartext pinned to $cleartextHost (from .env)"
+    } else {
+        "desk-panel: cleartext pinned to $cleartextHost " +
+            "(placeholder — no .env, the panel will not reach any PC)"
+    }
+)
+
+val generatedResDir = layout.buildDirectory.dir("generated/netsec/res").get().asFile
+
+// The generated tree replaces src/main/res as the module's only res source dir,
+// rather than sitting alongside it: two source dirs carrying the same resource
+// name is a duplicate-resource error, and there is no ordering that makes one
+// win inside a single source set.
+// Sync, not Copy: Copy never removes a destination file whose source went away,
+// and this tree is the module's *only* res source dir. Renaming a resource under
+// src/main/res would otherwise leave the old copy behind and ship both, which
+// surfaces as a duplicate-resource error or a stale resource that only
+// ./gradlew clean explains.
+val generateNetsecRes = tasks.register<Sync>("generateNetsecRes") {
+    description = "Copies res/, substituting the PC's LAN address from .env into the cleartext pin."
+    from("src/main/res")
+    into(generatedResDir)
+    // Scoped to XML because filter() round-trips a file through a line-by-line
+    // String transform. res/ is all text today; the first launcher icon, WebP
+    // or font to land here would be packaged corrupted, with no build error and
+    // nothing to see until it fails to decode on the device.
+    filesMatching("**/*.xml") {
+        filter { line -> line.replace(cleartextPlaceholder, cleartextHost) }
+    }
+    inputs.property("cleartextHost", cleartextHost)
+}
+
+// ---------------------------------------------------------------------------
+// Release signing
+//
+// Absorbed from keystore.properties into .env (ADR 0013): two build-time local
+// files was one too many. Behaviour is T7.1's, unchanged — all four values
+// present means release signing, any of them missing means fall back to debug
+// so a fresh clone and CI still build.
+// ---------------------------------------------------------------------------
+val keystoreFilePath = dotenvValue("KEYSTORE_FILE")
+val keystorePassword = dotenvValue("KEYSTORE_PASSWORD")
+val keystoreAlias = dotenvValue("KEY_ALIAS")
+val keystoreKeyPassword = dotenvValue("KEY_PASSWORD")
+
+// storeFile is resolved against the Gradle root (android/), so the keystore
+// sitting next to .env at the repository root is `../desk-panel.keystore`. A
+// path that only resolves from this module is accepted too, so either spelling
+// works.
+// A path that is set but resolves to nothing is a typo, and a typo must not
+// fall back to the debug key: the APK builds, installs on a clean device, and
+// then refuses to install over the real one — INSTALL_FAILED_UPDATE_INCOMPATIBLE,
+// whose only cure is an uninstall that discards the MIUI grants T2.4 spent a
+// session collecting. Same argument as PC_IP above: absent is a documented
+// fallback, wrong is not.
+val resolvedKeystore = keystoreFilePath?.let { path ->
+    (rootProject.file(path).takeIf { it.exists() } ?: file(path).takeIf { it.exists() })
+        ?: throw GradleException(
+            "KEYSTORE_FILE in .env points at no file: '$path'. Tried " +
+                "${rootProject.file(path)} and ${file(path)}. Leave it empty to fall back " +
+                "to the debug key deliberately."
+        )
+}
+val hasReleaseSigning = resolvedKeystore != null &&
+    keystorePassword != null && keystoreAlias != null && keystoreKeyPassword != null
+
+// Same argument as the cleartext line: a release APK that silently fell back to
+// the debug key installs fine and then refuses to install over the real one.
+logger.lifecycle(
+    if (hasReleaseSigning) {
+        "desk-panel: release signing (from .env)"
+    } else {
+        "desk-panel: debug signing (no usable release key in .env — not installable " +
+            "over a release build)"
+    }
+)
 
 android {
     namespace = "dev.bosco.deskpanel"
@@ -36,6 +175,10 @@ android {
     // duplicate it into assets/. See android/CLAUDE.md.
     sourceSets["main"].assets.srcDirs("../../web")
 
+    // res/ is read from the generated copy above, never from src/main/res
+    // directly, so the address baked into the APK can differ from the one in git.
+    sourceSets["main"].res.setSrcDirs(listOf(generatedResDir))
+
     // web/ is the whole layer, tests included, and packaging everything under
     // it shipped web/test/format.test.js into the APK: node:test code, inert
     // on the device but real bytes in a production artefact, and exactly what
@@ -47,31 +190,31 @@ android {
     // install an APK signed with a different key over an existing one, and the
     // only way out is an uninstall, which throws away the MIUI permissions and
     // device state T2.4 grants by hand. See docs/BUILD.md.
-    if (keystorePropertiesFile.exists()) {
+    if (hasReleaseSigning) {
         signingConfigs.create("release") {
-            // storeFile is resolved against the Gradle root (android/), so the
-            // keystore sitting next to keystore.properties at the repository
-            // root is `../desk-panel.keystore`. A path that only resolves from
-            // this module is accepted too, so either spelling works.
-            val storeFilePath = keystoreProperties.getProperty("storeFile")
-            storeFile = rootProject.file(storeFilePath).takeIf { it.exists() }
-                ?: file(storeFilePath)
-            storePassword = keystoreProperties.getProperty("storePassword")
-            keyAlias = keystoreProperties.getProperty("keyAlias")
-            keyPassword = keystoreProperties.getProperty("keyPassword")
+            storeFile = resolvedKeystore
+            storePassword = keystorePassword
+            keyAlias = keystoreAlias
+            keyPassword = keystoreKeyPassword
         }
     }
 
     buildTypes {
         getByName("release") {
-            // No keystore.properties means a fresh clone or CI. Fall back to the
-            // debug key so `assembleRelease` still produces an APK there instead
-            // of failing the build; only the machine holding the keystore can
-            // produce an installable-over-the-top release.
+            // No signing values in .env means a fresh clone or CI. Fall back to
+            // the debug key so `assembleRelease` still produces an APK there
+            // instead of failing the build; only the machine holding the
+            // keystore can produce an installable-over-the-top release.
             signingConfig = signingConfigs.findByName("release")
                 ?: signingConfigs.getByName("debug")
         }
     }
+}
+
+// Resource merging has to see the substituted copy, and preBuild is the one
+// task every variant's pipeline runs first.
+tasks.named("preBuild") {
+    dependsOn(generateNetsecRes)
 }
 
 dependencies {
