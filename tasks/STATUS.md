@@ -23,7 +23,7 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 | # | Task | State | Notes |
 |---|---|---|---|
 | T0.0 | Git identity and repository creation | done | Bootstrap session, 2026-09-13 |
-| T0.1 | Containerised Android toolchain | todo | Rewritten for a Linux host. Blocks all of phase 2. Big one |
+| T0.1 | Containerised Android toolchain | done | 2026-09-14. JDK 21.0.5 + SDK 36, 1.45 GB image; host still has no `java`. Given to the local model first and it failed twice — `docs/harness-notes/2026-09-14-T0.1.md` |
 | T0.2 | Repository skeleton, README, gitignore, gitattributes | done | Bootstrap session |
 | T0.3 | The nine ADRs | done | Bootstrap session |
 | T0.4 | CLAUDE.md files, STATUS.md, `.claude/` | done | Bootstrap session |
@@ -34,9 +34,9 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 
 | # | Task | State | Notes |
 |---|---|---|---|
-| T1.1 | Clock in plain HTML/JS | todo | Independent of T0.1 — can be done today |
-| T1.2 | `mock.js` fixtures | todo | |
-| TT.1 | Extract `format.js` + node:test | todo | Pairs with T1.2 |
+| T1.1 | Clock in plain HTML/JS | done | 2026-09-16. Brought from `harness/t1.1-accepted` |
+| TT.1 | Extract `format.js` + node:test | done | 2026-09-16. 16 tests, `node --test` green; purity grep passes. `isNight` takes `"HH:MM"`, the shape config ships |
+| T1.2 | `mock.js` fixtures | done | 2026-09-16. `app.js` now renders quotes/fx/crypto/weather/battery/stale via `format.js`; mock guarded behind `file:` + `__nativeBridge` check in `index.html` |
 
 ## Phase 2 — Android skeleton
 
@@ -106,6 +106,17 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 | T7.3 | Pre-public review: secrets, README, screenshots | todo | Before flipping the repo public |
 | TT.8 | `e2e/run_e2e.py`, five scenarios | todo | Needs TT.6 |
 | TT.9 | CI workflow | todo | |
+
+## Why TT.1 runs before T1.2
+
+The table used to list T1.2 before TT.1. T1.2's acceptance ends with
+`node --test "web/test/**/*.test.js"`, and the only thing that ever writes a file matching that
+glob is **TT.1**. Run in the table's order, T1.2's last line fails on an empty glob and the task
+can never go green — through no fault of its own implementation.
+
+TT.1's own prereq is T1.1, not T1.2, so nothing is lost by swapping them: `format.js` is
+extracted from the clock code, and `mock.js` then feeds the payload through functions that are
+already under test.
 
 ## Why T7.1 sits in phase 2
 
