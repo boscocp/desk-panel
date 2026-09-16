@@ -233,3 +233,32 @@ Quotes and weather come afterwards; they are the least risky part and the easies
   0005 is marked `accepted` today with its central mechanism still undecided.
 - **Whether the local model can carry a task end to end** is what the two-agent setup is for.
   Resolved per task, by reviewing the PR. See ADR 0011 and `docs/LOCAL-MODELS.md`.
+- **Who keeps polling once the Activity is not resumed** is opened by T4.2 and has to be answered
+  by T4.3, before any brightness work: the screen going off is itself an `onPause`, so the loop
+  that would notice the PC returning is switched off by the very behaviour invariant 3 asks for.
+  The T4.3 task file carries the candidates and the battery argument against each.
+
+## Resuming after 2026-09-16 (evening)
+
+Wave 6 (Milestone B) is open on `wave/6-milestone-b`, PR #10. T4.2 landed with all five criteria
+green on the device, plus the review fixes on top of it.
+
+**Take TT.6 first**, then T4.3, then T4.4. TT.6 is the cheap one and the path is warm: T4.2 has
+just exercised every marker it counts, by hand.
+
+Getting back to a testable rig takes three things, none of them automatic yet:
+
+1. **Start the server by hand** — `python server/server.py`. There is no autostart on this box:
+   T3.9 (systemd user unit on `graphical-session.target`) is `todo`, and wave 3 never ran. The
+   server dies with whatever shell started it.
+2. **The firewall rule has to be in place.** The dev box runs ufw and `docs/SERVER-SETUP.md`
+   ships no firewall step for Linux by design. The phone reaches the PC through a NAT — it holds
+   `192.168.3.100` and arrives as `192.168.15.2` — so the rule cannot be written against the
+   phone's own address: `sudo ufw allow from 192.168.0.0/16 to any port 8777 proto tcp`. Without
+   it, ping succeeds and HTTP times out, and the panel reports a perfectly ordinary offline.
+3. **Be at the phone for the first `adb install` of the session**, and build with
+   `assembleRelease`. Both reasons are in the T4.2 notes above.
+
+The server's own log is the best instrument the project has for the poll loop: it prints one
+line per request with a timestamp, so the cadence — and any duplicate loop — is directly
+countable without touching the app.
