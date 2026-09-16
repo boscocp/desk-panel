@@ -52,7 +52,7 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 
 | # | Task | State | Notes |
 |---|---|---|---|
-| T3.1 | `/ping` | todo | Independent of T0.1 |
+| T3.1 | `/ping` | todo | Independent of T0.1. Now also ships `probe.py` — see below |
 | T3.2 | Config loading | todo | |
 | T3.3 | `/quotes` proxy | todo | ⚠️ Subtask 0: confirm brapi FX and crypto endpoints |
 | T3.4 | `/weather` proxy | todo | |
@@ -106,6 +106,20 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 | T7.3 | Pre-public review: secrets, README, screenshots | todo | Before flipping the repo public |
 | TT.8 | `e2e/run_e2e.py`, five scenarios | todo | Needs TT.6 |
 | TT.9 | CI workflow | todo | |
+
+## Why `probe.py` moved from T3.5 to T3.1
+
+T3.1 declared `Prereqs: none` and `Files: server/server.py`, but both of its acceptance
+commands run `server/probe.py` — a T3.5 deliverable. T3.5 declared `Prereqs: T3.1, T3.2`. So
+T3.1 needed T3.5 needed T3.1, and neither could go first.
+
+`scripts/check_status.py` detects prereq cycles and did not catch this one: it compares
+**declared** prereqs, and this cycle ran through an **acceptance command** instead. Worth
+remembering — the same shape is what made T1.2 unrunnable before TT.1.
+
+`probe.py` is a generic HTTP probe that knows nothing about login scope, and ten task files call
+it. It belongs with its first caller. T3.5 keeps `verify_login_scope.py`, which really is part
+of the login-scope contract.
 
 ## Why TT.1 runs before T1.2
 
