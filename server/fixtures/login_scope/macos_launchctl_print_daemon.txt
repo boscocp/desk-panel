@@ -1,0 +1,17 @@
+dev.bosco.deskpanel = {
+	active count = 1
+	path = /Library/LaunchDaemons/dev.bosco.deskpanel.plist
+	type = LaunchDaemon
+	state = running
+
+	program = /usr/bin/python3
+
+	domain = system [100000]
+	minimum runtime = 10
+	exit timeout = 5
+	runs = 1
+	pid = 388
+	last exit code = (never exited)
+
+	properties = keepalive | runatload
+}

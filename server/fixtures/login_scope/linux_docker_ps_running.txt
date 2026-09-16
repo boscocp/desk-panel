@@ -1,0 +1,2 @@
+NAMES               IMAGE                    STATUS              PORTS
+desk-panel-server   desk-panel/server:local  Up 2 hours          0.0.0.0:8777->8777/tcp

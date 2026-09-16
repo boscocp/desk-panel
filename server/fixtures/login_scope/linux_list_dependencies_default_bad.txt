@@ -1,0 +1,22 @@
+default.target
+○ ├─desk-panel.service
+● ├─turing-smart-screen.service
+● └─basic.target
+●   ├─paths.target
+●   ├─sockets.target
+●   │ ├─dbus.socket
+●   │ ├─dirmngr.socket
+●   │ ├─gpg-agent-browser.socket
+●   │ ├─gpg-agent-extra.socket
+●   │ ├─gpg-agent-ssh.socket
+●   │ ├─gpg-agent.socket
+●   │ ├─keyboxd.socket
+●   │ ├─p11-kit-server.socket
+●   │ ├─pipewire-pulse.socket
+●   │ ├─pipewire.socket
+●   │ ├─systemd-ask-password.socket
+●   │ ├─systemd-importd.socket
+●   │ ├─systemd-journalctl.socket
+●   │ ├─systemd-machined.socket
+●   │ └─systemd-storage-fs.socket
+●   └─timers.target
