@@ -81,6 +81,12 @@ dependencies {
     // is not (T2.2).
     implementation("androidx.webkit:webkit:1.12.1")
 
+    // WindowCompat / WindowInsetsControllerCompat: the supported way to hide the
+    // system bars on every API level the panel runs on (T2.3). It arrives
+    // transitively through webkit, but the immersive code is ours and so is the
+    // dependency on it.
+    implementation("androidx.core:core:1.13.1")
+
     // JVM unit tests only — PcState and friends are plain Java with no Android
     // imports precisely so `./gradlew test` covers them without a device.
     testImplementation("junit:junit:4.13.2")
