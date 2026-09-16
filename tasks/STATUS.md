@@ -89,6 +89,27 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 | T5.4 | Battery telemetry | todo | |
 | TT.7 | Espresso-Web assertions | todo | |
 
+### Tooling: `e2e/layout/` (no task number — it arrived with T6.1)
+
+A layout harness, deliberately recorded here rather than given an invented task id. It drives
+Firefox over Marionette on the host (no phone, no adb, standard library only), measures
+`web/index.html` at the phone's real 872x392 viewport and exits non-zero if any section is off
+screen or clips its own content. `python e2e/layout/check_layout.py`, and
+`--extra-css FILE` tries a size change without editing `web/`.
+
+It exists because the fifth card hung off the bottom of the screen for two tasks while every
+screenshot looked fine. Three things in it are worth more than the code: it calibrates the
+layout viewport instead of trusting `SetWindowRect`, which silently gave 306px of height
+instead of 392 and would have passed a broken layout; it fails when a section renders **empty**,
+because an empty card always fits and that is precisely how the panel looked acceptable before
+T6.1; and it runs a stress payload as well as a served tick, because the typical tick is not
+what breaks a layout.
+
+**T6.2, T6.3 and T6.4 should all run it** — each changes sizes, and a size change is what puts
+a card off screen. **TT.7** is its on-device counterpart: this harness cannot see the real font,
+since Android resolves `sans-serif-condensed` to Roboto Condensed while the host falls back to
+something wider, so its text widths are a conservative estimate rather than the truth.
+
 ## Phase 6 — Visual (parallel with 3–5, touches only `web/`)
 
 | # | Task | State | Notes |
