@@ -16,6 +16,35 @@ This deliberately avoids `adb install` over USB, which on MIUI requires enabling
 (Security settings)" — a separate toggle from the standard one that wants a Xiaomi account and
 sometimes imposes a waiting period on new accounts. The browser route sidesteps all of it.
 
+## The APK is built for one PC address
+
+The app is allowed to talk cleartext http to exactly one host, and that permission is baked
+into the APK. It comes from `PC_IP` in the gitignored `.env` at the repository root — the file
+`.env.example` describes, and which also holds the signing keys
+([ADR 0013](adr/0013-local-configuration-boundaries.md)). **Never put an API token there:**
+the phone never reaches a data provider, the PC does, and anything Gradle reads is compiled
+into the APK, which is a zip file. Tokens, tickers, the city and the intervals live in
+`server/config.json` on the PC instead.
+
+So before building the APK you install here, set `PC_IP` to the PC's LAN address — the one from
+its static DHCP reservation. **If that address ever changes, editing `.env` is not enough: the
+APK has to be rebuilt and reinstalled**, because cleartext permission is a property of the APK,
+not of the server. Nothing else in the project behaves that way.
+
+Every build prints which address it used:
+
+```
+desk-panel: cleartext pinned to 192.168.15.3 (from .env)
+desk-panel: cleartext pinned to 192.168.1.100 (placeholder — no .env, the panel will not reach any PC)
+```
+
+The second line means the APK will report "offline" for ever, whatever the network is doing.
+That looks exactly like a bug in the app, which is why the line exists. See
+[BUILD.md](BUILD.md).
+
+The phone and the PC need not share a subnet — on the development network they do not, and
+routing between them works. `adb shell ping -c 3 <PC_IP>` is the check.
+
 ## MIUI settings that decide whether this works at all
 
 These are not optional polish. Without them MIUI will kill the app within hours and it will
