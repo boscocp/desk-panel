@@ -13,6 +13,10 @@ local.properties
 *.apk
 *.aab
 
+# --- Python bytecode caches ---
+__pycache__/
+*.pyc
+
 # --- tooling pulled in locally, not installed system-wide ---
 tools/
 
