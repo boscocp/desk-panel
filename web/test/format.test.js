@@ -1,0 +1,101 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+const { formatPrice, formatChange, changeClass, weatherLabel, isNight } = require('../js/format.js');
+
+test('formatPrice formats a BRL price with two decimals', () => {
+    assert.equal(formatPrice(38.42, 'BRL'), 'R$38.42');
+});
+
+test('formatPrice formats a six-figure crypto price with thousand separators', () => {
+    assert.equal(formatPrice(234567.891, 'USD'), '$234,567.89');
+});
+
+test('formatPrice returns a placeholder for non-numeric input', () => {
+    assert.equal(formatPrice(NaN, 'USD'), '--');
+    assert.equal(formatPrice(undefined, 'USD'), '--');
+});
+
+test('formatChange formats a positive change with a leading sign', () => {
+    assert.equal(formatChange(1.234), '+1.2%');
+});
+
+test('formatChange formats a negative change with a leading sign', () => {
+    assert.equal(formatChange(-0.87), '-0.9%');
+});
+
+test('formatChange formats zero change without a sign', () => {
+    assert.equal(formatChange(0), '0.0%');
+});
+
+test('changeClass buckets positive, negative and zero', () => {
+    assert.equal(changeClass(2.5), 'up');
+    assert.equal(changeClass(-2.5), 'down');
+    assert.equal(changeClass(0), 'flat');
+});
+
+test('weatherLabel maps a known WMO code', () => {
+    assert.equal(weatherLabel(95), 'Thunderstorm');
+});
+
+test('weatherLabel falls back to Unknown for an unmapped code', () => {
+    assert.equal(weatherLabel(9999), 'Unknown');
+});
+
+test('isNight is true well inside a night window that does not wrap midnight', () => {
+    assert.equal(isNight(new Date(2026, 0, 1, 23, 0), 22, 23), false);
+    assert.equal(isNight(new Date(2026, 0, 1, 22, 30), 22, 23), true);
+});
+
+test('isNight handles a window that wraps midnight', () => {
+    // Night window 22:00-06:00.
+    assert.equal(isNight(new Date(2026, 0, 1, 23, 0), 22, 6), true);
+    assert.equal(isNight(new Date(2026, 0, 1, 0, 30), 22, 6), true);
+    assert.equal(isNight(new Date(2026, 0, 1, 5, 59), 22, 6), true);
+    assert.equal(isNight(new Date(2026, 0, 1, 6, 0), 22, 6), false);
+    assert.equal(isNight(new Date(2026, 0, 1, 12, 0), 22, 6), false);
+});
+
+// The shape that actually ships: server/config.json spells night_start /
+// night_end as "HH:MM", and T1.2's payload carries night:{start,end} the same
+// way. Passing those strings to an hour-integer implementation returns false
+// for every hour of the day, silently, so the night profile never engages.
+test('isNight accepts the "HH:MM" strings the server config actually ships', () => {
+    assert.equal(isNight(new Date(2026, 0, 1, 23, 0), '22:00', '07:00'), true);
+    assert.equal(isNight(new Date(2026, 0, 1, 2, 0), '22:00', '07:00'), true);
+    assert.equal(isNight(new Date(2026, 0, 1, 6, 59), '22:00', '07:00'), true);
+    assert.equal(isNight(new Date(2026, 0, 1, 7, 0), '22:00', '07:00'), false);
+    assert.equal(isNight(new Date(2026, 0, 1, 12, 0), '22:00', '07:00'), false);
+});
+
+test('isNight honours minutes rather than rounding down to the hour', () => {
+    assert.equal(isNight(new Date(2026, 0, 1, 22, 15), '22:30', '07:00'), false);
+    assert.equal(isNight(new Date(2026, 0, 1, 22, 30), '22:30', '07:00'), true);
+    assert.equal(isNight(new Date(2026, 0, 1, 7, 29), '22:30', '07:30'), true);
+    assert.equal(isNight(new Date(2026, 0, 1, 7, 30), '22:30', '07:30'), false);
+});
+
+test('isNight returns false for an unparseable bound instead of guessing', () => {
+    assert.equal(isNight(new Date(2026, 0, 1, 23, 0), '22h00', '07:00'), false);
+    assert.equal(isNight(new Date(2026, 0, 1, 23, 0), '25:00', '07:00'), false);
+    assert.equal(isNight(new Date(2026, 0, 1, 23, 0), null, '07:00'), false);
+    assert.equal(isNight(new Date(2026, 0, 1, 23, 0), '22:00', '22:00'), false);
+});
+
+// mock.js deliberately carries a sub-1 crypto price (and keeps six decimals
+// for it) to prove the layout survives one. Truncating to two decimals shows
+// it as 0.00 on every tick, hiding both the price and any movement in it.
+test('formatPrice keeps sub-1 crypto prices visible instead of rounding to zero', () => {
+    assert.equal(formatPrice(0.00081, 'USD'), '$0.00081');
+    assert.equal(formatPrice(0.4212, 'USD'), '$0.4212');
+    assert.equal(formatPrice(0.00000012, 'USD'), '$0.00000012');
+});
+
+test('formatPrice still uses exactly two decimals at or above 1', () => {
+    assert.equal(formatPrice(341200, 'USD'), '$341,200.00');
+    assert.equal(formatPrice(38.42, 'BRL'), 'R$38.42');
+    assert.equal(formatPrice(1, 'USD'), '$1.00');
+    assert.equal(formatPrice(0, 'USD'), '$0.00');
+});

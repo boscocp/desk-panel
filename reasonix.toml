@@ -28,6 +28,15 @@ allow = [
   "Bash(python -m json.tool:*)", "Bash(python3 -m json.tool:*)",
   "Bash(node --test:*)", "Bash(node --check:*)",
   "Bash(docker compose -f docker/compose.yml run --rm build:*)",
+  # T0.1 has to build the image; the line above only covers running the service
+  # once it exists. `config` validates compose.yml without starting anything.
+  "Bash(docker compose -f docker/compose.yml build:*)",
+  "Bash(docker compose -f docker/compose.yml config:*)",
+
+  # The T0.1 ownership probe writes into out/, which is gitignored and absent
+  # from a fresh checkout. Deleting is deliberately NOT granted: the `rm` in
+  # that acceptance block is run by the reviewer, outside the harness.
+  "Bash(mkdir:*)", "Bash(touch:*)", "Bash(test:*)",
 
   # Git, read side plus staging and committing.
   "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",

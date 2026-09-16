@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Desk Panel</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="clock-container">
+        <div id="clock"></div>
+        <div id="date"></div>
+    </div>
+    <div id="panel">
+        <section id="quotes" class="card-list"></section>
+        <section id="fx" class="card-list"></section>
+        <section id="crypto" class="card-list"></section>
+        <section id="weather" class="card"></section>
+        <section id="battery" class="card"></section>
+        <div id="stale-badge" hidden>STALE</div>
+    </div>
+    <script src="js/format.js"></script>
+    <script src="js/app.js"></script>
+    <script>
+        // Mock fixtures for browser-only development (Chrome, no APK, no
+        // phone, no server) — see web/js/mock.js. Guarded so it never runs
+        // inside the APK: the WebView there is served from
+        // https://appassets.androidplatform.net/, never file:, and the
+        // native layer sets window.__nativeBridge before these scripts run.
+        if (location.protocol === 'file:' && typeof window.__nativeBridge === 'undefined') {
+            var mockScript = document.createElement('script');
+            mockScript.src = 'js/mock.js';
+            document.body.appendChild(mockScript);
+        }
+    </script>
+</body>
+</html>
