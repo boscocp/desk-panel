@@ -63,7 +63,7 @@ html {
 body {
     height: 100%;
     margin: 0;
-    padding: 12px;
+    padding: 10px;
     box-sizing: border-box;
     overflow: hidden;
 
@@ -113,7 +113,7 @@ body {
 
 #date {
     margin-top: 6px;
-    font-size: 16px;
+    font-size: 20px;
     line-height: 1.25;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -141,8 +141,8 @@ body {
     grid-template-columns: minmax(0, 1fr) 224px;
     /* Fractional rows, never auto: the three market cards and the two on the
      * right always divide exactly the height available, whatever they hold. */
-    grid-template-rows: minmax(0, 1.22fr) minmax(0, 1fr) minmax(0, 1fr);
-    gap: 10px;
+    grid-template-rows: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
 }
 
 #quotes  { grid-area: 1 / 1 / 2 / 2; }
@@ -173,9 +173,11 @@ body {
 .card-list::before,
 .card::before {
     flex: 0 0 auto;
-    font-size: 11px;
+    font-size: 20px;
     line-height: 1.2;
-    letter-spacing: 0.22em;
+    /* Wide tracking at 11px read as a label. At 20px it reads as a gap, and
+     * WEATHER stops fitting its card, so it comes back in. */
+    letter-spacing: 0.14em;
     color: var(--accent-dim);
     margin-bottom: 3px;
 }
@@ -217,6 +219,7 @@ body {
 
 .row .price {
     color: var(--accent);
+    font-weight: 700;
 }
 
 .row .change {
@@ -255,7 +258,7 @@ body {
 }
 
 #battery {
-    font-size: 17px;
+    font-size: 20px;
     line-height: 1.3;
     color: var(--accent-dim);
 }
@@ -268,9 +271,9 @@ body {
     right: 0;
     background: var(--down);
     color: var(--ground);
-    font-size: 11px;
+    font-size: 20px;
     font-weight: 700;
-    letter-spacing: 0.2em;
-    padding: 2px 8px;
+    letter-spacing: 0.1em;
+    padding: 0 7px;
     border-radius: 0 3px 0 3px;
 }
