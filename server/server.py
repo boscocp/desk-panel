@@ -117,15 +117,26 @@ def config_search_paths(argv, env, script_dir):
     return paths
 
 
-def config_permission_warning(mode, platform):
+def config_permission_warning(mode, platform, path=None, token=""):
     """Pure: a human-readable warning if `mode` (an os.stat().st_mode
-    value) grants group or other permissions, else None.
+    value) grants group or other permissions on a file that holds a token,
+    else None.
 
-    POSIX only -- config.json holds the brapi token, and `st_mode` is
-    meaningless on Windows, where the real access control is the NTFS ACL,
-    not a chmod bit. `platform` is whatever the caller passes as
-    sys.platform ("linux", "darwin", "win32", ...), so this stays pure and
-    testable without touching a filesystem.
+    POSIX only -- `st_mode` is meaningless on Windows, where the real
+    access control is the NTFS ACL, not a chmod bit. `platform` is whatever
+    the caller passes as sys.platform, so this stays pure and testable
+    without touching a filesystem.
+
+    `token` gates the warning, because there is nothing to protect without
+    one. config.example.json is committed, carries `brapi_token: ""`, and is
+    0644 on purpose; warning about it fires on every --check-only run in the
+    acceptance suite and names a file the user never edited. A warning that
+    cries wolf on the example file is how people learn to ignore the one
+    that fires on the real config.
+
+    `path` names the file actually checked, rather than assuming it was
+    config.json -- the old message said "config.json" while inspecting
+    whatever --config pointed at.
 
     Always a warning, never a reason to refuse to start: this process is
     the login signal (invariant 2), and dying over a permission bit breaks
@@ -133,11 +144,14 @@ def config_permission_warning(mode, platform):
     """
     if platform == "win32":
         return None
+    if not token:
+        return None
     if mode & 0o077:
+        name = path if path is not None else "config.json"
         return (
-            f"warning: config.json is readable by group/other (mode "
+            f"warning: {name} is readable by group/other (mode "
             f"{oct(mode & 0o777)}); it holds the brapi token. Consider: "
-            f"chmod 600 config.json"
+            f"chmod 600 {name}"
         )
     return None
 
@@ -270,7 +284,9 @@ def main(argv=None):
         except OSError:
             mode = None
         if mode is not None:
-            warning = config_permission_warning(mode, sys.platform)
+            warning = config_permission_warning(
+                mode, sys.platform, path=config_path, token=config.get("brapi_token", "")
+            )
             if warning:
                 print(warning, file=sys.stderr)
 
