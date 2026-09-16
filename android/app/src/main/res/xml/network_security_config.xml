@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext HTTP is permitted for the PC and for nothing else.
+
+  The panel talks to the PC server over plain http on the LAN, so exactly one
+  host needs an exemption. Granting it through a base-config instead would open
+  cleartext to every address on the internet, and setting the manifest-wide
+  cleartext flag on <application> does the same; both are forbidden here. See
+  android/CLAUDE.md and T4.1, whose acceptance greps for precisely that mistake.
+
+  includeSubdomains is false because this is a bare IPv4 address: an IP has no
+  subdomains, and leaving the attribute at its default would widen the exemption
+  past the single host it is meant to cover.
+
+  CHANGE THIS ADDRESS to the PC's real LAN IP. 192.168.1.100 is the repository's
+  agreed placeholder (T7.3), not a working address. It must match the static DHCP
+  reservation for the PC — if the PC's IP moves and this file does not, the app
+  reports "offline" forever and looks like a bug rather than a misconfiguration.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">192.168.1.100</domain>
+    </domain-config>
+</network-security-config>
