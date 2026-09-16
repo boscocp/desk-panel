@@ -24,6 +24,13 @@ android {
     // Points straight at web/, the single copy of the panel UI — never
     // duplicate it into assets/. See android/CLAUDE.md.
     sourceSets["main"].assets.srcDirs("../../web")
+
+    // web/ is the whole layer, tests included, and packaging everything under
+    // it shipped web/test/format.test.js into the APK: node:test code, inert
+    // on the device but real bytes in a production artefact, and exactly what
+    // T7.3's pre-public review exists to catch. The panel loads only
+    // index.html, css/ and js/, so nothing else belongs in there.
+    androidResources.ignoreAssetsPatterns += listOf("test", "*.test.js", ".gitkeep")
 }
 
 // Every other task (`make apk`, T3.6, CI) expects the APK at the repository
