@@ -9,12 +9,17 @@
         android:label="Desk Panel"
         android:allowBackup="false"
         android:networkSecurityConfig="@xml/network_security_config">
-        <!-- Landscape is pinned here rather than left to the sensor: the phone
-             lies in a stand and must not follow it. The no-action-bar theme is
-             the third bar to go — WindowInsetsControllerCompat hides the status
-             and navigation bars but not the activity's own title strip, and a
-             dark window background keeps the panel from flashing white before
-             the WebView paints (T2.3). -->
+        <!-- sensorLandscape takes both landscape directions and refuses portrait,
+             so the panel can sit either way up depending on which side the cable
+             leaves the stand. It also ignores the system rotation lock, which is
+             what a panel wants. The no-action-bar theme is the third bar to go —
+             WindowInsetsControllerCompat hides the status and navigation bars but
+             not the activity's own title strip, and a dark window background keeps
+             the panel from flashing white before the WebView paints (T2.3).
+
+             Note for whoever adds configChanges: without it, a 180° flip relaunches
+             the activity and reloads the WebView. `panel=rendered` appearing twice
+             in logcat after a flip is that happening. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"

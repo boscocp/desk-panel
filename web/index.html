@@ -7,9 +7,15 @@
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-    <div id="clock-container">
-        <div id="clock"></div>
-        <div id="date"></div>
+    <div id="sidebar">
+        <div id="clock-container">
+            <div id="clock"></div>
+            <div id="date"></div>
+        </div>
+        <!-- Reserved for the v2 shortcut buttons: empty on purpose, so that
+             adding them later fills a space that already exists instead of
+             forcing the panel to be laid out again. -->
+        <div id="shortcuts"></div>
     </div>
     <div id="panel">
         <section id="quotes" class="card-list"></section>
