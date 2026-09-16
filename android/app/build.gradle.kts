@@ -33,6 +33,12 @@ android {
     androidResources.ignoreAssetsPatterns += listOf("test", "*.test.js", ".gitkeep")
 }
 
+dependencies {
+    // JVM unit tests only — PcState and friends are plain Java with no Android
+    // imports precisely so `./gradlew test` covers them without a device.
+    testImplementation("junit:junit:4.13.2")
+}
+
 // Every other task (`make apk`, T3.6, CI) expects the APK at the repository
 // root's out/, not buried in app/build/outputs/apk/. The assemble<Variant>
 // umbrella task is not registered yet when onVariants fires, so the hookup
