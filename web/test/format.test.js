@@ -83,3 +83,19 @@ test('isNight returns false for an unparseable bound instead of guessing', () =>
     assert.equal(isNight(new Date(2026, 0, 1, 23, 0), null, '07:00'), false);
     assert.equal(isNight(new Date(2026, 0, 1, 23, 0), '22:00', '22:00'), false);
 });
+
+// mock.js deliberately carries a sub-1 crypto price (and keeps six decimals
+// for it) to prove the layout survives one. Truncating to two decimals shows
+// it as 0.00 on every tick, hiding both the price and any movement in it.
+test('formatPrice keeps sub-1 crypto prices visible instead of rounding to zero', () => {
+    assert.equal(formatPrice(0.00081, 'USD'), '$0.00081');
+    assert.equal(formatPrice(0.4212, 'USD'), '$0.4212');
+    assert.equal(formatPrice(0.00000012, 'USD'), '$0.00000012');
+});
+
+test('formatPrice still uses exactly two decimals at or above 1', () => {
+    assert.equal(formatPrice(341200, 'USD'), '$341,200.00');
+    assert.equal(formatPrice(38.42, 'BRL'), 'R$38.42');
+    assert.equal(formatPrice(1, 'USD'), '$1.00');
+    assert.equal(formatPrice(0, 'USD'), '$0.00');
+});

@@ -23,9 +23,13 @@ function formatPrice(value, currency) {
         return '--';
     }
     const symbol = CURRENCY_SYMBOLS[currency] || '';
+    // Two decimals is right for equities and FX, and wrong for the cheap end
+    // of crypto: a coin at 0.00081 renders as 0.00, so its price and every
+    // movement in it disappear. Below 1, widen the window instead.
+    const small = value !== 0 && Math.abs(value) < 1;
     const formatted = value.toLocaleString('en-US', {
         minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
+        maximumFractionDigits: small ? 8 : 2,
     });
     return `${symbol}${formatted}`;
 }
