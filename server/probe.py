@@ -98,10 +98,34 @@ def evaluate(args):
     return matched, kind, status
 
 
+def port_is_taken(host, port, timeout=0.5):
+    """True if something already accepts connections on host:port."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(timeout)
+        try:
+            sock.connect((host, port))
+        except OSError:
+            return False
+        return True
+
+
 def run_server_and_probe(args):
     """Start server.py as a child process, probe it, then stop it -- cleaning
     up the child even when the probe or the assertion fails, so a bad run
     never leaves the port bound for the next one."""
+    # Refuse to run if the port is already busy. Without this, server.py fails
+    # to bind, exits, and the readiness loop happily connects to whatever was
+    # already there -- so --serve reports success for code it never started.
+    # This is not hypothetical: T3.9 installs a systemd user unit on the
+    # development machine listening on this very port, which would turn every
+    # later --serve acceptance green against the installed service instead of
+    # the working tree.
+    if port_is_taken(args.host, args.port):
+        raise ProbeError(
+            f"{args.host}:{args.port} is already in use; --serve will not probe a "
+            f"server it did not start. Stop the other listener first "
+            f"(on Linux: systemctl --user stop desk-panel)."
+        )
     server_path = Path(__file__).resolve().parent / "server.py"
     process = subprocess.Popen(
         [sys.executable, str(server_path)],
