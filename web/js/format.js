@@ -81,17 +81,39 @@ function weatherLabel(code) {
     return WEATHER_LABELS[code] || 'Unknown';
 }
 
-// now: Date, start/end: hour-of-day integers (0-23). Handles the wrap
-// where the night window crosses midnight, e.g. start=22, end=6.
+// now: Date. start/end: "HH:MM" as shipped in server/config.json
+// (night_start / night_end) and in the payload's night:{start,end} — a bare
+// hour integer is accepted too. Returns false if either bound is unparseable,
+// so a malformed config leaves the panel in its day profile rather than dark.
+//
+// Minutes are honoured: "22:30" must not round down to 22:00, or the panel
+// dims half an hour early every night.
+function minutesOfDay(bound) {
+    if (typeof bound === 'number' && Number.isInteger(bound) && bound >= 0 && bound <= 23) {
+        return bound * 60;
+    }
+    if (typeof bound !== 'string') {
+        return null;
+    }
+    const match = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(bound.trim());
+    if (!match) {
+        return null;
+    }
+    return Number(match[1]) * 60 + Number(match[2]);
+}
+
 function isNight(now, start, end) {
-    const hour = now.getHours();
-    if (start === end) {
+    const from = minutesOfDay(start);
+    const to = minutesOfDay(end);
+    if (from === null || to === null || from === to) {
         return false;
     }
-    if (start < end) {
-        return hour >= start && hour < end;
+    const at = now.getHours() * 60 + now.getMinutes();
+    if (from < to) {
+        return at >= from && at < to;
     }
-    return hour >= start || hour < end;
+    // The window wraps midnight, e.g. 22:00 -> 07:00.
+    return at >= from || at < to;
 }
 
 if (typeof module !== 'undefined' && module.exports) {

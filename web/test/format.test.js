@@ -57,3 +57,29 @@ test('isNight handles a window that wraps midnight', () => {
     assert.equal(isNight(new Date(2026, 0, 1, 6, 0), 22, 6), false);
     assert.equal(isNight(new Date(2026, 0, 1, 12, 0), 22, 6), false);
 });
+
+// The shape that actually ships: server/config.json spells night_start /
+// night_end as "HH:MM", and T1.2's payload carries night:{start,end} the same
+// way. Passing those strings to an hour-integer implementation returns false
+// for every hour of the day, silently, so the night profile never engages.
+test('isNight accepts the "HH:MM" strings the server config actually ships', () => {
+    assert.equal(isNight(new Date(2026, 0, 1, 23, 0), '22:00', '07:00'), true);
+    assert.equal(isNight(new Date(2026, 0, 1, 2, 0), '22:00', '07:00'), true);
+    assert.equal(isNight(new Date(2026, 0, 1, 6, 59), '22:00', '07:00'), true);
+    assert.equal(isNight(new Date(2026, 0, 1, 7, 0), '22:00', '07:00'), false);
+    assert.equal(isNight(new Date(2026, 0, 1, 12, 0), '22:00', '07:00'), false);
+});
+
+test('isNight honours minutes rather than rounding down to the hour', () => {
+    assert.equal(isNight(new Date(2026, 0, 1, 22, 15), '22:30', '07:00'), false);
+    assert.equal(isNight(new Date(2026, 0, 1, 22, 30), '22:30', '07:00'), true);
+    assert.equal(isNight(new Date(2026, 0, 1, 7, 29), '22:30', '07:30'), true);
+    assert.equal(isNight(new Date(2026, 0, 1, 7, 30), '22:30', '07:30'), false);
+});
+
+test('isNight returns false for an unparseable bound instead of guessing', () => {
+    assert.equal(isNight(new Date(2026, 0, 1, 23, 0), '22h00', '07:00'), false);
+    assert.equal(isNight(new Date(2026, 0, 1, 23, 0), '25:00', '07:00'), false);
+    assert.equal(isNight(new Date(2026, 0, 1, 23, 0), null, '07:00'), false);
+    assert.equal(isNight(new Date(2026, 0, 1, 23, 0), '22:00', '22:00'), false);
+});
