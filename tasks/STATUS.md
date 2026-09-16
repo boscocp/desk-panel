@@ -36,7 +36,7 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 |---|---|---|---|
 | T1.1 | Clock in plain HTML/JS | done | 2026-09-16. Brought from `harness/t1.1-accepted` |
 | TT.1 | Extract `format.js` + node:test | done | 2026-09-16. 11 tests, `node --test` green; purity grep passes |
-| T1.2 | `mock.js` fixtures | todo | Pairs with TT.1 |
+| T1.2 | `mock.js` fixtures | done | 2026-09-16. `app.js` now renders quotes/fx/crypto/weather/battery/stale via `format.js`; mock guarded behind `file:` + `__nativeBridge` check in `index.html` |
 
 ## Phase 2 — Android skeleton
 
