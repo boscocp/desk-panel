@@ -44,6 +44,14 @@ public class MainActivity extends Activity {
 
     private WebView webView;
 
+    /**
+     * Created once so its {@link PcState} survives a pause/resume pair: the
+     * panel has not changed its mind about the PC just because the Activity
+     * went away for a moment, and re-logging a marker it already logged would
+     * be a lie about a transition that never happened.
+     */
+    private PcPoller pcPoller;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -93,6 +101,26 @@ public class MainActivity extends Activity {
         enterImmersiveMode();
 
         webView.loadUrl(PANEL_URL);
+
+        // The panel's only network code, and it lives here rather than in the
+        // page: web/ never calls fetch (invariant 1). R.string.pc_host carries
+        // the address the build baked in from .env.
+        pcPoller = new PcPoller(getString(R.string.pc_host));
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        pcPoller.start();
+    }
+
+    @Override
+    protected void onPause() {
+        // Before super, so the loop is already down by the time the Activity is
+        // no longer foreground. A poller that outlives its Activity is a leak
+        // that bills itself to the battery rather than crashing.
+        pcPoller.stop();
+        super.onPause();
     }
 
     @Override
