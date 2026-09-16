@@ -43,10 +43,10 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 | # | Task | State | Notes |
 |---|---|---|---|
 | T2.1 | Minimal Gradle project in Java | done | 2026-09-16. Java app module (`dev.bosco.deskpanel`), `compileSdk`/`targetSdk 36`, `minSdk 26`, Java 17 bytecode. Gradle 9.7.1 + AGP 9.4.0, wrapper pinned with a `distributionSha256Sum`. Real wrapper lives in `android/` (`git update-index --chmod=+x android/gradlew` per the task); a thin root-level `./gradlew` delegates into it so the Makefile's bare `./gradlew` keeps working from the repo root. `assembleDebug` copies the APK to `out/` via `androidComponents.onVariants` + `afterEvaluate` (the `assemble<Variant>` task isn't registered yet inside `onVariants`). `MainActivity` is an empty `FrameLayout`; assets point at `../../web`, not a copy. Both acceptance commands exit 0 |
-| T2.2 | WebView + WebViewAssetLoader | todo | 🏁 **Milestone A** — first sign of life |
-| T2.3 | Keep screen on, landscape, immersive | todo | |
-| T7.1 | Release keystore and signing | todo | Moved here from phase 7 — see below |
-| T2.4 | MIUI smoke test: autostart, battery, reboot | todo | Deliberately early. Riskiest unknown |
+| T2.2 | WebView + WebViewAssetLoader | blocked | 2026-09-16. Needs the phone on adb: acceptance installs the APK and greps `dumpsys window`. Code not started |
+| T2.3 | Keep screen on, landscape, immersive | blocked | 2026-09-16. Needs the phone on adb: three `dumpsys` greps plus a 600s wakefulness check |
+| T7.1 | Release keystore and signing | blocked | 2026-09-16. Needs `keystore.properties` + `desk-panel.keystore`, created by a human — both hold signing passwords and are denied to agents. No adb needed despite the old header |
+| T2.4 | MIUI smoke test: autostart, battery, reboot | blocked | 2026-09-16. Needs the phone on adb: reboots it and asserts MIUI autostart, battery whitelist |
 
 ## Phase 3 — Python server (parallel with phase 2)
 
@@ -73,11 +73,11 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 | # | Task | State | Notes |
 |---|---|---|---|
 | T4.1 | `network_security_config.xml` | done | 2026-09-16. `res/xml/network_security_config.xml` grants cleartext to one `<domain-config>` and nothing else; no `base-config`, no `android:usesCleartextTraffic`. `includeSubdomains="false"` because a bare IP has no subdomains and the default would widen the exemption. Manifest gains `INTERNET` and `android:networkSecurityConfig` on `<application>`. Address is the agreed placeholder `192.168.1.100` — T3.5 (which reserves the real one) is still `todo`, and T7.3's acceptance requires exactly this literal in committed non-doc source, so the placeholder is the correct committed value either way; a comment in the file says what to change. All five acceptance commands exit 0. Verified past the greps: `aapt2` on `out/app-debug.apk` shows the manifest attribute resolving to `@0x7f010000` = `xml/network_security_config`, and the packaged binary XML decodes to the single pinned domain |
-| T4.2 | `PcPoller` | todo | |
+| T4.2 | `PcPoller` | blocked | 2026-09-16. Needs the phone on adb: all four criteria are `adb logcat` marker greps |
 | T4.3 | Wire to `onPcState()` + brightness | todo | 🏁 **Milestone B** — the product's soul |
 | T4.4 | Real screen sleep, replacing brightness zero | todo | Decides the ADR 0005 fallback |
 | TT.5 | `PcState` extracted + JVM tests | done | 2026-09-16. `PcState.java` is plain Java — no Android imports, no clock read internally, no threads, no sleeps: every time-aware method takes `nowMs` as an argument, so T4.2 can drive it unmodified. It owns the state (`UNKNOWN`/`ONLINE`/`OFFLINE`, starting `UNKNOWN` so the first probe either way is a transition), the consecutive-failure count, `nextIntervalMs()` (2000 online; 2000/4000/8000 doubling, capped at 15000 offline, reset on first success), and `nextProbeAtMs()`/`isDue()` so `PcPoller` can keep no deadline of its own. It decides *that* a transition happened and returns it; emitting `state=online`/`state=offline` stays on the Android side (TT.6). 16 JUnit tests; both acceptance commands exit 0 and `./gradlew test` finishes in seconds. The suite was checked against 10 mutations of `PcState` — flapping, deaf, stuck, uncapped backoff, no reset, flat backoff, backoff one rung too fast, `isDue` off by one, deadline ignoring the backoff, failures uncounted — and every one turned it red |
-| TT.6 | Logcat markers | todo | Silent prerequisite of the whole E2E suite |
+| TT.6 | Logcat markers | blocked | 2026-09-16. Needs the phone on adb: captures logcat and counts markers |
 
 ## Phase 5 — Real data
 
