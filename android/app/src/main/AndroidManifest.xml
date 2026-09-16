@@ -9,9 +9,30 @@
         android:label="Desk Panel"
         android:allowBackup="false"
         android:networkSecurityConfig="@xml/network_security_config">
+        <!-- sensorLandscape takes both landscape directions and refuses portrait,
+             so the panel can sit either way up depending on which side the cable
+             leaves the stand. It also ignores the system rotation lock, which is
+             what a panel wants. The no-action-bar theme is the third bar to go —
+             WindowInsetsControllerCompat hides the status and navigation bars but
+             not the activity's own title strip, and a dark window background keeps
+             the panel from flashing white before the WebView paints (T2.3).
+
+             No android:configChanges, and that is measured rather than assumed.
+             A 180 degree flip under sensorLandscape does NOT relaunch the activity:
+             `orientation` stays `land` and screenSize, screenLayout and
+             smallestScreenSize are all unchanged, so nothing the activity would
+             have to declare actually changes. Verified on the device: the pid
+             stayed 27861 across a flip from ROTATION_270 to ROTATION_90, and
+             `panel=rendered` stayed at one occurrence, meaning the WebView never
+             reloaded. Adding configChanges here would be configuration for a
+             problem that does not exist. If a future change makes the panel
+             portrait-capable, this stops being true and the detector is the same:
+             a second `panel=rendered` in logcat after a rotation. -->
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@android:style/Theme.Material.NoActionBar">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

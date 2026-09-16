@@ -1,53 +1,204 @@
+/* Neon desk panel, landscape.
+ *
+ * Sized for the real target: the Redmi Note 10's landscape WebView viewport is
+ * 872 x 392 CSS px (2400x1080 physical at 440dpi, once the display cutout is
+ * claimed - see T2.3). The page is exactly one screen: nothing scrolls, and
+ * every card clips its own content, so an extra ticker arriving from server
+ * config can never push a section off the bottom edge.
+ *
+ * Colours are custom properties on purpose. T6.4's night profile only has to
+ * redefine these, not hunt hex literals through the file.
+ */
+
+:root {
+    /* Palette - T6.1, second cut. The first was cyan on a violet-black; the
+     * user asked for purple leaning pink, then settled on these exact values.
+     *
+     * --ground is pure black, and that is not a taste call. This panel is an
+     * AMOLED showing one unchanging layout for hours, which is the burn-in
+     * case ADR 0008 and T6.2 exist for. At #000000 the pixel is off: it draws
+     * no power and there is nothing there to burn in. Do not "improve" it back
+     * to a tinted ground.
+     *
+     * --accent-dim is the accent desaturated, NOT darkened: it is the colour of
+     * the smallest text on the panel (date, row labels, card titles), read from
+     * about 50cm, so it needs more contrast than the clock rather than less. It
+     * measures 6.8:1 on black against the accent's 5.1:1. Secondary here means
+     * less saturated, never dimmer. */
+    --ground: #000000;      /* pure black: pixels physically off */
+    --accent: #D53FA7;      /* primary: clock, prices, weather */
+    --accent-dim: #BB81AA;  /* secondary: date, labels, titles, borders */
+
+    /* Gains and losses have to be told apart instantly from across a desk, on
+     * a panel that is otherwise entirely pink. Two shades of red would not do
+     * it, so up/down are separated three ways at once: hue (--up is the
+     * accent's exact complement, 138 deg against 318 deg), brightness (10.9:1
+     * against 6.1:1 on black), and the sign format.js already writes into the
+     * text. Any one of the three surviving is enough to read the panel. */
+    --up: #3FD56C;          /* gain: the accent's hue complement */
+    --down: #FF3D6E;        /* loss: the accent pushed toward red */
+
+    /* Derived, all from --accent. */
+    --rule: rgba(213, 63, 167, 0.38);
+    --rule-faint: rgba(213, 63, 167, 0.16);
+    --glow: rgba(213, 63, 167, 0.45);
+    --glow-dim: rgba(187, 129, 170, 0.35);
+
+    /* Condensed system stack, no webfont: the WebView has no network by
+     * design (ADR 0002), so anything fetched would simply fail to load.
+     * 'sans-serif-condensed' is Android's own alias for Roboto Condensed; the
+     * rest are the desktop equivalents for the browser check. */
+    --font: 'sans-serif-condensed', 'Roboto Condensed', 'Liberation Sans Narrow',
+            'DejaVu Sans Condensed', 'Arial Narrow', system-ui, sans-serif;
+}
+
+html {
+    height: 100%;
+    background-color: var(--ground);
+    /* WebView font boosting would silently inflate every size below. */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
+
 body {
-    background-color: #0A0118;
-    color: #00E5FF;
-    font-family: 'Courier New', Courier, monospace;
+    height: 100%;
     margin: 0;
-    padding: 2rem;
+    padding: 10px;
     box-sizing: border-box;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2rem;
+    overflow: hidden;
+
+    background-color: var(--ground);
+    color: var(--accent);
+    font-family: var(--font);
+    /* Without tabular figures every price jitters sideways on each update. */
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1;
+    user-select: none;
+
+    display: grid;
+    grid-template-columns: 296px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    gap: 12px;
+}
+
+/* --- Left column: clock, date, and the reserved strip ---------------------- */
+
+#sidebar {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
 }
 
 #clock-container {
-    text-align: center;
+    min-width: 0;
 }
 
+/* 60px, not larger: the clock must not be clipped by #sidebar even when the
+ * stack falls all the way through to a non-condensed fallback, which is ~4.5em
+ * wide for HH:MM:SS against the ~4.0em of Android's Roboto Condensed. It is
+ * still the first thing the eye lands on - two and a half times the next
+ * largest text on the panel, alone in its own column, and the only thing that
+ * glows. */
 #clock {
-    font-size: 10rem;
-    font-weight: bold;
+    font-size: 60px;
+    line-height: 1.2;
+    font-weight: 700;
+    letter-spacing: -0.005em;
+    color: var(--accent);
+    text-shadow: 0 0 16px var(--glow);
+    white-space: nowrap;
 }
 
 #date {
-    font-size: 2rem;
+    margin-top: 6px;
+    font-size: 20px;
+    line-height: 1.25;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent-dim);
 }
 
-#panel {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    align-items: flex-start;
-    gap: 1.5rem;
-    width: 100%;
+/* Reserved for the v2 shortcut buttons. Deliberately empty and invisible: it
+ * holds the space now so adding the buttons later is a fill, not a re-layout. */
+#shortcuts {
+    align-self: end;
+    min-height: 56px;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    gap: 8px;
 }
+
+/* --- Right of the clock: the data cards ----------------------------------- */
+
+#panel {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 224px;
+    /* Fractional rows, never auto: the three market cards and the two on the
+     * right always divide exactly the height available, whatever they hold. */
+    grid-template-rows: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+}
+
+#quotes  { grid-area: 1 / 1 / 2 / 2; }
+#fx      { grid-area: 2 / 1 / 3 / 2; }
+#crypto  { grid-area: 3 / 1 / 4 / 2; }
+#weather { grid-area: 1 / 2 / 3 / 3; }
+#battery { grid-area: 3 / 2 / 4 / 3; }
 
 .card-list,
 .card {
-    background: rgba(0, 229, 255, 0.05);
-    border: 1px solid #00E5FF;
-    border-radius: 8px;
-    padding: 1rem;
-    min-width: 14rem;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    box-sizing: border-box;
+    padding: 5px 10px 5px 11px;
+    border: 1px solid var(--rule);
+    border-left: 2px solid var(--accent);
+    border-radius: 3px;
+    /* No fill. Every pixel inside a card that is not a glyph or a rule stays
+     * at --ground, which on this AMOLED means switched off. */
+    background: var(--ground);
+    display: flex;
+    flex-direction: column;
 }
+
+/* Card titles come from CSS, not markup: app.js clears each section with
+ * textContent = '' on every update, which would take a real element with it. */
+.card-list::before,
+.card::before {
+    flex: 0 0 auto;
+    font-size: 20px;
+    line-height: 1.2;
+    /* Wide tracking at 11px read as a label. At 20px it reads as a gap, and
+     * WEATHER stops fitting its card, so it comes back in. */
+    letter-spacing: 0.14em;
+    color: var(--accent-dim);
+    margin-bottom: 3px;
+}
+
+#quotes::before  { content: 'B3'; }
+#fx::before      { content: 'FX'; }
+#crypto::before  { content: 'CRYPTO'; }
+#weather::before { content: 'WEATHER'; }
+#battery::before { content: 'DEVICE'; }
 
 .row {
     display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.25rem 0;
+    align-items: baseline;
+    gap: 10px;
+    padding: 3px 0;
+    font-size: 20px;
+    line-height: 1.24;
+}
+
+.row + .row {
+    border-top: 1px solid var(--rule-faint);
 }
 
 .row .label {
@@ -56,6 +207,8 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    letter-spacing: 0.04em;
+    color: var(--accent-dim);
 }
 
 .row .price,
@@ -64,22 +217,63 @@ body {
     white-space: nowrap;
 }
 
+.row .price {
+    color: var(--accent);
+    font-weight: 700;
+}
+
+.row .change {
+    min-width: 4.4em;
+    text-align: right;
+}
+
 .change.up {
-    color: #39FF14;
+    color: var(--up);
 }
 
 .change.down {
-    color: #FF3860;
+    color: var(--down);
 }
 
 .change.flat {
-    color: #00E5FF;
+    color: var(--accent-dim);
 }
 
+/* Weather and battery hold a single line of text from app.js, not .row
+ * elements, so they are styled through the section itself. */
+
+/* The one div app.js appends, centred in whatever room is left under the
+ * title. auto margins only ever share out positive free space, so a long
+ * forecast still starts at the top instead of being pushed out of the card. */
+.card > div {
+    margin-top: auto;
+    margin-bottom: auto;
+}
+
+#weather {
+    font-size: 24px;
+    line-height: 1.32;
+    letter-spacing: 0.01em;
+    color: var(--accent);
+}
+
+#battery {
+    font-size: 20px;
+    line-height: 1.3;
+    color: var(--accent-dim);
+}
+
+/* STALE is a warning, so it takes --down rather than the accent: it must not
+ * read as just another pink label. */
 #stale-badge {
-    background: #FF3860;
-    color: #0A0118;
-    font-weight: bold;
-    padding: 0.25rem 0.75rem;
-    border-radius: 4px;
+    position: absolute;
+    top: 0;
+    right: 0;
+    background: var(--down);
+    color: var(--ground);
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    padding: 0 7px;
+    border-radius: 0 3px 0 3px;
 }
