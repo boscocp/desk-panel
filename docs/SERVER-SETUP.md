@@ -1,7 +1,20 @@
-# Server setup (Windows)
+# Server setup
 
 The server is one Python file using only the standard library. No pip, no virtualenv. It runs
-on a clean Windows box with Python installed and nothing else.
+on a clean box with Python 3.11 or newer installed and nothing else.
+
+Windows is the primary host and the one that is verified day to day; Linux and macOS follow the
+same contract, stated per OS in [ADR 0010](adr/0010-login-signal-is-session-scoped.md). Whatever
+the OS, the rule is the same one:
+
+> The server is launched by, and dies with, the **graphical session of a specific human user**.
+> It is never reachable from a supervisor of system scope, and never from a session that a human
+> did not start by logging in at the screen.
+
+That is not a preference about tidiness. The phone holds its screen on exactly while the server
+answers, so anything that answers without a login — a Windows Service, a systemd **system**
+unit, a LaunchDaemon, an `@reboot` entry, a Docker container, or a systemd **user** unit reached
+from `default.target` — lights the panel for an empty room and looks like a phone bug.
 
 ## Configuration
 
@@ -16,8 +29,13 @@ Edit it: tickers, city, brapi token, port. `config.json` is gitignored and never
 
 ```bash
 python server/server.py
-curl http://localhost:8777/ping
+python server/probe.py --host 127.0.0.1 --expect up
 ```
+
+`probe.py` rather than `curl`: in PowerShell `curl` is an alias for `Invoke-WebRequest`, which
+does not understand `-sf` and exits 0 on flags it ignores. The probe behaves identically in
+`cmd`, PowerShell, bash and fish, and turns the answer into an exit code — 0 when reality
+matched `--expect`, 1 when it did not, 2 when the probe itself could not tell.
 
 ## Install the Scheduled Task
 
@@ -67,25 +85,63 @@ The real test is not `localhost`. Reboot, log in, wait a minute, then from **ano
 the LAN**:
 
 ```bash
-curl http://<pc-ip>:8777/ping
+python server/probe.py --host <pc-ip> --expect up
 ```
 
 A firewall prompt that never appears when testing locally will appear here. That is the point.
 
+Then lock the screen, or log out, and probe again from the same device:
+
+```bash
+python server/probe.py --host <pc-ip> --expect down
+```
+
+Logging out must make it exit 0. If it does not, the launcher is of system scope and the panel
+will stay lit with nobody there.
+
 ## Linux
 
-`install_task.ps1` is Windows-only by nature. The Linux equivalent is a systemd **user** unit —
-but bound to `graphical-session.target`, not `default.target`, and with `PartOf=` as well as
-`WantedBy=`. Installed by `server/install_user_unit.sh` (T3.9).
+`install_task.ps1` is Windows-only by nature. The Linux carrier is a systemd **user** unit,
+installed by `server/install_user_unit.sh` (T3.9) into `~/.config/systemd/user/`. Three fields
+are the invariant, and none of them is optional:
 
-This document used to recommend `WantedBy=default.target` and call it equivalent. It is not.
-With `loginctl enable-linger` on, the user manager starts at boot with nobody logged in and
-reaches `default.target`, so the server would answer at the greeter — the exact failure the
-"never a Windows Service" rule exists to prevent. An SSH session reaches it too, even with
-lingering off. `PartOf=` matters for the other end: without it the unit survives logout,
-because logind defaults to `KillUserProcesses=no`.
+```ini
+[Unit]
+PartOf=graphical-session.target
+After=graphical-session.target
 
-Full reasoning in [ADR 0010](adr/0010-login-signal-is-session-scoped.md).
+[Service]
+Type=exec
+ExecStart=/usr/bin/python3 %h/desk-panel/server/server.py
+
+[Install]
+WantedBy=graphical-session.target
+```
+
+- **`WantedBy=graphical-session.target`**, never `default.target`. This document used to
+  recommend `default.target` and call it equivalent. It is not. With `loginctl enable-linger`
+  on — commonly switched on for unrelated reasons, podman or pipewire or user timers — the user
+  manager starts at boot with nobody logged in and reaches `default.target`, so the server would
+  answer at the greeter. An SSH session reaches it too, even with lingering off.
+- **`PartOf=graphical-session.target`.** `WantedBy=` starts the unit; it does not stop it. With
+  logind's default `KillUserProcesses=no`, a `WantedBy`-only unit survives logout and keeps
+  answering. `PartOf=` is what makes logging out mean something.
+- **`Type=exec`**, so systemd considers the unit started when the process is actually executing
+  rather than merely forked.
+
+Enable it without starting it, and let the next login start it:
+
+```bash
+systemctl --user enable desk-panel.service
+```
+
+Never `systemctl enable` without `--user`, never `sudo systemctl enable`, and never
+`docker compose up` for the server. The toolchain is containerised (ADR 0003) and the reflex is
+close at hand; a container answers with nobody logged in at all.
+
+Lingering does **not** have to be off. Binding to `graphical-session.target` makes the invariant
+hold either way, and the verifier below proves the stronger property directly: the unit is not
+in the transitive closure of `default.target`.
 
 There is no firewall step here. Desktop distros usually ship no inbound filter, and when they
 do it is firewalld *or* ufw *or* nftables — T3.9 detects and instructs rather than configuring.
@@ -95,3 +151,43 @@ do it is firewalld *or* ufw *or* nftables — T3.9 detects and instructs rather 
 A LaunchAgent in `~/Library/LaunchAgents` with `LimitLoadToSessionType = Aqua` (T3.10). Never a
 LaunchDaemon, and never `/Library/LaunchAgents`. Written but **unverified** — there is no Mac
 to run it on, and the task is `blocked` rather than pretending otherwise.
+
+## Verifying the login scope
+
+`probe.py` proves the server answers. It cannot prove *why* it answers, and a Windows Service
+answers just as cheerfully as a Scheduled Task. `server/verify_login_scope.py` is the check for
+the "why": run it on the host, as the user who owns the session.
+
+```bash
+python server/verify_login_scope.py
+```
+
+On the current OS it asserts that a session-scoped autostart entry exists and carries the fields
+[ADR 0010](adr/0010-login-signal-is-session-scoped.md) names, that **no** system-scoped
+equivalent exists alongside it, that auto-login is off, and that it is not running under WSL or
+inside a container.
+
+| Exit | Meaning |
+|---|---|
+| 0 | every check passed |
+| 1 | at least one check failed — the invariant is broken on this machine |
+| 2 | at least one check could not be determined |
+
+**2 is not "probably fine".** A verifier that exits 0 when it could not look is worse than no
+verifier, because what it exists to catch shows up as "the panel is lit while nobody is logged
+in" — which nobody reads as a misconfigured launcher. So every check fails closed: a missing
+command, an unreadable file or unexpected output all report *unknown*, never *pass*.
+
+Auto-login is reported, not solved. No launcher can fix it: the session starts with nobody
+present, and the signal degrades to "the machine is powered on" — which is what
+[ADR 0004](adr/0004-server-is-login-signal-and-proxy.md) rejects on its first page.
+
+Every check in that tool is a pure function over captured text, with the command execution in a
+thin shell around it. So the parsers themselves can be checked anywhere, on any OS, against
+real captured output in `server/fixtures/login_scope/`:
+
+```bash
+python server/verify_login_scope.py --self-test
+```
+
+That is how the macOS checks are tested without a Mac (TT.10).

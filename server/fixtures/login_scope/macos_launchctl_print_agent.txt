@@ -1,0 +1,45 @@
+dev.bosco.deskpanel = {
+	active count = 1
+	path = /Users/bosco/Library/LaunchAgents/dev.bosco.deskpanel.plist
+	type = LaunchAgent
+	state = running
+
+	program = /usr/bin/python3
+
+	arguments = {
+		/usr/bin/python3
+		/Users/bosco/desk-panel/server/server.py
+	}
+
+	default environment = {
+		PATH => /usr/bin:/bin:/usr/sbin:/sbin
+	}
+
+	environment = {
+		XPC_SERVICE_NAME => dev.bosco.deskpanel
+	}
+
+	domain = gui/501 [100005]
+	minimum runtime = 10
+	exit timeout = 5
+	runs = 1
+	pid = 4213
+	immediate reason = speculative
+	forks = 0
+	execs = 1
+	initialized = 1
+	trampolined = 1
+	started suspended = 0
+	proxies suspended = 0
+	last exit code = (never exited)
+
+	spawn type = daemon (3)
+	jetsam priority = 40
+	jetsam memory limit (active) = (unlimited)
+	jetsam memory limit (inactive) = (unlimited)
+	jetsamproperties category = daemon
+	jetsam thread limit = 32
+	cpumon = default
+
+	properties = keepalive | runatload | inferred program
+}
