@@ -41,16 +41,66 @@ the APK are the files in the repo — there is no copy step and no sync step. Ed
 
 ## Signing
 
-Create a release keystore once and keep it out of git:
+Create a release keystore once, at the repository root, and keep it out of git:
 
 ```bash
 keytool -genkeypair -v -keystore desk-panel.keystore \
   -alias desk-panel -keyalg RSA -keysize 2048 -validity 10000
 ```
 
-Put the path and passwords in `keystore.properties` (gitignored, and read by
-`build.gradle.kts`). `.gitignore` already covers `*.keystore`, `*.jks` and
-`keystore.properties`.
+Put the path and the passwords in `keystore.properties`, also at the repository root:
+
+```properties
+storeFile=../desk-panel.keystore
+storePassword=…
+keyAlias=desk-panel
+keyPassword=…
+```
+
+`storeFile` is resolved against the Gradle root, which is `android/` — so the keystore sitting
+beside `keystore.properties` at the repository root is `../desk-panel.keystore`. A path that
+resolves from the `android/app/` module is accepted too; the build tries the Gradle root first
+and falls back to the module.
+
+`.gitignore` already covers `*.keystore`, `*.jks` and `keystore.properties`. Verify rather than
+assume — a password in the history is not something a later commit can remove, and this repo
+goes public eventually:
+
+```bash
+git check-ignore -q keystore.properties
+git check-ignore -q desk-panel.keystore
+! git ls-files | grep -qiE '\.(keystore|jks)$|^keystore\.properties$'
+```
+
+**Back the keystore up somewhere outside the repository.** Losing it means never being able to
+update this install again — only an uninstall, which throws away the device state.
+
+### Building a release
+
+```bash
+docker compose -f docker/compose.yml run --rm build ./gradlew assembleRelease
+```
+
+The APK lands at `out/desk-panel-release.apk` (debug keeps its own name, `out/app-debug.apk`,
+because the server and the E2E suite look for it there).
+
+Confirm it really carries the release key — a build that silently fell back to debug signing
+still produces an APK at the right path:
+
+```bash
+docker compose -f docker/compose.yml run --rm build \
+  sh -lc '$ANDROID_HOME/build-tools/36.0.0/apksigner verify --print-certs out/desk-panel-release.apk'
+```
+
+The certificate DN is the one entered into `keytool`. `C=US, O=Android, CN=Android Debug` means
+the fallback below kicked in.
+
+### When `keystore.properties` is absent
+
+It is gitignored, so it is missing on every fresh clone and in CI. There the release build
+**falls back to the debug key** rather than failing, so a clone still builds and
+`assembleRelease` still exits 0. The resulting APK is not installable over one signed with the
+release key — only the machine holding the keystore can produce that.
 
 **Use the release keystore from the start, including for local builds.** Alternating between
 the debug key and a release key makes Android refuse to install over the existing app, and the

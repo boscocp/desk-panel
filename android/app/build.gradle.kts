@@ -1,7 +1,18 @@
 import com.android.build.api.artifact.SingleArtifact
+import java.util.Properties
 
 plugins {
     id("com.android.application")
+}
+
+// Signing material for release builds. The file sits at the repository root and
+// is gitignored along with the keystore itself, so it is absent on a fresh clone
+// and in CI — see the fallback in buildTypes below.
+val keystorePropertiesFile = rootProject.file("../keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) {
+        keystorePropertiesFile.inputStream().use { load(it) }
+    }
 }
 
 android {
@@ -31,6 +42,36 @@ android {
     // T7.3's pre-public review exists to catch. The panel loads only
     // index.html, css/ and js/, so nothing else belongs in there.
     androidResources.ignoreAssetsPatterns += listOf("test", "*.test.js", ".gitkeep")
+
+    // A stable release key from the very first install: Android refuses to
+    // install an APK signed with a different key over an existing one, and the
+    // only way out is an uninstall, which throws away the MIUI permissions and
+    // device state T2.4 grants by hand. See docs/BUILD.md.
+    if (keystorePropertiesFile.exists()) {
+        signingConfigs.create("release") {
+            // storeFile is resolved against the Gradle root (android/), so the
+            // keystore sitting next to keystore.properties at the repository
+            // root is `../desk-panel.keystore`. A path that only resolves from
+            // this module is accepted too, so either spelling works.
+            val storeFilePath = keystoreProperties.getProperty("storeFile")
+            storeFile = rootProject.file(storeFilePath).takeIf { it.exists() }
+                ?: file(storeFilePath)
+            storePassword = keystoreProperties.getProperty("storePassword")
+            keyAlias = keystoreProperties.getProperty("keyAlias")
+            keyPassword = keystoreProperties.getProperty("keyPassword")
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            // No keystore.properties means a fresh clone or CI. Fall back to the
+            // debug key so `assembleRelease` still produces an APK there instead
+            // of failing the build; only the machine holding the keystore can
+            // produce an installable-over-the-top release.
+            signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.getByName("debug")
+        }
+    }
 }
 
 dependencies {
@@ -49,6 +90,13 @@ androidComponents {
         val copyApk = tasks.register<Copy>("copy${variantName}ApkToOut") {
             from(variant.artifacts.get(SingleArtifact.APK))
             into(rootProject.file("../out"))
+            // The release APK is the one a human installs and the server offers,
+            // so it gets a product-shaped name. Debug keeps app-debug.apk, which
+            // T3.6 and the server already look for. The regex is anchored so the
+            // output-metadata.json sitting beside it is left alone.
+            if (variant.name == "release") {
+                rename("""^app-release\.apk$""", "desk-panel-release.apk")
+            }
         }
         project.afterEvaluate {
             tasks.named("assemble$variantName") {
