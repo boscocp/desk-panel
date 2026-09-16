@@ -43,7 +43,7 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 | # | Task | State | Notes |
 |---|---|---|---|
 | T2.1 | Minimal Gradle project in Java | done | 2026-09-16. Java app module (`dev.bosco.deskpanel`), `compileSdk`/`targetSdk 36`, `minSdk 26`, Java 17 bytecode. Gradle 9.7.1 + AGP 9.4.0, wrapper pinned with a `distributionSha256Sum`. Real wrapper lives in `android/` (`git update-index --chmod=+x android/gradlew` per the task); a thin root-level `./gradlew` delegates into it so the Makefile's bare `./gradlew` keeps working from the repo root. `assembleDebug` copies the APK to `out/` via `androidComponents.onVariants` + `afterEvaluate` (the `assemble<Variant>` task isn't registered yet inside `onVariants`). `MainActivity` is an empty `FrameLayout`; assets point at `../../web`, not a copy. Both acceptance commands exit 0 |
-| T2.2 | WebView + WebViewAssetLoader | blocked | 2026-09-16. Needs the phone on adb: acceptance installs the APK and greps `dumpsys window`. Code not started |
+| T2.2 | WebView + WebViewAssetLoader | blocked | 2026-09-16. **Code is complete and builds; blocked on a MIUI device toggle, not on code.** `MainActivity` serves `web/` through `WebViewAssetLoader` at `https://appassets.androidplatform.net/assets/index.html` with `MIXED_CONTENT_NEVER_ALLOW` and `androidx.webkit:webkit:1.12.1`. The four commands that need no phone are green: `assembleRelease`, `test -f out/desk-panel-release.apk`, `./gradlew test`, `make lint-tasks`. Verified past the greps without the device — `classes.dex` carries `WebViewAssetLoader`, `WebViewClientCompat` and the literal panel URL, and the APK packages exactly the 5 intended assets. **The install cannot proceed**: `adb install -r` returns `INSTALL_FAILED_USER_RESTRICTED` immediately and device-side `pm install` hangs on a confirmation dialog nobody can see, because the phone sits at `mWakefulness=Dozing` with an AOD window focused and `adb shell input keyevent` is silently ignored — simulated input and adb installs are gated by the *same* MIUI switch, so both dying together identifies it. A human must enable Developer options → **"USB debugging (Security settings)"** and **"Install via USB"** (the first needs a signed-in Xiaomi account), unlock the screen, and tap MIUI's install confirmation. `install_non_market_apps` is already `1`, so generic unknown-sources is not the blocker. Nothing was left on the device: the one pushed APK was removed and no package is installed. The acceptance block was rewritten — see the correction section in the task file, and the note below |
 | T2.3 | Keep screen on, landscape, immersive | blocked | 2026-09-16. Needs the phone on adb: three `dumpsys` greps plus a 600s wakefulness check |
 | T7.1 | Release keystore and signing | done | 2026-09-16. Keystore created by a human; `build.gradle.kts` reads `keystore.properties` and signs `release`, falling back to the debug key when the file is absent so a fresh clone still builds. APK at `out/desk-panel-release.apk`; `apksigner --print-certs` confirms the release DN, not `CN=Android Debug`. All six acceptance commands exit 0. Install-over check still manual |
 | T2.4 | MIUI smoke test: autostart, battery, reboot | blocked | 2026-09-16. Needs the phone on adb: reboots it and asserts MIUI autostart, battery whitelist |
@@ -156,6 +156,24 @@ phase 7, after T2.4 has already installed a debug-signed APK. Android refuses to
 differently-signed APK over an existing one, so the only way out is an uninstall, which throws
 away the device state and every MIUI permission T2.4 spent a session granting. That is exactly
 what T7.1 exists to prevent, and the old ordering guaranteed it.
+
+Moving the row was not enough, though: T7.1 landing also invalidated **T2.2's acceptance
+block**, and nothing reported it — the same failure mode as "Nothing re-runs an earlier task's
+acceptance" above, running forwards instead of backwards. A task marked `todo` can be quietly
+broken by a task that lands before it, and there is no check for that either. T2.2's block
+asked for `out/desk-panel-debug.apk`, a path the build stopped producing when T7.1 gave only
+the release artefact a product name, and it installed the debug APK, which is precisely the
+debug-first install this section exists to prevent. Both were rewritten during T2.2; the task
+file carries the detail.
+
+The third defect found there was older than T7.1 and unrelated to it: the block ran
+`adb install` and then grepped `dumpsys window` for `mCurrentFocus.*dev.bosco.deskpanel`,
+without ever starting the Activity. `adb install` launches nothing, so that line was asserting
+against whatever happened to be foreground — it would have passed with the app installed and
+never run, and failed for someone whose launcher happened to be showing. An acceptance command
+can exit 0 for reasons that have nothing to do with the task; that one had been sitting in the
+file since T0.5's remediation pass, which converted prose criteria into commands but could not
+tell whether the resulting command measured the right thing.
 
 ## Shortest path to seeing something work
 

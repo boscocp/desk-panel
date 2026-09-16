@@ -75,6 +75,12 @@ android {
 }
 
 dependencies {
+    // WebViewAssetLoader + WebViewClientCompat: they serve web/ over the
+    // https://appassets.androidplatform.net/ origin, which is what makes the
+    // panel a secure context. Without it the only option is file://, which
+    // is not (T2.2).
+    implementation("androidx.webkit:webkit:1.12.1")
+
     // JVM unit tests only — PcState and friends are plain Java with no Android
     // imports precisely so `./gradlew test` covers them without a device.
     testImplementation("junit:junit:4.13.2")
