@@ -34,9 +34,9 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 
 | # | Task | State | Notes |
 |---|---|---|---|
-| T1.1 | Clock in plain HTML/JS | todo | Independent of T0.1 — can be done today |
-| T1.2 | `mock.js` fixtures | todo | |
-| TT.1 | Extract `format.js` + node:test | todo | Pairs with T1.2 |
+| T1.1 | Clock in plain HTML/JS | done | 2026-09-16. Brought from `harness/t1.1-accepted` |
+| TT.1 | Extract `format.js` + node:test | todo | ⬅ **before T1.2**, not after — see below |
+| T1.2 | `mock.js` fixtures | todo | Pairs with TT.1 |
 
 ## Phase 2 — Android skeleton
 
@@ -106,6 +106,17 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 | T7.3 | Pre-public review: secrets, README, screenshots | todo | Before flipping the repo public |
 | TT.8 | `e2e/run_e2e.py`, five scenarios | todo | Needs TT.6 |
 | TT.9 | CI workflow | todo | |
+
+## Why TT.1 runs before T1.2
+
+The table used to list T1.2 before TT.1. T1.2's acceptance ends with
+`node --test "web/test/**/*.test.js"`, and the only thing that ever writes a file matching that
+glob is **TT.1**. Run in the table's order, T1.2's last line fails on an empty glob and the task
+can never go green — through no fault of its own implementation.
+
+TT.1's own prereq is T1.1, not T1.2, so nothing is lost by swapping them: `format.js` is
+extracted from the clock code, and `mock.js` then feeds the payload through functions that are
+already under test.
 
 ## Why T7.1 sits in phase 2
 
