@@ -52,19 +52,19 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 
 | # | Task | State | Notes |
 |---|---|---|---|
-| T3.1 | `/ping` | todo | Independent of T0.1 |
-| T3.2 | Config loading | todo | |
+| T3.1 | `/ping` | blocked | 2026-09-16. Code is complete and was green when it landed; T3.2 then made a missing `config.json` fatal, so `probe.py --serve` now exits 2. Same `cp` unblocks it — see below |
+| T3.2 | Config loading | blocked | 2026-09-16. `load_config(path)` in `server/server.py`: defaults for missing keys, `ConfigError` for malformed JSON, hard fail (exit 1, message points at `config.example.json`) when the file is absent — deliberately, per the task's own guidance against a silently-empty start. 3 of 4 acceptance commands pass; `probe.py --serve --expect up` fails in this checkout because `server/config.json` (gitignored, per-machine) does not exist here and creating it is outside what this session is permitted to touch. Needs a human to `cp server/config.example.json server/config.json` once (`docs/SERVER-SETUP.md`), then re-run |
 | T3.3 | `/quotes` proxy | todo | ⚠️ Subtask 0: confirm brapi FX and crypto endpoints |
 | T3.4 | `/weather` proxy | todo | |
 | T3.5 | Login-scoped autostart: contract + `probe.py` | todo | Platform-neutral. Rewritten — see ADR 0010 |
 | T3.8 | Windows: Scheduled Task, firewall, static IP | todo | Primary platform. Tested from the LAN |
 | T3.9 | Linux: systemd user unit (graphical-session) | todo | Dev box. Beware `Linger=yes` |
 | T3.10 | macOS: LaunchAgent | blocked | No Mac. Plist and docs ship anyway |
-| T3.11 | Server portability hardening | todo | UTF-8, cwd, `allow_reuse_address` — Windows bugs |
+| T3.11 | Server portability hardening | done | 2026-09-16. `config_search_paths()` (`--config` → `DESK_PANEL_CONFIG` → `script_dir/config.json`, cwd-independent), `config_permission_warning()` (POSIX-only, warns not refuses), `check_python_version()` (3.11 floor), `Server(HTTPServer)` with `allow_reuse_address = os.name != "nt"`, `--check-only` and `--log-file` flags, explicit UTF-8 everywhere. All 5 acceptance commands exit 0 |
 | T3.6 | Serve the APK at `/app` | todo | |
 | T3.7 | `POST /action/{id}` stub returning 501 | todo | v2 placeholder |
-| TT.2 | Server unit tests + fixtures | todo | Pairs with T3.3, T3.4 |
-| TT.3 | Two HTTP integration tests on port 0 | todo | |
+| TT.2 | Server unit tests + fixtures | blocked | 2026-09-16. 32 tests, all green, no network. Covers every pure function that exists today: `load_config` (extended with the non-dict-JSON branch), `route`, `config_search_paths`, `config_permission_warning`, `check_python_version`, and a new `_allow_reuse_address(os_name)` extracted from `Server` so both platform branches are reachable without reloading the module (reloading under a patched `os.name` crashes on `Path(__file__).resolve()`). Fixtures and normalise/cache/stale-fallback tests are NOT done: `providers_brapi.py`/`providers_openmeteo.py` don't exist yet (T3.3/T3.4 are still `todo`), so there is no outbound call to patch and no real upstream shape to record a fixture from. Re-open once T3.3/T3.4 land |
+| TT.3 | Two HTTP integration tests on port 0 | blocked | 2026-09-16. `server/tests/test_http.py`: `Server(("127.0.0.1", 0), Handler)` on a daemon thread, real `http.client` round trips, shut down and joined in `tearDownClass`. `GET /ping` (status, `Content-Type`, `Content-Length`, body bytes) and `GET /nonexistent` (404) are covered. `GET /quotes` (step 5) and `POST /action/x` → 501 (step 6) are NOT covered: `route()` in `server/server.py` still only handles `GET /ping`, so T3.3 ("`/quotes` proxy") and T3.7 ("`POST /action/{id}` stub") haven't landed and there is nothing to hit — `POST /action/x` still falls through to 404 today. Re-open once T3.3/T3.7 land, same pattern as TT.2. `python -m unittest discover -s server/tests -t .` exits 0, twice in a row, no port conflicts |
 | TT.4 | Contract tests, opt-in | todo | |
 | TT.10 | Login-scope verifier tests, from fixtures | todo | Makes T3.10 checkable without a Mac |
 
@@ -106,6 +106,36 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 | T7.3 | Pre-public review: secrets, README, screenshots | todo | Before flipping the repo public |
 | TT.8 | `e2e/run_e2e.py`, five scenarios | todo | Needs TT.6 |
 | TT.9 | CI workflow | todo | |
+
+## Nothing re-runs an earlier task's acceptance
+
+T3.1 was accepted with both its commands exiting 0. T3.2 then landed the hard fail on a missing
+`config.json`, and T3.1's `probe.py --serve --expect up` started exiting 2 — without a line of
+T3.1's own code changing, and without anything reporting it. It was found only because a
+verifier was pointed at the whole branch rather than at one task.
+
+That is a gap in the workflow, not bad luck. `/task` runs a task's acceptance once, at the
+moment that task is executed, and nothing ever runs it again. `make check` runs the **test
+suites**, not the `## Acceptance` blocks, so a later task can silently invalidate an earlier
+task's criterion and the index will keep saying `done`.
+
+Worth a task of its own: a `make verify-accepted` that re-runs the acceptance block of every row
+marked `done` and fails on the first non-zero exit. Until that exists, treat `done` as "passed
+once", not as "passes now".
+
+## Why `probe.py` moved from T3.5 to T3.1
+
+T3.1 declared `Prereqs: none` and `Files: server/server.py`, but both of its acceptance
+commands run `server/probe.py` — a T3.5 deliverable. T3.5 declared `Prereqs: T3.1, T3.2`. So
+T3.1 needed T3.5 needed T3.1, and neither could go first.
+
+`scripts/check_status.py` detects prereq cycles and did not catch this one: it compares
+**declared** prereqs, and this cycle ran through an **acceptance command** instead. Worth
+remembering — the same shape is what made T1.2 unrunnable before TT.1.
+
+`probe.py` is a generic HTTP probe that knows nothing about login scope, and ten task files call
+it. It belongs with its first caller. T3.5 keeps `verify_login_scope.py`, which really is part
+of the login-scope contract.
 
 ## Why TT.1 runs before T1.2
 
