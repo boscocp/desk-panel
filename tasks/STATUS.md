@@ -60,7 +60,7 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 | T3.8 | Windows: Scheduled Task, firewall, static IP | todo | Primary platform. Tested from the LAN |
 | T3.9 | Linux: systemd user unit (graphical-session) | todo | Dev box. Beware `Linger=yes` |
 | T3.10 | macOS: LaunchAgent | blocked | No Mac. Plist and docs ship anyway |
-| T3.11 | Server portability hardening | todo | UTF-8, cwd, `allow_reuse_address` — Windows bugs |
+| T3.11 | Server portability hardening | done | 2026-09-16. `config_search_paths()` (`--config` → `DESK_PANEL_CONFIG` → `script_dir/config.json`, cwd-independent), `config_permission_warning()` (POSIX-only, warns not refuses), `check_python_version()` (3.11 floor), `Server(HTTPServer)` with `allow_reuse_address = os.name != "nt"`, `--check-only` and `--log-file` flags, explicit UTF-8 everywhere. All 5 acceptance commands exit 0 |
 | T3.6 | Serve the APK at `/app` | todo | |
 | T3.7 | `POST /action/{id}` stub returning 501 | todo | v2 placeholder |
 | TT.2 | Server unit tests + fixtures | todo | Pairs with T3.3, T3.4 |
