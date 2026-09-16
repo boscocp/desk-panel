@@ -52,7 +52,7 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 
 | # | Task | State | Notes |
 |---|---|---|---|
-| T3.1 | `/ping` | todo | Independent of T0.1. Now also ships `probe.py` — see below |
+| T3.1 | `/ping` | done | 2026-09-16. `server/server.py` (`/ping` + 404) and `server/probe.py` (stdlib-only HTTP probe, `--serve` starts/stops the server). Both acceptance commands exit 0 |
 | T3.2 | Config loading | todo | |
 | T3.3 | `/quotes` proxy | todo | ⚠️ Subtask 0: confirm brapi FX and crypto endpoints |
 | T3.4 | `/weather` proxy | todo | |
