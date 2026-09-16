@@ -1,0 +1,29 @@
+graphical-session.target
+● ├─app-geoclue\x2ddemo\x2dagent@autostart.service
+● ├─at-spi-dbus-bus.service
+● ├─gvfs-daemon.service
+● ├─gvfs-metadata.service
+● ├─gvfs-udisks2-volume-monitor.service
+● ├─xdg-desktop-portal-gtk.service
+● ├─xdg-desktop-portal.service
+● ├─xdg-document-portal.service
+● ├─xdg-permission-store.service
+● └─basic.target
+●   ├─paths.target
+●   ├─sockets.target
+●   │ ├─dbus.socket
+●   │ ├─dirmngr.socket
+●   │ ├─gpg-agent-browser.socket
+●   │ ├─gpg-agent-extra.socket
+●   │ ├─gpg-agent-ssh.socket
+●   │ ├─gpg-agent.socket
+●   │ ├─keyboxd.socket
+●   │ ├─p11-kit-server.socket
+●   │ ├─pipewire-pulse.socket
+●   │ ├─pipewire.socket
+●   │ ├─systemd-ask-password.socket
+●   │ ├─systemd-importd.socket
+●   │ ├─systemd-journalctl.socket
+●   │ ├─systemd-machined.socket
+●   │ └─systemd-storage-fs.socket
+●   └─timers.target

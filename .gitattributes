@@ -13,3 +13,7 @@
 gradlew text eol=lf
 *.sh    text eol=lf
 *.bat   text eol=crlf
+
+# Captured tool output, kept byte for byte. A Windows fixture normalised to LF
+# is no longer the text the parser will meet on a Windows box.
+server/fixtures/login_scope/** -text

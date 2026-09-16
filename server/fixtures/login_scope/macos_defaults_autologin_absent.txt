@@ -1,0 +1,1 @@
+The domain/default pair of (/Library/Preferences/com.apple.loginwindow, autoLoginUser) does not exist
