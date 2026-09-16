@@ -57,7 +57,7 @@ body {
     user-select: none;
 
     display: grid;
-    grid-template-columns: 288px minmax(0, 1fr);
+    grid-template-columns: 296px minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
     gap: 12px;
 }
@@ -76,9 +76,12 @@ body {
     min-width: 0;
 }
 
+/* 60px, not larger: the clock must not be clipped by #sidebar even when the
+ * stack falls all the way through to a non-condensed fallback, which is ~4.5em
+ * wide for HH:MM:SS against the ~4.0em of Android's Roboto Condensed. */
 #clock {
-    font-size: 64px;
-    line-height: 1.15;
+    font-size: 60px;
+    line-height: 1.2;
     font-weight: 700;
     letter-spacing: -0.005em;
     text-shadow: 0 0 16px var(--glow-cyan);
@@ -112,7 +115,7 @@ body {
     min-width: 0;
     min-height: 0;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 228px;
+    grid-template-columns: minmax(0, 1fr) 224px;
     /* Fractional rows, never auto: the three market cards and the two on the
      * right always divide exactly the height available, whatever they hold. */
     grid-template-rows: minmax(0, 1.22fr) minmax(0, 1fr) minmax(0, 1fr);
@@ -208,6 +211,15 @@ body {
 
 /* Weather and battery hold a single line of text from app.js, not .row
  * elements, so they are styled through the section itself. */
+
+/* The one div app.js appends, centred in whatever room is left under the
+ * title. auto margins only ever share out positive free space, so a long
+ * forecast still starts at the top instead of being pushed out of the card. */
+.card > div {
+    margin-top: auto;
+    margin-bottom: auto;
+}
+
 #weather {
     font-size: 24px;
     line-height: 1.32;

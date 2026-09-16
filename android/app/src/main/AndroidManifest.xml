@@ -17,9 +17,17 @@
              not the activity's own title strip, and a dark window background keeps
              the panel from flashing white before the WebView paints (T2.3).
 
-             Note for whoever adds configChanges: without it, a 180° flip relaunches
-             the activity and reloads the WebView. `panel=rendered` appearing twice
-             in logcat after a flip is that happening. -->
+             No android:configChanges, and that is measured rather than assumed.
+             A 180 degree flip under sensorLandscape does NOT relaunch the activity:
+             `orientation` stays `land` and screenSize, screenLayout and
+             smallestScreenSize are all unchanged, so nothing the activity would
+             have to declare actually changes. Verified on the device -- the pid
+             stayed 27861 across a flip from ROTATION_270 to ROTATION_90, and
+             `panel=rendered` stayed at one occurrence, meaning the WebView never
+             reloaded. Adding configChanges here would be configuration for a
+             problem that does not exist. If a future change makes the panel
+             portrait-capable, this stops being true and the detector is the same:
+             a second `panel=rendered` in logcat after a rotation. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
