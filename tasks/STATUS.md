@@ -35,7 +35,7 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 | # | Task | State | Notes |
 |---|---|---|---|
 | T1.1 | Clock in plain HTML/JS | done | 2026-09-16. Brought from `harness/t1.1-accepted` |
-| TT.1 | Extract `format.js` + node:test | todo | ⬅ **before T1.2**, not after — see below |
+| TT.1 | Extract `format.js` + node:test | done | 2026-09-16. 11 tests, `node --test` green; purity grep passes |
 | T1.2 | `mock.js` fixtures | todo | Pairs with TT.1 |
 
 ## Phase 2 — Android skeleton
