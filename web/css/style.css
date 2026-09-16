@@ -174,28 +174,12 @@ body {
 .card::before {
     flex: 0 0 auto;
     font-size: 20px;
-    /* 1.15, not 1.2: these titles are all caps with no descenders, and the
-     * pixel it saves pays for the rule below. */
-    line-height: 1.15;
+    line-height: 1.2;
     /* Wide tracking at 11px read as a label. At 20px it reads as a gap, and
      * WEATHER stops fitting its card, so it comes back in. */
     letter-spacing: 0.14em;
     color: var(--accent-dim);
-
-    /* The title has to read as a heading and not as one more row, and every
-     * other axis is already spent: size is fixed by T6.3's 20px floor, so it
-     * now matches the row labels exactly; weight went to the prices for this
-     * same reason and two bold things would compete; colour is the palette's.
-     * So the heading is signalled structurally, by a rule the rows do not have.
-     *
-     * It is deliberately --rule against the rows' --rule-faint -- 0.38 alpha
-     * against 0.16 -- because at the same strength it would read as just
-     * another row divider and make the problem worse. Negative margins take it
-     * full width, out to the card's accent border, so it separates the card
-     * rather than underlining a word. */
-    margin: 0 -10px 2px -11px;
-    padding: 0 10px 2px 11px;
-    border-bottom: 1px solid var(--rule);
+    margin-bottom: 3px;
 }
 
 #quotes::before  { content: 'B3'; }
