@@ -52,8 +52,8 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 
 | # | Task | State | Notes |
 |---|---|---|---|
-| T3.1 | `/ping` | blocked | 2026-09-16. Code is complete and was green when it landed; T3.2 then made a missing `config.json` fatal, so `probe.py --serve` now exits 2. Same `cp` unblocks it — see below |
-| T3.2 | Config loading | blocked | 2026-09-16. `load_config(path)` in `server/server.py`: defaults for missing keys, `ConfigError` for malformed JSON, hard fail (exit 1, message points at `config.example.json`) when the file is absent — deliberately, per the task's own guidance against a silently-empty start. 3 of 4 acceptance commands pass; `probe.py --serve --expect up` fails in this checkout because `server/config.json` (gitignored, per-machine) does not exist here and creating it is outside what this session is permitted to touch. Needs a human to `cp server/config.example.json server/config.json` once (`docs/SERVER-SETUP.md`), then re-run |
+| T3.1 | `/ping` | done | 2026-09-16. `server/server.py` + `server/probe.py`. Went blocked when T3.2 made a missing config fatal, green again once `config.json` was seeded — no T3.1 code changed either way |
+| T3.2 | Config loading | done | 2026-09-16. Pure `load_config` with defaults; hard fail on a missing `config.json`. All four acceptance commands exit 0 |
 | T3.3 | `/quotes` proxy | todo | ⚠️ Subtask 0: confirm brapi FX and crypto endpoints |
 | T3.4 | `/weather` proxy | todo | |
 | T3.5 | Login-scoped autostart: contract + `probe.py` | todo | Platform-neutral. Rewritten — see ADR 0010 |
