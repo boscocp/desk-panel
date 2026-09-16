@@ -205,6 +205,17 @@ class Handler(BaseHTTPRequestHandler):
         self._handle("POST")
 
 
+def _allow_reuse_address(os_name):
+    """Pure: whether SO_REUSEADDR should be on for `os_name` (an os.name
+    value). Split out from the Server class body so TT.2 can test both
+    branches without reloading this module under a patched os.name --
+    that reload would itself explode, since the module-level
+    `Path(__file__).resolve()` above picks WindowsPath/PosixPath from the
+    live os.name at import time.
+    """
+    return os_name != "nt"
+
+
 class Server(HTTPServer):
     """HTTPServer with a platform-correct `allow_reuse_address`.
 
@@ -216,7 +227,7 @@ class Server(HTTPServer):
     default socket behaviour (refuse, EADDRINUSE) instead of stdlib's 1.
     """
 
-    allow_reuse_address = (os.name != "nt")
+    allow_reuse_address = _allow_reuse_address(os.name)
 
 
 def parse_args(argv=None):

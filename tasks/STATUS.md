@@ -63,7 +63,7 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 | T3.11 | Server portability hardening | done | 2026-09-16. `config_search_paths()` (`--config` → `DESK_PANEL_CONFIG` → `script_dir/config.json`, cwd-independent), `config_permission_warning()` (POSIX-only, warns not refuses), `check_python_version()` (3.11 floor), `Server(HTTPServer)` with `allow_reuse_address = os.name != "nt"`, `--check-only` and `--log-file` flags, explicit UTF-8 everywhere. All 5 acceptance commands exit 0 |
 | T3.6 | Serve the APK at `/app` | todo | |
 | T3.7 | `POST /action/{id}` stub returning 501 | todo | v2 placeholder |
-| TT.2 | Server unit tests + fixtures | todo | Pairs with T3.3, T3.4 |
+| TT.2 | Server unit tests + fixtures | blocked | 2026-09-16. 32 tests, all green, no network. Covers every pure function that exists today: `load_config` (extended with the non-dict-JSON branch), `route`, `config_search_paths`, `config_permission_warning`, `check_python_version`, and a new `_allow_reuse_address(os_name)` extracted from `Server` so both platform branches are reachable without reloading the module (reloading under a patched `os.name` crashes on `Path(__file__).resolve()`). Fixtures and normalise/cache/stale-fallback tests are NOT done: `providers_brapi.py`/`providers_openmeteo.py` don't exist yet (T3.3/T3.4 are still `todo`), so there is no outbound call to patch and no real upstream shape to record a fixture from. Re-open once T3.3/T3.4 land |
 | TT.3 | Two HTTP integration tests on port 0 | todo | |
 | TT.4 | Contract tests, opt-in | todo | |
 | TT.10 | Login-scope verifier tests, from fixtures | todo | Makes T3.10 checkable without a Mac |

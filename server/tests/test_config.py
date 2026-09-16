@@ -49,6 +49,20 @@ class LoadConfigTests(unittest.TestCase):
         self.assertEqual(config["fx"], ["USD-BRL", "EUR-BRL"])
         self.assertEqual(config["timezone"], "America/Sao_Paulo")
 
+    def test_json_array_is_rejected_even_though_it_parses(self):
+        # Valid JSON, but not an object -- config.update(data) would raise
+        # a confusing ValueError deep inside load_config if this guard
+        # were removed.
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
+            json.dump(["PETR4", "VALE3"], fh)
+            path = Path(fh.name)
+        try:
+            with self.assertRaises(ConfigError) as ctx:
+                load_config(path)
+            self.assertIn("must contain a JSON object", str(ctx.exception))
+        finally:
+            path.unlink()
+
     def test_secret_never_appears_in_a_config_error_message(self):
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as fh:
             fh.write("{not valid json, token=super-secret-token")
