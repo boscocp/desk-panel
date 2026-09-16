@@ -7,14 +7,78 @@ logged-in user's session and to die with it, never to auto-restart or run as
 a service.
 
 The request handler only routes and serialises. All real logic lives in
-plain functions (`route`, below, and whatever T3.2+ adds) so tests can call
-them directly without a socket -- see server/CLAUDE.md and TT.2.
+plain functions (`route`, `load_config`, below, and whatever T3.3+ adds) so
+tests can call them directly without a socket -- see server/CLAUDE.md and
+TT.2.
 """
 import json
+import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 
 HOST = "0.0.0.0"
 PORT = 8777
+
+CONFIG_PATH = Path(__file__).resolve().parent / "config.json"
+EXAMPLE_CONFIG_PATH = Path(__file__).resolve().parent / "config.example.json"
+
+# Every key config.example.json ships, with a safe empty/inert default.
+# `load_config` fills in whatever a real config.json omits so that a
+# partial file degrades gracefully instead of raising KeyError deep inside
+# a handler -- see server/CLAUDE.md ("config drives behaviour").
+DEFAULT_CONFIG = {
+    "port": PORT,
+    "brapi_token": "",
+    "quotes": [],
+    "crypto": [],
+    "fx": [],
+    "city": "Sao Paulo",
+    "timezone": "America/Sao_Paulo",
+    "quotes_interval_s": 300,
+    "weather_interval_s": 900,
+    "night_start": "22:00",
+    "night_end": "07:00",
+    "actions": {},
+}
+
+
+class ConfigError(Exception):
+    """A missing or malformed config.json.
+
+    The message is always safe to print or log: it never contains the
+    token or any other config value, only the path involved -- see
+    server/CLAUDE.md ("secrets stay here").
+    """
+
+
+def load_config(path):
+    """Pure: load config.json from `path`, filling missing keys with
+    DEFAULT_CONFIG. Raises ConfigError -- never a bare exception -- for a
+    missing file or invalid JSON, so callers get one exception type to
+    handle. No I/O beyond the single read; no logging, no defaults baked
+    into the network layer. Pure so TT.2 can test it without a server.
+    """
+    try:
+        raw = Path(path).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise ConfigError(
+            f"{path} not found. Copy {EXAMPLE_CONFIG_PATH} to that path "
+            f"and fill in your brapi token."
+        ) from None
+    except OSError as exc:
+        raise ConfigError(f"cannot read {path}: {exc}") from None
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ConfigError(f"{path} is not valid JSON: {exc}") from None
+
+    if not isinstance(data, dict):
+        raise ConfigError(f"{path} must contain a JSON object")
+
+    config = dict(DEFAULT_CONFIG)
+    config.update(data)
+    return config
 
 
 def route(method, path):
@@ -49,7 +113,17 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    server = HTTPServer((HOST, PORT), Handler)
+    # A server that starts with silently-empty config looks healthy and
+    # shows an empty panel -- worse than one that refuses to start with a
+    # clear message. So this is fatal, not a fallback to DEFAULT_CONFIG.
+    try:
+        config = load_config(CONFIG_PATH)
+    except ConfigError as exc:
+        print(exc, file=sys.stderr)
+        sys.exit(1)
+
+    port = config.get("port", PORT)
+    server = HTTPServer((HOST, port), Handler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

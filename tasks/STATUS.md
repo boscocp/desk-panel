@@ -53,7 +53,7 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 | # | Task | State | Notes |
 |---|---|---|---|
 | T3.1 | `/ping` | done | 2026-09-16. `server/server.py` (`/ping` + 404) and `server/probe.py` (stdlib-only HTTP probe, `--serve` starts/stops the server). Both acceptance commands exit 0 |
-| T3.2 | Config loading | todo | |
+| T3.2 | Config loading | blocked | 2026-09-16. `load_config(path)` in `server/server.py`: defaults for missing keys, `ConfigError` for malformed JSON, hard fail (exit 1, message points at `config.example.json`) when the file is absent — deliberately, per the task's own guidance against a silently-empty start. 3 of 4 acceptance commands pass; `probe.py --serve --expect up` fails in this checkout because `server/config.json` (gitignored, per-machine) does not exist here and creating it is outside what this session is permitted to touch. Needs a human to `cp server/config.example.json server/config.json` once (`docs/SERVER-SETUP.md`), then re-run |
 | T3.3 | `/quotes` proxy | todo | ⚠️ Subtask 0: confirm brapi FX and crypto endpoints |
 | T3.4 | `/weather` proxy | todo | |
 | T3.5 | Login-scoped autostart: contract + `probe.py` | todo | Platform-neutral. Rewritten — see ADR 0010 |
