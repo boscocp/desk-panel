@@ -60,7 +60,13 @@ fun dotenvValue(key: String): String? = dotenv[key]?.takeIf { it.isNotBlank() }
 // ---------------------------------------------------------------------------
 val cleartextPlaceholder = "192.168.1.100"
 val pcIp = dotenvValue("PC_IP")
-if (pcIp != null && !Regex("""^\d{1,3}(\.\d{1,3}){3}$""").matches(pcIp)) {
+// Octets are range-checked, not just counted: \d{1,3} accepts 192.168.1.256,
+// and the build would then bake an unreachable address into both the pin and
+// pc_host while printing the reassuring line below. A panel that cannot reach
+// its PC looks exactly like a panel whose PC is off, which is the ambiguity
+// this whole mechanism exists to remove.
+val ipv4Octet = "(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])"
+if (pcIp != null && !Regex("^" + ipv4Octet + "(\\." + ipv4Octet + "){3}$").matches(pcIp)) {
     throw GradleException("PC_IP in .env is not an IPv4 address: '$pcIp'")
 }
 val cleartextHost = pcIp ?: cleartextPlaceholder
@@ -84,11 +90,22 @@ val generatedResDir = layout.buildDirectory.dir("generated/netsec/res").get().as
 // rather than sitting alongside it: two source dirs carrying the same resource
 // name is a duplicate-resource error, and there is no ordering that makes one
 // win inside a single source set.
-val generateNetsecRes = tasks.register<Copy>("generateNetsecRes") {
+// Sync, not Copy: Copy never removes a destination file whose source went away,
+// and this tree is the module's *only* res source dir. Renaming a resource under
+// src/main/res would otherwise leave the old copy behind and ship both, which
+// surfaces as a duplicate-resource error or a stale resource that only
+// ./gradlew clean explains.
+val generateNetsecRes = tasks.register<Sync>("generateNetsecRes") {
     description = "Copies res/, substituting the PC's LAN address from .env into the cleartext pin."
     from("src/main/res")
     into(generatedResDir)
-    filter { line -> line.replace(cleartextPlaceholder, cleartextHost) }
+    // Scoped to XML because filter() round-trips a file through a line-by-line
+    // String transform. res/ is all text today; the first launcher icon, WebP
+    // or font to land here would be packaged corrupted, with no build error and
+    // nothing to see until it fails to decode on the device.
+    filesMatching("**/*.xml") {
+        filter { line -> line.replace(cleartextPlaceholder, cleartextHost) }
+    }
     inputs.property("cleartextHost", cleartextHost)
 }
 
@@ -109,8 +126,19 @@ val keystoreKeyPassword = dotenvValue("KEY_PASSWORD")
 // sitting next to .env at the repository root is `../desk-panel.keystore`. A
 // path that only resolves from this module is accepted too, so either spelling
 // works.
+// A path that is set but resolves to nothing is a typo, and a typo must not
+// fall back to the debug key: the APK builds, installs on a clean device, and
+// then refuses to install over the real one — INSTALL_FAILED_UPDATE_INCOMPATIBLE,
+// whose only cure is an uninstall that discards the MIUI grants T2.4 spent a
+// session collecting. Same argument as PC_IP above: absent is a documented
+// fallback, wrong is not.
 val resolvedKeystore = keystoreFilePath?.let { path ->
-    rootProject.file(path).takeIf { it.exists() } ?: file(path).takeIf { it.exists() }
+    (rootProject.file(path).takeIf { it.exists() } ?: file(path).takeIf { it.exists() })
+        ?: throw GradleException(
+            "KEYSTORE_FILE in .env points at no file: '$path'. Tried " +
+                "${rootProject.file(path)} and ${file(path)}. Leave it empty to fall back " +
+                "to the debug key deliberately."
+        )
 }
 val hasReleaseSigning = resolvedKeystore != null &&
     keystorePassword != null && keystoreAlias != null && keystoreKeyPassword != null
