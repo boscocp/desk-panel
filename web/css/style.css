@@ -1,4 +1,4 @@
-/* Cyberpunk-neon desk panel, landscape.
+/* Neon desk panel, landscape.
  *
  * Sized for the real target: the Redmi Note 10's landscape WebView viewport is
  * 872 x 392 CSS px (2400x1080 physical at 440dpi, once the display cutout is
@@ -11,31 +11,50 @@
  */
 
 :root {
-    /* Palette - T6.1. Changing a value here changes it everywhere. */
-    --bg: #0A0118;          /* near-black with a violet cast */
-    --cyan: #00E5FF;        /* primary: clock, labels, rules */
-    --magenta: #FF2E88;     /* accent: headers, highlights */
-    --up: #00FF9C;          /* positive change */
-    --down: #FF2E88;        /* negative change */
-    --muted: #6C5B8A;       /* secondary text */
+    /* Palette - T6.1, second cut. The first was cyan on a violet-black; the
+     * user asked for purple leaning pink, then settled on these exact values.
+     *
+     * --ground is pure black, and that is not a taste call. This panel is an
+     * AMOLED showing one unchanging layout for hours, which is the burn-in
+     * case ADR 0008 and T6.2 exist for. At #000000 the pixel is off: it draws
+     * no power and there is nothing there to burn in. Do not "improve" it back
+     * to a tinted ground.
+     *
+     * --accent-dim is the accent desaturated, NOT darkened: it is the colour of
+     * the smallest text on the panel (date, row labels, card titles), read from
+     * about 50cm, so it needs more contrast than the clock rather than less. It
+     * measures 6.8:1 on black against the accent's 5.1:1. Secondary here means
+     * less saturated, never dimmer. */
+    --ground: #000000;      /* pure black: pixels physically off */
+    --accent: #D53FA7;      /* primary: clock, prices, weather */
+    --accent-dim: #BB81AA;  /* secondary: date, labels, titles, borders */
 
-    /* Derived, all from the six above. */
-    --rule: rgba(0, 229, 255, 0.30);
-    --rule-faint: rgba(0, 229, 255, 0.12);
-    --wash: rgba(0, 229, 255, 0.06);
-    --glow-cyan: rgba(0, 229, 255, 0.45);
-    --glow-magenta: rgba(255, 46, 136, 0.40);
+    /* Gains and losses have to be told apart instantly from across a desk, on
+     * a panel that is otherwise entirely pink. Two shades of red would not do
+     * it, so up/down are separated three ways at once: hue (--up is the
+     * accent's exact complement, 138 deg against 318 deg), brightness (10.9:1
+     * against 6.1:1 on black), and the sign format.js already writes into the
+     * text. Any one of the three surviving is enough to read the panel. */
+    --up: #3FD56C;          /* gain: the accent's hue complement */
+    --down: #FF3D6E;        /* loss: the accent pushed toward red */
+
+    /* Derived, all from --accent. */
+    --rule: rgba(213, 63, 167, 0.38);
+    --rule-faint: rgba(213, 63, 167, 0.16);
+    --glow: rgba(213, 63, 167, 0.45);
+    --glow-dim: rgba(187, 129, 170, 0.35);
 
     /* Condensed system stack, no webfont: the WebView has no network by
      * design (ADR 0002), so anything fetched would simply fail to load.
      * 'sans-serif-condensed' is Android's own alias for Roboto Condensed; the
-     * rest are the desktop equivalents for the Chrome check. */
+     * rest are the desktop equivalents for the browser check. */
     --font: 'sans-serif-condensed', 'Roboto Condensed', 'Liberation Sans Narrow',
             'DejaVu Sans Condensed', 'Arial Narrow', system-ui, sans-serif;
 }
 
 html {
     height: 100%;
+    background-color: var(--ground);
     /* WebView font boosting would silently inflate every size below. */
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
@@ -48,8 +67,8 @@ body {
     box-sizing: border-box;
     overflow: hidden;
 
-    background-color: var(--bg);
-    color: var(--cyan);
+    background-color: var(--ground);
+    color: var(--accent);
     font-family: var(--font);
     /* Without tabular figures every price jitters sideways on each update. */
     font-variant-numeric: tabular-nums;
@@ -78,13 +97,17 @@ body {
 
 /* 60px, not larger: the clock must not be clipped by #sidebar even when the
  * stack falls all the way through to a non-condensed fallback, which is ~4.5em
- * wide for HH:MM:SS against the ~4.0em of Android's Roboto Condensed. */
+ * wide for HH:MM:SS against the ~4.0em of Android's Roboto Condensed. It is
+ * still the first thing the eye lands on - two and a half times the next
+ * largest text on the panel, alone in its own column, and the only thing that
+ * glows. */
 #clock {
     font-size: 60px;
     line-height: 1.2;
     font-weight: 700;
     letter-spacing: -0.005em;
-    text-shadow: 0 0 16px var(--glow-cyan);
+    color: var(--accent);
+    text-shadow: 0 0 16px var(--glow);
     white-space: nowrap;
 }
 
@@ -94,7 +117,7 @@ body {
     line-height: 1.25;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--muted);
+    color: var(--accent-dim);
 }
 
 /* Reserved for the v2 shortcut buttons. Deliberately empty and invisible: it
@@ -136,11 +159,11 @@ body {
     box-sizing: border-box;
     padding: 5px 10px 5px 11px;
     border: 1px solid var(--rule);
-    border-left: 2px solid var(--cyan);
+    border-left: 2px solid var(--accent);
     border-radius: 3px;
-    /* Keeps almost every pixel at --bg: good for the look, and the right thing
-     * for an AMOLED that shows this same frame all day. */
-    background: linear-gradient(90deg, var(--wash), rgba(0, 229, 255, 0) 45%);
+    /* No fill. Every pixel inside a card that is not a glyph or a rule stays
+     * at --ground, which on this AMOLED means switched off. */
+    background: var(--ground);
     display: flex;
     flex-direction: column;
 }
@@ -153,8 +176,7 @@ body {
     font-size: 11px;
     line-height: 1.2;
     letter-spacing: 0.22em;
-    color: var(--magenta);
-    text-shadow: 0 0 10px var(--glow-magenta);
+    color: var(--accent-dim);
     margin-bottom: 3px;
 }
 
@@ -184,12 +206,17 @@ body {
     text-overflow: ellipsis;
     white-space: nowrap;
     letter-spacing: 0.04em;
+    color: var(--accent-dim);
 }
 
 .row .price,
 .row .change {
     flex: 0 0 auto;
     white-space: nowrap;
+}
+
+.row .price {
+    color: var(--accent);
 }
 
 .row .change {
@@ -206,7 +233,7 @@ body {
 }
 
 .change.flat {
-    color: var(--cyan);
+    color: var(--accent-dim);
 }
 
 /* Weather and battery hold a single line of text from app.js, not .row
@@ -224,20 +251,23 @@ body {
     font-size: 24px;
     line-height: 1.32;
     letter-spacing: 0.01em;
+    color: var(--accent);
 }
 
 #battery {
     font-size: 17px;
     line-height: 1.3;
-    color: var(--muted);
+    color: var(--accent-dim);
 }
 
+/* STALE is a warning, so it takes --down rather than the accent: it must not
+ * read as just another pink label. */
 #stale-badge {
     position: absolute;
     top: 0;
     right: 0;
-    background: var(--magenta);
-    color: var(--bg);
+    background: var(--down);
+    color: var(--ground);
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.2em;
