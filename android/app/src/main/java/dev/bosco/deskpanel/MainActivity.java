@@ -51,6 +51,13 @@ public class MainActivity extends Activity implements PanelService.Panel {
      */
     private Boolean lastOnline;
 
+    /**
+     * The last payload handed to the page, for the same reason
+     * {@link #lastOnline} is kept: the WebView reloads on a wake, and a
+     * reloaded page knows nothing until the next refresh a minute later.
+     */
+    private String lastPayload;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -89,6 +96,7 @@ public class MainActivity extends Activity implements PanelService.Panel {
                 // again. Pushing it here closes that window, and covers the
                 // reload the wake causes.
                 pushPcStateToPage();
+                pushDataToPage();
             }
         });
 
@@ -180,6 +188,24 @@ public class MainActivity extends Activity implements PanelService.Panel {
 
         if (logTransition) {
             Log.i(Markers.TAG, Markers.screen(online));
+        }
+    }
+
+    @Override
+    public void onData(String json) {
+        lastPayload = json;
+        pushDataToPage();
+    }
+
+    /**
+     * Hands the last payload to the page. The one place data enters the
+     * WebView — and it enters from native Java, never from a fetch inside the
+     * page (invariant 1, ADR 0002). {@code DataPayload} has already made the
+     * string safe to interpolate.
+     */
+    private void pushDataToPage() {
+        if (lastPayload != null) {
+            webView.evaluateJavascript("window.onData(" + lastPayload + ")", null);
         }
     }
 

@@ -55,17 +55,17 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 |---|---|---|---|
 | T3.1 | `/ping` | done | 2026-09-16. `server/server.py` + `server/probe.py`. Went blocked when T3.2 made a missing config fatal, green again once `config.json` was seeded — no T3.1 code changed either way |
 | T3.2 | Config loading | done | 2026-09-16. Pure `load_config` with defaults; hard fail on a missing `config.json`. All four acceptance commands exit 0 |
-| T3.3 | `/quotes` proxy | todo | ⚠️ Subtask 0: confirm brapi FX and crypto endpoints |
-| T3.4 | `/weather` proxy | todo | |
+| T3.3 | `/quotes` proxy | done | 2026-09-19. **Subtask 0 answered by asking the API, not the docs** — which describe the crypto and currency endpoints without giving their shapes. Measured: `/api/v2/stocks/quote?symbols=PETR4,VALE3,ITUB4` and the legacy `/api/quote/...` both 200 without a token; `/api/v2/crypto` and `/api/v2/currency` both **401 MISSING_TOKEN**, and `config.json` carries an empty token. So brapi covers stocks here and nothing else, and the task file's pre-approved fallback is what ships: Binance for crypto, AwesomeAPI for FX, both key-free. Three modules named for three upstreams — a `providers_brapi.py` calling Binance would be a lie in the one place a reader can check. brapi serves **two response shapes** (v2 nests under `data`, legacy is flat) and both answered 200 the same day, so `normalise` reads either; the free tier is the part of an API most likely to move and the failure it produces is an empty panel. Three traps pinned by tests: Binance and AwesomeAPI send every number as a **string**; a currency pair is spelled four ways between config and panel (`USD-BRL`, `USD-BRL`, `USDBRL`, `USD/BRL`) and `normalise` is the only place any may appear; and one cache covers all three markets, so a single upstream failing marks the whole payload stale — honest, since something on the panel is then older than it looks. `curl -sf /quotes | python -m json.tool` exits 0 with every configured symbol |
+| T3.4 | `/weather` proxy | done | 2026-09-19. Geocode once and cache the coordinates for the life of the process; forecast on `weather_interval_s`. All three acceptance commands exit 0, `probe.py` gaining the `--expect-json-keys` it needed. **The `daily` arrays are a week, not a day**, and the task file's warning is about which index: without the `timezone` parameter the days cut on UTC boundaries, so after 21:00 in São Paulo index 0 is tomorrow and the panel shows tomorrow's high as today's — a wrong number, not an error. Two defences instead of one: the timezone comes from config (never a literal), and `normalise` finds the day matching `current.time` rather than trusting index 0, so a mismatch costs the min/max instead of silently shifting them. Missing values are `None`, never `0` — zero is a real temperature in most of the world, so a zero standing in for no-data is a lie the panel cannot detect. The city shown is the **resolved** name (`Sao Paulo` in, `São Paulo` out), which is how a human notices they geocoded the wrong Springfield. Manual check: 24°C, 15.5–26.1, code 2, on a September afternoon in São Paulo |
 | T3.5 | Login-scoped autostart: contract + verifier | done | 2026-09-16. `server/verify_login_scope.py` + `server/fixtures/login_scope/`. No installer here — T3.8/T3.9/T3.10 still `todo`. `probe.py` was left alone: it shipped with T3.1 and the login-scope work needed no flag it lacks. Every check is a pure function over captured text (`parse_schtasks_xml`, `parse_systemctl_show`, `parse_launchctl_print`, `parse_list_dependencies`, `parse_launchagent_plist`, `detect_autologin`, `detect_system_scope`, `detect_wsl`, `detect_container`) with command execution in a thin shell, so `--self-test` exercises all three platforms from fixtures on one box — 85 cases, and macOS is checkable without a Mac (TT.10's groundwork). **Fails closed**: exit 0 all pass, 1 a real failure, 2 could-not-tell, and a missing command or unreadable file produces 2, never 0. Proved twice — `PATH=/nonexistent` gives 2, and `docker run python:3.13-slim` gives 1 on `not-container` with everything else unknown. Linux fixtures are real captures from this machine (a `desk-panel.service` user unit was installed, enabled, captured in both the good and the `default.target` shapes, then removed); Windows and macOS fixtures are written to the documented output shapes and are the weak spot until T3.8/T3.10 replace them with real captures. On this box the live run exits 1 on `linux.unit.loaded` — correct, T3.9 has not installed the unit. `docs/SERVER-SETUP.md` rewritten: the `## Linux` section now carries the three mandatory fields instead of `WantedBy=default.target`, the title lost "(Windows)", the two `curl` lines became `probe.py`, and a `## Verifying the login scope` section documents the three exit codes. All four acceptance commands exit 0 |
 | T3.8 | Windows: Scheduled Task, firewall, static IP | todo | Primary platform. Tested from the LAN |
 | T3.9 | Linux: systemd user unit (graphical-session) | todo | Dev box. Beware `Linger=yes` |
 | T3.10 | macOS: LaunchAgent | blocked | No Mac. Plist and docs ship anyway |
 | T3.11 | Server portability hardening | done | 2026-09-16. `config_search_paths()` (`--config` → `DESK_PANEL_CONFIG` → `script_dir/config.json`, cwd-independent), `config_permission_warning()` (POSIX-only, warns not refuses), `check_python_version()` (3.11 floor), `Server(HTTPServer)` with `allow_reuse_address = os.name != "nt"`, `--check-only` and `--log-file` flags, explicit UTF-8 everywhere. All 5 acceptance commands exit 0 |
 | T3.6 | Serve the APK at `/app` | todo | |
-| T3.7 | `POST /action/{id}` stub returning 501 | todo | v2 placeholder |
-| TT.2 | Server unit tests + fixtures | blocked | 2026-09-16. 32 tests, all green, no network. Covers every pure function that exists today: `load_config` (extended with the non-dict-JSON branch), `route`, `config_search_paths`, `config_permission_warning`, `check_python_version`, and a new `_allow_reuse_address(os_name)` extracted from `Server` so both platform branches are reachable without reloading the module (reloading under a patched `os.name` crashes on `Path(__file__).resolve()`). Fixtures and normalise/cache/stale-fallback tests are NOT done: `providers_brapi.py`/`providers_openmeteo.py` don't exist yet (T3.3/T3.4 are still `todo`), so there is no outbound call to patch and no real upstream shape to record a fixture from. Re-open once T3.3/T3.4 land |
-| TT.3 | Two HTTP integration tests on port 0 | blocked | 2026-09-16. `server/tests/test_http.py`: `Server(("127.0.0.1", 0), Handler)` on a daemon thread, real `http.client` round trips, shut down and joined in `tearDownClass`. `GET /ping` (status, `Content-Type`, `Content-Length`, body bytes) and `GET /nonexistent` (404) are covered. `GET /quotes` (step 5) and `POST /action/x` → 501 (step 6) are NOT covered: `route()` in `server/server.py` still only handles `GET /ping`, so T3.3 ("`/quotes` proxy") and T3.7 ("`POST /action/{id}` stub") haven't landed and there is nothing to hit — `POST /action/x` still falls through to 404 today. Re-open once T3.3/T3.7 land, same pattern as TT.2. `python -m unittest discover -s server/tests -t .` exits 0, twice in a row, no port conflicts |
+| T3.7 | `POST /action/{id}` stub returning 501 | done | 2026-09-19. Rode along with wave 8 because TT.3 was `blocked` on it as well as on T3.3, and stranding TT.3 a second time for a five-line route would have been the more expensive choice. Matched narrowly by a pure `action_id(path)`: one segment, non-empty, no nesting, no `..`, no query — which is the first half of the closed-allowlist promise in `server/CLAUDE.md`. 501 rather than 404 or 200, because the route exists and does nothing yet, and that is exactly what 501 says. `probe.py --serve --url /action/anything --method POST --expect-status 501` exits 0 |
+| TT.2 | Server unit tests + fixtures | done | 2026-09-19. Re-opened by wave 8, as its earlier note asked. 86 tests now, up from 32: every provider normaliser against a **real recorded response** in `server/tests/fixtures/`, plus the cache, the stale fallback and the payload assembly. The fixtures are captures, not hand-written shapes — which is the point, since the shapes for crypto and FX were not in anybody's documentation. `TimedCache` takes `now` as an argument and `App` takes its clock, so a 300s TTL expires in a function call rather than a sleep. **A test found a real defect**: after a failed refresh the cache did not move `fetched_at`, so every subsequent request retried — an upstream that is down would have become one outbound call per panel poll, the exact traffic the cache exists to prevent, arriving when the upstream can least afford it. A failure now spends the TTL like a success does. The acceptance's real check passes too: the whole suite is green inside a network namespace with no route out, proved by a `URLError` on a live URL from that same namespace |
+| TT.3 | Two HTTP integration tests on port 0 | done | 2026-09-19. Steps 5 and 6 landed, which is what it was `blocked` on: `/quotes` over a real socket asserting the T1.2 contract shape key by key, and `POST /action/x` returning 501 with `GET` to the same path still 404. Still no network — the provider modules' `load` is replaced, so the payload comes from the test file and `upstream.py` is never reached. A second server on its own port 0, built with `functools.partial(Handler, app=...)` rather than a class attribute, because a class attribute would be shared by every server in a process that starts more than one. Content-Length is asserted against the **byte** length on a payload carrying `São Paulo`, since a length computed on characters truncates the body and the client hangs |
 | TT.4 | Contract tests, opt-in | todo | |
 | TT.10 | Login-scope verifier tests, from fixtures | todo | Makes T3.10 checkable without a Mac |
 
@@ -84,7 +84,7 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 
 | # | Task | State | Notes |
 |---|---|---|---|
-| T5.1 | `DataPoller`, replacing the mock | todo | |
+| T5.1 | `DataPoller`, replacing the mock | done | 2026-09-19. Real quotes, FX, crypto and weather on the panel; all three acceptance commands exit 0 and the manual check was done against a screencap, value by value. `DataPoller` is a sibling of `PcPoller`, deliberately not merged with it: they answer different questions on different clocks, a 2s heartbeat that decides whether the screen is on at all against a 60s refresh of what it shows. It runs **only while online** — offline the panel is dark and the device is up on a wake lock held to notice a login, and spending that on numbers nobody can see is the opposite of ADR 0008. The interval is not config: the server decides how often to hit an upstream, the phone only decides how often to ask a server that is already caching, so a value here cannot burn anybody's API budget. `DataPayload` is the part worth testing and has no Android imports, so the merge is covered on the JVM — `org.json` is bundled with Android but its JVM stub throws, so the real artefact is on the **test** classpath only. **Merging is all-or-nothing**, and that is a choice about wiping: `onData` is a full replacement and `app.js` clears each section before rendering it, so half a payload erases the half that failed, which is worse than sending nothing when the panel already holds values a minute old. A hostile ticker is a test, not a hope: a symbol that closes its own literal and appends a call survives as data, because the payload is built through `org.json` rather than concatenated. U+2028/U+2029 are escaped too — legal unescaped in JSON, line terminators in pre-ES2019 JavaScript, and silent. `web/js/app.js` needed **no changes**, which is what the contract was for |
 | T5.2 | Timeouts, retry, failure tolerance | todo | |
 | T5.3 | Adaptive polling with backoff | todo | Requirement, not polish — see ADR 0008 |
 | T5.4 | Battery telemetry | todo | |
@@ -223,8 +223,12 @@ Quotes and weather come afterwards; they are the least risky part and the easies
 
 ## Open questions
 
-- **brapi FX and crypto endpoints are unconfirmed.** Resolved as subtask 0 of T3.3. Fallbacks
-  without a key: Binance public API for crypto, AwesomeAPI for FX.
+- ~~**brapi FX and crypto endpoints are unconfirmed**~~ **Resolved 2026-09-19, T3.3 subtask 0:
+  brapi serves neither without a token.** `/api/v2/crypto` and `/api/v2/currency` both answer
+  `401 MISSING_TOKEN`, while stocks answer 200 for the free sample set. The fallbacks are what
+  ships — Binance for crypto, AwesomeAPI for FX, both key-free. Measured against the live API;
+  the docs name the endpoints without giving their shapes. Recorded at the top of
+  `server/providers_brapi.py`.
 - **adb from inside the container is undocumented.** Answered: the container does not own the
   USB device. Gradle runs in the container and talks to the **host's** adb server over TCP —
   `make connected`, defined in TT.7. T7.2 covers wireless adb, which is a different question.
@@ -246,68 +250,52 @@ Quotes and weather come afterwards; they are the least risky part and the easies
   discharging, sparse `AlarmManager` probe, `ACTION_POWER_CONNECTED` as the real signal — is
   specified in ADR 0014 and deliberately unwritten, because it cannot be tested on this desk.
 
-## Resuming after 2026-09-19
+## Resuming after 2026-09-19 (wave 8)
 
-Wave 7 is on `wave/7-screen-state`. TT.6, T4.3 and T4.4 are all `done`, every acceptance command
-exits 0 on the device, and **Milestone B is reached**: the PC going away takes the screen with
-it, and the PC coming back turns it on again with nobody touching the phone.
+Wave 8 is on `wave/8-real-data`. **The panel shows real data**: B3 quotes, FX, crypto and
+weather, fetched by the PC and pushed into the page through `window.onData`. T3.3, T3.4, T3.7,
+TT.2, TT.3 and T5.1 are all `done`.
 
-**What is left of this wave is eyes-only.** `mWakefulness=Dozing` is adb's word for it. Nobody
-has yet confirmed in a dark room that the panel is *actually* dark rather than merely reported
-dark, and nobody has watched it come back without a hand on the phone. Both are written into
-T4.4's manual check and neither can be automated — that is the point of the `## Manual check`
-convention.
+Wave 7 before it reached **Milestone B** — the screen follows the PC in both directions,
+confirmed by eye at the device.
 
-**Next is not T5.1**, though it reads that way from phase 4. T5.1's prereqs are `T4.3, T3.3,
-T3.4`, and both server proxies are still `todo` — its own acceptance asks `probe.py` for
-`/quotes`, which no endpoint answers yet. The path to data on the panel runs
-**T3.3 → T3.4 → T3.7 → TT.2 → TT.3 → T5.1**, which is wave 8. T3.7 is a 501 stub that costs
-minutes and is the other half of what TT.3 is `blocked` on, so it rides along rather than
-stranding TT.3 a second time.
+**Next: T5.2** (timeouts, retry, failure tolerance), then T5.3 (adaptive polling) and T5.4
+(battery, which is why the DEVICE card on the panel is still empty). T5.5 (thermal cutoff) has
+the screen-state machine it was waiting for. T6.x is parallel and touches only `web/`.
 
-T5.5 (thermal cutoff) now has the screen-state machine it was waiting for, and T5.3's backoff
-assertions have the heartbeat vocabulary they need, though neither `ping=` nor `data=` has an
-emitter yet.
+Wave 8 corrected a claim this file made: the resume note said "Next: T5.1", and T5.1's prereqs
+are `T4.3, T3.3, T3.4` with both server proxies `todo`. Its own acceptance asks `probe.py` for
+`/quotes`, which no endpoint answered. **Read a task's `Prereqs:` line before promising it is
+next.**
 
-Two device settings this wave discovered, both of which look like app bugs when wrong and
-**neither of which survives an `adb install -r`**:
+### What is still only true on this desk
 
-1. **MIUI "Show on Lock screen" must be granted.** Denied, the panel logs `state=online` and
-   `screen=wake` perfectly and the screen stays dark. From the host:
-   `adb shell appops set dev.bosco.deskpanel 10020 allow` (and `10008` with it). The durable
-   route is MIUI's Settings UI — see `docs/INSTALL-PHONE.md`.
-2. **Developer options → "Stay awake" must be off.**
-   `adb shell settings get global stay_on_while_plugged_in` has to answer `0`. It was `7` on
-   this phone, and with it on the screen simply never sleeps, so the whole wave asserts green
-   while doing nothing visible.
+- **`brapi_token` is empty**, and the three configured tickers are in brapi's free sample set
+  (PETR4, VALE3, ITUB4 — MGLU3 is the fourth). Adding any other ticker needs a token in
+  `server/config.json`, and nothing warns: the row simply does not appear.
+- **Crypto and FX do not come from brapi at all** — it answers `401` for both without a token.
+  Binance and AwesomeAPI serve them, key-free. If either changes shape the panel loses that
+  card, not the whole page.
+- **The DEVICE card is empty** because T5.4 has not landed. That is the design, not a fault.
 
-A third, if the panel ever comes back upside down: **`PANEL_ORIENTATION` in `.env`** pins the
-direction (`sensorLandscape` default, or `landscape` / `reverseLandscape`). This desk is
-`reverseLandscape` = `ROTATION_270`. Read the current one with
-`adb shell dumpsys window | grep -o "mRotation=ROTATION_[0-9]*"`. Changing it needs a rebuild,
-like `PC_IP`.
+### The rig, unchanged from wave 7
 
-Getting back to a testable rig takes three things, none of them automatic yet:
+1. **Start the server by hand** — `python server/server.py`. T3.9 is still `todo`. Start and
+   stop it **by PID file**, never `pkill -f "server/server.py"`: that pattern matches the
+   command line of the shell doing the killing, and it killed the session twice in wave 7.
+2. **The ufw rule has to be in place** — `sudo ufw allow from 192.168.0.0/16 to any port 8777
+   proto tcp`. The phone arrives through a NAT, so the rule cannot name the phone's own address.
+   `toybox nc` from `adb shell` is the quickest check that it still is.
+3. **Be at the phone for the first `adb install` of the session**, build with `assembleRelease`,
+   and **re-grant the MIUI app-ops afterwards** — `adb install -r` resets them and the screen
+   silently stops waking:
+   `adb shell appops set dev.bosco.deskpanel 10020 allow` (and `10008`).
+4. **Developer options → "Stay awake" must stay off.** `adb shell settings get global
+   stay_on_while_plugged_in` has to answer `0`.
+5. **`PANEL_ORIENTATION=reverseLandscape` in `.env`** is this stand's direction (`ROTATION_270`).
 
-1. **Start the server by hand** — `python server/server.py`. There is no autostart on this box:
-   T3.9 (systemd user unit on `graphical-session.target`) is `todo`, and wave 3 never ran. The
-   server dies with whatever shell started it. Start and stop it **by PID file**, not with
-   `pkill -f`: the pattern matches the command line of the shell doing the killing, which is a
-   fast way to kill your own session. It happened twice in this wave.
-2. **The firewall rule has to be in place.** The dev box runs ufw and `docs/SERVER-SETUP.md`
-   ships no firewall step for Linux by design. The phone reaches the PC through a NAT — it holds
-   `192.168.3.100` and arrives as `192.168.15.2` — so the rule cannot be written against the
-   phone's own address: `sudo ufw allow from 192.168.0.0/16 to any port 8777 proto tcp`. Without
-   it, ping succeeds and HTTP times out, and the panel reports a perfectly ordinary offline.
-   It was already in place for this wave; `toybox nc` from `adb shell` is the quickest check
-   that it still is.
-3. **Be at the phone for the first `adb install` of the session**, and build with
-   `assembleRelease`. Both reasons are in the T4.2 notes above.
+**Always `adb logcat -c` before changing the PC's state, never after.** The reverse order is a
+race the clear usually wins, leaving an empty log and an app that did everything right.
 
-The server's own log is the best instrument the project has for the poll loop: it prints one
-line per request with a timestamp, so the cadence — and any duplicate loop — is directly
-countable without touching the app.
-
-**Always `adb logcat -c` before changing the PC's state, never after.** The reverse order reads
-naturally and is a race the clear usually wins, leaving an empty log and an app that did
-everything right. It cost time in this wave and had cost time before, over `am start`.
+The server's own log prints one line per request with a timestamp, so the panel's poll cadence —
+2s for `/ping`, 60s for the data pair — is directly countable without touching the app.
