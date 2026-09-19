@@ -39,6 +39,23 @@ public final class PcState {
      */
     public static final long BACKOFF_CAP_MS = 15000L;
 
+    /**
+     * The sparse offline probe, for when the phone is offline <em>and</em> on
+     * its own battery (T5.6). This is not a rung on the ladder above: it is
+     * what replaces the ladder entirely, because in that state there is no
+     * in-process schedule at all — the device is allowed to suspend and
+     * {@code AlarmManager} owns the next probe.
+     *
+     * <p>15 minutes rather than something responsive, and the number is the
+     * platform's, not a preference. Doze clamps an allow-while-idle alarm to
+     * roughly nine minutes, so anything tighter is a promise that would not be
+     * kept. It can afford to be this sparse because it is a <em>backstop</em>:
+     * with the USB dying with the PC, power returning is the real signal and
+     * arrives as {@code ACTION_POWER_CONNECTED} the instant the PC comes back
+     * (ADR 0014).
+     */
+    public static final long DORMANT_ALARM_MS = 15 * 60 * 1000L;
+
     private State state = State.UNKNOWN;
     private boolean transitioned;
     private int consecutiveFailures;
@@ -109,6 +126,34 @@ public final class PcState {
             interval *= 2;
         }
         return Math.min(interval, BACKOFF_CAP_MS);
+    }
+
+    /**
+     * Whether the poll schedule should leave this process altogether (T5.6).
+     *
+     * <p>Dormant is one state and one only: <b>offline and on battery</b>.
+     * Offline on mains is the ADR 0014 arrangement and stays exactly as it was
+     * — a wake lock and the ladder above, which costs a little heat on a phone
+     * that is charging anyway. Offline on battery is the state that ADR 0014
+     * says makes its own decision wrong, and the difference is not a cadence
+     * but an owner: nothing in this process may hold the CPU awake, so there is
+     * no thread to run a ladder on and {@code AlarmManager} has to keep the
+     * time instead.
+     *
+     * <p>Online is never dormant, whatever the power. Somebody is looking at
+     * the panel, {@code FLAG_KEEP_SCREEN_ON} is holding the device up for the
+     * display's sake, and a 2s probe is the cheapest thing happening.
+     *
+     * <p>A parameter rather than a field, like the clock that {@link #record}
+     * takes: this class holds what it learned from probes, and power is not
+     * something a probe can tell it.
+     *
+     * @param onMains whether the charger is connected — {@code EXTRA_PLUGGED},
+     *                never {@code EXTRA_STATUS}, which reports
+     *                {@code NOT_CHARGING} for a paused charge on a live cable
+     */
+    public boolean isDormant(boolean onMains) {
+        return state == State.OFFLINE && !onMains;
     }
 
     /**

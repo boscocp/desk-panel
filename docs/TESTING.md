@@ -67,10 +67,10 @@ that warns rather than fails. Full reasoning in [ADR 0009](adr/0009-testing-stra
 Those markers are a contract. Renaming one breaks the suite.
 
 Two kinds, defined in `Markers.java` (TT.6). **Transitions** — `state=online|offline`,
-`screen=wake|sleep`, `night=on|off` — fire only when something changes; a steady state logs
-nothing, and T4.2 asserts exactly that. **Heartbeats** — `tick=`, `ping=`, `data=ok|err`,
-`battery=` — fire per cycle at a bounded rate, because "still running" and "at most four polls
-a minute" cannot be asserted any other way.
+`screen=wake|sleep`, `night=on|off`, `dormant=on|off` — fire only when something changes; a
+steady state logs nothing, and T4.2 asserts exactly that. **Heartbeats** — `tick=`, `ping=`,
+`data=ok|err`, `battery=` — fire per cycle at a bounded rate, because "still running" and "at
+most four polls a minute" cannot be asserted any other way.
 
 **This table is the source.** `e2e/README.md` and `tasks/TT.8-e2e-suite.md` link here rather
 than restating it — three copies had already drifted apart on scenario 5.
@@ -82,6 +82,8 @@ than restating it — three copies had already drifted apart on scenario 5.
 | 3 | Start the server | `state=online` and `screen=wake` within 20s |
 | 4 | `/quotes` serving a known fixture | Rendered values match, via Espresso-Web |
 | 5 | Phone Wi-Fi off for 30s | No crash in logcat; recovers unaided |
+| 6 | `dumpsys battery unplug` while offline | `dormant=on`, then no `ping=` and no held wake lock |
+| 7 | `dumpsys battery reset` while dormant | `dormant=off` and a `ping=` within 10s |
 
 The 20s allowances exist because the offline backoff caps at 15s (T5.3). Tighter windows
 produce flaky failures that are not bugs.
@@ -103,6 +105,11 @@ them:
   the health: 2s while online, and 2/4/8/15/15 climbing to the cap while offline. A minute
   measured from the moment the PC goes away holds seven, a settled offline minute holds four.
   Give the ladder twenty seconds to finish climbing before asserting a count (T5.3).
+- `dormant=on` is the log saying its own silence is deliberate (T5.6). Offline and on battery
+  the app hands its schedule to `AlarmManager` and goes quiet for fifteen minutes at a time, so
+  **an assertion that counts `ping=` over a window has to know which power state it is in** —
+  the same window is four lines on mains and zero on battery. `dumpsys battery unplug` and
+  `reset` put the device in either state on demand, and fire the real power broadcasts.
 - `battery=` is one line per broadcast, which on this device is about every eight seconds while
   charging. It is **not** one line per render: the page is only re-rendered when the level or
   the temperature actually changes, so the marker count and the render count differ on purpose

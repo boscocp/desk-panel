@@ -1,6 +1,6 @@
 # 0014 — The poll loop outlives the screen: a foreground service owns it
 
-Status: accepted · 2026-09-19
+Status: accepted · 2026-09-19 · power-aware branch written and measured 2026-09-19 (T5.6)
 Amends [ADR 0005](0005-real-screen-sleep.md), which describes the screen policy and says
 nothing about who stays awake to enforce it.
 
@@ -44,8 +44,10 @@ this needed.
   MIUI's exemptions are written against. It does not replace the manual toggles; it is what
   makes them mean something. The price is a permanent notification, which the panel hides
   anyway (the status bar is gone, T2.3) and which nobody sees while the screen is off.
-- **CPU awake (2):** a `PARTIAL_WAKE_LOCK`, acquired on the transition to offline and dropped
-  once the panel's window actually has focus again. Online it would be redundant, because
+- **CPU awake (2):** a `PARTIAL_WAKE_LOCK`, acquired on the transition to offline *while the
+  phone is on mains* and dropped once the panel's window actually has focus again. Offline on
+  battery it is deliberately not held at all, and `AlarmManager` keeps the time instead — see
+  the measurement below. Online it would be redundant, because
   `FLAG_KEEP_SCREEN_ON` already keeps the device up — but *asking* for the wake is not the same
   as getting it. `startActivity` only hands the request to the ActivityManager and returns, so
   releasing there would drop the app's only claim on the CPU with the wake still in flight, and
@@ -98,9 +100,44 @@ inherited. **If ErP Ready is ever disabled in the BIOS, as `docs/DEVICE-CARE.md`
 this decision is wrong from that day on** and the service has to become power-aware: drop the
 wake lock while discharging, fall back to `AlarmManager` for a sparse offline probe, and take
 `ACTION_POWER_CONNECTED` as the immediate signal that the PC has just come back — which, with
-ErP off, is exactly what USB power returning means. That branch is deliberately not written
-yet: it cannot be tested on this desk today, and untested code for a state that never occurs is
-worse than a documented follow-up.
+ErP off, is exactly what USB power returning means.
+
+### The assumption was measured, and it was false — for a different reason (T5.6, 2026-09-19)
+
+The branch above is **written**. What the measurement found is worth recording, because the
+prediction in it was wrong in an instructive way.
+
+ErP Ready was never the problem. USB stays live with the PC on *and* off, exactly as assumed.
+What the desk actually reports is:
+
+```
+Max charging current: 100000      # 100 mA
+level 22 at 12:44  ->  level 20 at 13:11
+```
+
+The port negotiates **100 mA**, and the panel with its screen on draws several times that. So
+the phone discharges at about 4.4% an hour *while the framework reports `status: 2`, charging*.
+"Offline means charging with the screen off" was true about the cable and false about the
+arithmetic — the supply is simply smaller than the draw, and this ADR's reasoning never
+considered that a live cable might not be enough.
+
+Two consequences, and they pull in different directions:
+
+- **The branch is more valuable than this ADR thought.** With the screen off, a partial wake
+  lock costs something like 60–120 mA against 100 mA coming in: roughly break-even, so the phone
+  hovers rather than recovers. Dropping the lock turns those hours net-positive, which is the
+  difference between a panel that charges overnight and one that starts each morning lower than
+  the last.
+- **The branch does not fix the online case, and no code can.** While anybody is looking at the
+  panel it draws more than the port supplies. That is a power source, not a decision — see
+  T5.6's notes.
+
+The claim that the branch "cannot be tested on this desk today" was also wrong, and it was the
+weakest part of this ADR. `adb shell dumpsys battery unplug` overrides what the framework
+reports and fires the real `ACTION_POWER_DISCONNECTED`, which is the layer the app reads; `reset`
+fires `ACTION_POWER_CONNECTED`. The whole branch is exercised in about two minutes without
+touching the cable or the BIOS. **Untestability is worth checking before it is used as a reason
+not to write something.**
 
 ## Alternatives rejected
 
@@ -144,6 +181,17 @@ worse than a documented follow-up.
   `docs/INSTALL-PHONE.md` rather than a footnote.
 - `START_STICKY`: if MIUI kills the process anyway, the panel comes back watching rather than
   staying dark with the PC on.
+- **Offline on battery, recovery without a power event takes up to fifteen minutes** (T5.6).
+  That is the cost of letting the device suspend, and it is bounded by
+  `PcState.DORMANT_ALARM_MS` rather than by `BACKOFF_CAP_MS`. It is only ever paid in the
+  configuration where the phone is on its own charger while the PC is off: with the USB dying
+  with the PC, `ACTION_POWER_CONNECTED` arrives the moment the PC returns and the alarm never
+  matters.
+- **An eighth logcat marker, `dormant=on|off`** (T5.6). `Markers.java` says to resist adding
+  more, and the justification is that everything else about dormancy is an *absence* — no
+  `ping=`, no wake lock, no `data=` — and an absence cannot be told from a poll loop that has
+  silently died, which is the failure T5.2 calls the worst available. This is the one line that
+  says the silence was deliberate.
 
 ## References
 

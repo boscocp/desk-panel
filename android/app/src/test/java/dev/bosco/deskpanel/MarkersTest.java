@@ -40,6 +40,12 @@ public class MarkersTest {
     }
 
     @Test
+    public void dormantMarkers() {
+        assertEquals("dormant=on", Markers.dormant(true));
+        assertEquals("dormant=off", Markers.dormant(false));
+    }
+
+    @Test
     public void heartbeatMarkers() {
         assertEquals("tick=1758240000", Markers.tick(1758240000L));
         assertEquals("ping=ok", Markers.ping("ok"));

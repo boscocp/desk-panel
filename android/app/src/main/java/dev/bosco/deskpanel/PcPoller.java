@@ -43,6 +43,20 @@ public final class PcPoller {
     public interface Listener {
         /** @param online whether the PC answered, i.e. whether a human is logged in */
         void onPcState(boolean online);
+
+        /**
+         * Called on the main thread when this poller has deliberately booked
+         * nothing, because the state is dormant — offline and on battery
+         * (T5.6). It is the handover: from here until something calls
+         * {@link #probeNow()}, no probe will happen, and the schedule is the
+         * listener's problem.
+         *
+         * <p>Fired after every dormant cycle rather than once on entering
+         * dormancy, and that is deliberate: it is the only thing that re-arms
+         * the alarm after a probe that found the PC still absent, so a
+         * once-only edge would leave the phone asleep for good.
+         */
+        void onDormant();
     }
 
     /** The PC server's port (T3.1). Only the host varies, and only per build. */
@@ -108,6 +122,17 @@ public final class PcPoller {
      */
     private volatile PcState.State delivered = PcState.State.UNKNOWN;
 
+    /**
+     * Whether the charger is connected, as last reported by the service from
+     * {@code EXTRA_PLUGGED} (T5.4).
+     *
+     * <p>Starts true, which is the safe default and not an optimistic one: if
+     * no battery broadcast ever arrives, this poller behaves exactly as it did
+     * before T5.6 — the ladder and the wake lock — rather than going dormant on
+     * a phone that is plainly charging and never probing again.
+     */
+    private volatile boolean onMains = true;
+
     private volatile ScheduledExecutorService scheduler;
 
     /**
@@ -143,6 +168,45 @@ public final class PcPoller {
         // The loop carries its own executor rather than reading the field, so a
         // straggler from a previous generation cannot reach this one at all.
         owner.execute(() -> poll(owner, booked));
+    }
+
+    /**
+     * Tells this poller whether the charger is connected (T5.6). Cheap and
+     * idempotent: it only decides what {@link #reschedule} does at the end of
+     * the next cycle, so the caller can hand it every battery broadcast without
+     * thinking about edges.
+     *
+     * <p>It deliberately does <em>not</em> probe or reschedule. Power returning
+     * is worth an immediate probe, but that is an edge only the caller can see,
+     * and it asks for it with {@link #probeNow()}.
+     */
+    public void setOnMains(boolean connected) {
+        onMains = connected;
+    }
+
+    /**
+     * Probes once, now, on the poller thread — the way out of dormancy.
+     *
+     * <p>No new schedule and no new generation: it books one cycle onto the
+     * loop that is already there but idle, so the cycle ends in the usual
+     * {@link #reschedule}, which decides what happens next from the state it
+     * finds. That is what makes recovery need no special case — a probe that
+     * finds the PC back lands on the 2s ladder, and one that finds it still
+     * gone hands the schedule straight back to the alarm.
+     *
+     * <p>A no-op if the poller is stopped.
+     */
+    public void probeNow() {
+        ScheduledExecutorService owner = scheduler;
+        if (!running || owner == null) {
+            return;
+        }
+        final int booked = generation;
+        try {
+            owner.execute(() -> poll(owner, booked));
+        } catch (RejectedExecutionException stopped) {
+            // stop() landed between the read and the submit. Nothing to do.
+        }
     }
 
     /**
@@ -254,6 +318,16 @@ public final class PcPoller {
         if (isStale(booked)) {
             return;
         }
+        if (state.isDormant(onMains)) {
+            // Books nothing, on purpose. Offline and on battery, this process
+            // must not be the reason the CPU stays up, and a scheduled task is
+            // exactly that reason -- either it holds a wake lock so it can fire
+            // or the device suspends and it does not fire at all. So the
+            // schedule goes to AlarmManager and this loop goes quiet until
+            // probeNow().
+            main.post(this::notifyDormant);
+            return;
+        }
         try {
             owner.schedule(
                     () -> poll(owner, booked),
@@ -262,6 +336,23 @@ public final class PcPoller {
         } catch (RejectedExecutionException stopped) {
             // stop() landed between the check and the schedule. Nothing to
             // do: the loop is supposed to end.
+        }
+    }
+
+    /**
+     * The dormancy handover, on the main thread for the same reason the state
+     * is delivered there: what the listener does with it touches the wake lock
+     * and the alarm, which are window-and-service concerns rather than socket
+     * ones.
+     *
+     * <p>Re-checked against {@code running} rather than a generation, because
+     * by the time this runs the loop may have been stopped — and arming an
+     * alarm on behalf of a poller that no longer exists would wake the phone
+     * every fifteen minutes for nothing.
+     */
+    private void notifyDormant() {
+        if (running) {
+            listener.onDormant();
         }
     }
 

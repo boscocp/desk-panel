@@ -10,8 +10,8 @@ package dev.bosco.deskpanel;
  * (ADR 0009).
  *
  * <p>Two kinds, and the distinction is the whole design. <b>Transitions</b> —
- * {@link #state}, {@link #screen}, {@link #night} — are emitted only when
- * something changes, so "exactly one marker" is a countable assertion and a
+ * {@link #state}, {@link #screen}, {@link #night}, {@link #dormant} — are
+ * emitted only when something changes, so "exactly one marker" is a countable assertion and a
  * steady state logs nothing. <b>Heartbeats</b> — {@link #tick}, {@link #ping},
  * {@link #data}, {@link #battery} — are emitted per cycle at a bounded rate,
  * because "this is still running" and "at most four polls a minute" cannot be
@@ -85,6 +85,22 @@ public final class Markers {
     /** One data cycle (T5.1). */
     public static String data(boolean ok) {
         return ok ? "data=ok" : "data=err";
+    }
+
+    /**
+     * Whether the poll loop has handed its schedule to {@code AlarmManager}
+     * because the phone is offline and on its own battery (T5.6).
+     *
+     * <p>A transition marker, and the eighth string in a class whose javadoc
+     * says to resist adding more — so here is the justification. Everything
+     * else about dormancy is an <em>absence</em>: no {@code ping=} lines, no
+     * wake lock, no {@code data=}. An absence cannot be told apart from a poll
+     * loop that has silently died, which is precisely the failure T5.2 calls
+     * the worst available, and the state lasts all night. This is the one line
+     * that says the silence was deliberate.
+     */
+    public static String dormant(boolean on) {
+        return on ? "dormant=on" : "dormant=off";
     }
 
     /** Battery level, on broadcast (T5.4). */

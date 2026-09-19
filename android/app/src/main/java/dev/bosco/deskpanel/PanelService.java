@@ -1,5 +1,6 @@
 package dev.bosco.deskpanel;
 
+import android.app.AlarmManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -13,6 +14,7 @@ import android.content.pm.ServiceInfo;
 import android.os.BatteryManager;
 import android.os.IBinder;
 import android.os.PowerManager;
+import android.os.SystemClock;
 import android.util.Log;
 
 import androidx.core.app.ServiceCompat;
@@ -44,8 +46,11 @@ import androidx.core.content.ContextCompat;
  *   <li><b>The CPU.</b> A foreground service does not keep the CPU awake. With
  *       the screen off, the device suspends and a {@code ScheduledExecutor}
  *       simply stops firing, so a login would go unnoticed until something else
- *       woke the phone. Hence {@link #offlineWakeLock}, held for exactly the
- *       stretch where nothing else is keeping the device up.
+ *       woke the phone. Hence {@link #offlineWakeLock} — held for the offline
+ *       stretch <em>while the phone is on mains</em>, and deliberately not
+ *       while it is on its own battery, where the device is supposed to
+ *       suspend and {@code AlarmManager} keeps the time instead (T5.6, the
+ *       follow-up branch ADR 0014 specifies).
  *   <li><b>The wake.</b> {@code setTurnScreenOn} only fires when the Activity is
  *       resumed, and nothing resumes a stopped Activity on its own. The service
  *       brings it to the front, which is a background activity start — allowed
@@ -88,6 +93,31 @@ public final class PanelService extends Service implements PcPoller.Listener {
 
     private static final String CHANNEL_ID = "panel";
     private static final int NOTIFICATION_ID = 1;
+
+    /**
+     * The sparse offline probe's alarm, as a package-scoped broadcast (T5.6).
+     * Scoped rather than implicit: nothing outside this app has any business
+     * waking its poll loop.
+     */
+    private static final String ACTION_DORMANT_PROBE = "dev.bosco.deskpanel.DORMANT_PROBE";
+
+    /**
+     * How long to hold the CPU for one dormant probe, as a timeout rather than
+     * a matching release.
+     *
+     * <p>The alarm's own implicit wake lock covers {@code onReceive} and
+     * nothing after it, and the probe is blocking I/O handed to another thread
+     * — so without a lock of our own the device can suspend mid-probe and the
+     * result arrives whenever something else happens to wake the phone. A
+     * timeout rather than a release in a callback because the failure modes are
+     * not symmetric: a lock released a few seconds late costs a few seconds of
+     * CPU, and a lock whose release never runs costs the battery this task
+     * exists to save. The platform drops it either way.
+     *
+     * <p>10s against a probe whose worst case is the connect and read timeouts
+     * back to back, 3s (see {@code PcPoller.TIMEOUT_MS}).
+     */
+    private static final long PROBE_WINDOW_MS = 10_000L;
 
     /**
      * The registered panel, or null when no Activity is alive. Static because
@@ -158,6 +188,23 @@ public final class PanelService extends Service implements PcPoller.Listener {
     private static volatile String lastBattery;
 
     /**
+     * Whether the charger is connected, from {@code EXTRA_PLUGGED} (T5.4).
+     * True until the first broadcast says otherwise, which is the same safe
+     * default {@code PcPoller} starts from: no broadcast means behave as the
+     * app did before T5.6 rather than go dormant on a charging phone.
+     */
+    private static volatile boolean onMains = true;
+
+    /**
+     * Whether the loop is currently dormant, so the marker fires on the
+     * transition and not on every fifteen-minute cycle. {@code onDormant} is
+     * called after every dormant probe by design — it is what re-arms the alarm
+     * — so this is what keeps {@code dormant=} one line per change, the same
+     * contract {@code state=} and {@code screen=} keep.
+     */
+    private static volatile boolean dormant;
+
+    /**
      * The running service, for the static entry points that have to reach an
      * instance field. Null between destroy and create.
      */
@@ -186,6 +233,23 @@ public final class PanelService extends Service implements PcPoller.Listener {
      * recommends, which would make the USB die with the PC.
      */
     private PowerManager.WakeLock offlineWakeLock;
+
+    /**
+     * Held for one dormant probe and released by its own timeout (T5.6).
+     *
+     * <p>A second lock rather than a timed acquire on {@link #offlineWakeLock},
+     * and the reason is that the two have different disciplines: this one is
+     * always timed and always short, that one is untimed and released by a
+     * window gaining focus. Mixing them means calling {@code acquire(timeout)}
+     * and {@code acquire()} on one object, and whether the second cancels the
+     * first's pending release is a detail of the platform's implementation
+     * rather than of its documentation — the kind of thing ADR 0009's reasoning
+     * says not to build on. Two objects have no such question.
+     */
+    private PowerManager.WakeLock probeWakeLock;
+
+    /** Keeps the sparse offline probe's time while this process is asleep (T5.6). */
+    private AlarmManager alarms;
 
     /**
      * Registers the Activity that owns the window, and immediately replays the
@@ -230,6 +294,8 @@ public final class PanelService extends Service implements PcPoller.Listener {
         instance = this;
         createNotificationChannel();
 
+        alarms = getSystemService(AlarmManager.class);
+
         PowerManager power = getSystemService(PowerManager.class);
         offlineWakeLock = power.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK, "DeskPanel:offline-poll");
@@ -237,6 +303,10 @@ public final class PanelService extends Service implements PcPoller.Listener {
         // counting would make a second acquire need a second release, and this
         // lock is a state, not a stack.
         offlineWakeLock.setReferenceCounted(false);
+
+        probeWakeLock = power.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK, "DeskPanel:probe");
+        probeWakeLock.setReferenceCounted(false);
 
         // R.string.pc_host carries the address the build baked in from .env.
         String host = getString(R.string.pc_host);
@@ -254,6 +324,11 @@ public final class PanelService extends Service implements PcPoller.Listener {
                 batteryReceiver,
                 new IntentFilter(Intent.ACTION_BATTERY_CHANGED),
                 ContextCompat.RECEIVER_NOT_EXPORTED);
+
+        IntentFilter wakeFilter = new IntentFilter(Intent.ACTION_POWER_CONNECTED);
+        wakeFilter.addAction(ACTION_DORMANT_PROBE);
+        ContextCompat.registerReceiver(
+                this, wakeReceiver, wakeFilter, ContextCompat.RECEIVER_NOT_EXPORTED);
     }
 
     /**
@@ -323,6 +398,12 @@ public final class PanelService extends Service implements PcPoller.Listener {
             // is still affordable, so a false "unplugged" argues for rewriting
             // the poll loop to solve a problem that does not exist.
             boolean plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0;
+
+            // The power state, before the reading: this is what decides whether
+            // the poll loop may hold the CPU at all (T5.6), and it matters even
+            // on a broadcast whose level is unusable and returns below.
+            onPowerState(plugged);
+
             String reading = BatteryReading.json(level, scale, tenths, plugged);
             if (reading == null) {
                 return;
@@ -337,6 +418,106 @@ public final class PanelService extends Service implements PcPoller.Listener {
         }
     };
 
+
+    /**
+     * The two things that end dormancy from outside the poll loop (T5.6):
+     * power returning, and the alarm coming due.
+     *
+     * <p>Registered dynamically rather than in the manifest. The process is a
+     * foreground service and therefore alive, so a manifest entry buys nothing
+     * and would run into the implicit-broadcast restrictions that have applied
+     * since API 26.
+     */
+    private final BroadcastReceiver wakeReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            // Captured before onPowerState clears it: power returning is what
+            // ends dormancy, so reading the flag afterwards would always say
+            // "not dormant" and the immediate probe -- the whole point of
+            // listening for this broadcast -- would never happen.
+            boolean wasDormant = dormant;
+
+            String action = intent.getAction();
+            if (Intent.ACTION_POWER_CONNECTED.equals(action)) {
+                // The real signal, and the reason the alarm can be as sparse as
+                // fifteen minutes. With the USB dying with the PC, power coming
+                // back *is* the PC coming back, so this is a login notification
+                // that costs nothing to listen for.
+                //
+                // ACTION_BATTERY_CHANGED carries the same fact, but not as
+                // promptly: it is one of the broadcasts the platform defers
+                // while dozing, which is exactly the state this arrives in.
+                onPowerState(true);
+            }
+            // Only out of dormancy. The alarm fires in no other state, but
+            // ACTION_POWER_CONNECTED arrives whenever somebody plugs the phone
+            // in, and probing on that while the panel is already on a 2s ladder
+            // would be a wake lock and a socket spent to learn what the next
+            // two seconds were going to say anyway.
+            if (wasDormant) {
+                probeAfterWake();
+            }
+        }
+    };
+
+    /**
+     * One power state, from wherever it was learned. Idempotent, so both
+     * receivers can call it on every broadcast without comparing edges.
+     *
+     * <p>It does not probe. Power returning deserves an immediate probe, but
+     * the probe belongs to the caller that knows a broadcast just arrived, so
+     * that a plain {@code ACTION_BATTERY_CHANGED} in the steady state does not
+     * turn into one probe per broadcast.
+     */
+    private void onPowerState(boolean plugged) {
+        // Unconditional and cheap: the poller only reads this at the end of a
+        // cycle, so it costs nothing to keep it correct on every broadcast.
+        poller.setOnMains(plugged);
+
+        // The rest is edge-only. ACTION_BATTERY_CHANGED arrives about every
+        // eight seconds while charging, and cancelling an alarm is a binder
+        // call: doing it 450 times an hour to cancel nothing is exactly the
+        // kind of small constant cost this task exists to remove.
+        if (onMains == plugged) {
+            return;
+        }
+        onMains = plugged;
+        if (plugged) {
+            // Nothing is waiting on the alarm any more: on mains the poller
+            // books its own ladder again, and leaving this armed would wake the
+            // phone every fifteen minutes to do what the loop is already doing.
+            cancelDormantAlarm();
+
+            // Dormancy ends here, not only when the PC comes back. Mains
+            // returning is enough on its own: the next reschedule will book
+            // in-process again because isDormant() is false, so the loop is
+            // live from that moment whatever the PC is doing. Without this the
+            // flag stayed true through a perfectly awake poll loop and the log
+            // never said dormancy had ended — measured on the device, where
+            // power came back, the probe fired in 21ms, and `dormant=off` was
+            // nowhere.
+            setDormant(false);
+        }
+        // Losing mains while *offline* leaves the wake lock held until the next
+        // reschedule notices, at most one BACKOFF_CAP_MS. Deliberately not
+        // chased: the probe that interval ends with needs the CPU anyway, so
+        // the tail costs one probe's worth of what the next probe would spend.
+    }
+
+    /**
+     * One probe, with enough CPU to finish it. The way back from dormancy,
+     * shared by the alarm and by power returning.
+     *
+     * <p>The lock is taken before the probe rather than after, and with a
+     * timeout: see {@link #PROBE_WINDOW_MS}. If the probe finds the PC back the
+     * ordinary path takes over and {@link #panelVisible()} drops the lock
+     * early; if it finds it still gone, {@link #onDormant()} drops it and
+     * re-arms.
+     */
+    private void probeAfterWake() {
+        probeWakeLock.acquire(PROBE_WINDOW_MS);
+        poller.probeNow();
+    }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -363,7 +544,15 @@ public final class PanelService extends Service implements PcPoller.Listener {
         poller.stop();
         dataPoller.stop();
         unregisterReceiver(batteryReceiver);
+        unregisterReceiver(wakeReceiver);
+        // Before the lock, and not optional: an alarm outliving the service it
+        // was arming a probe for would wake the phone every fifteen minutes to
+        // deliver a broadcast nothing is listening to.
+        cancelDormantAlarm();
         releaseOfflineWakeLock();
+        if (probeWakeLock.isHeld()) {
+            probeWakeLock.release();
+        }
         instance = null;
         super.onDestroy();
     }
@@ -395,8 +584,33 @@ public final class PanelService extends Service implements PcPoller.Listener {
         Log.i(Markers.TAG, Markers.state(online));
         lastOnline = online;
 
-        if (!online && !offlineWakeLock.isHeld()) {
+        // On mains only. Offline on battery the device is *supposed* to
+        // suspend, and holding this would be the whole problem T5.6 exists to
+        // fix rather than a step towards it — the reschedule that follows this
+        // delivery goes dormant instead, and onDormant() takes it from there
+        // (ADR 0014's own follow-up branch).
+        if (!online && onMains && !offlineWakeLock.isHeld()) {
             offlineWakeLock.acquire();
+        }
+        if (online) {
+            // Nothing sparse is pending any more, and an alarm left armed would
+            // wake the phone every fifteen minutes for a probe the 2s ladder is
+            // already making.
+            cancelDormantAlarm();
+            setDormant(false);
+
+            // Taken, not dropped, and this is the one place the word "offline"
+            // in the tag is misleading. ADR 0014's rule is that the CPU is held
+            // from the decision to wake until the window can be seen to be
+            // visible, because startActivity only queues the request -- and
+            // panelVisible() is what releases it. Before T5.6 that held by
+            // accident: the lock was already up from the offline stretch. Out
+            // of dormancy nothing holds it, so the wake would have raced a
+            // suspending device, and the probe's own lock is timed and would
+            // expire mid-wake.
+            if (!offlineWakeLock.isHeld()) {
+                offlineWakeLock.acquire();
+            }
         }
 
         Panel target = panel;
@@ -431,6 +645,77 @@ public final class PanelService extends Service implements PcPoller.Listener {
             lastServerPayload = null;
             lastPayload = null;
         }
+    }
+
+    /**
+     * The poll loop has booked nothing because the state is dormant — offline
+     * and on battery (T5.6). From here the schedule is this service's, and it
+     * keeps it in {@code AlarmManager} rather than in a thread, so that the
+     * device is free to suspend.
+     *
+     * <p>Order matters and it is the reverse of the online path: the lock goes
+     * <em>before</em> the alarm is armed, because the alarm is what will bring
+     * the CPU back and there is nothing to lose by being asleep in between.
+     *
+     * <p>Called after every dormant probe, not once on entering dormancy, which
+     * is what re-arms the alarm for the next one. {@link #setDormant} is what
+     * keeps the marker down to one line per transition.
+     */
+    @Override
+    public void onDormant() {
+        releaseOfflineWakeLock();
+        armDormantAlarm();
+        setDormant(true);
+    }
+
+    /** The marker, on the transition only. */
+    private void setDormant(boolean nowDormant) {
+        if (dormant == nowDormant) {
+            return;
+        }
+        dormant = nowDormant;
+        Log.i(Markers.TAG, Markers.dormant(nowDormant));
+    }
+
+    /**
+     * Books the sparse probe.
+     *
+     * <p>{@code setAndAllowWhileIdle}, which is inexact and permitted in Doze.
+     * Not {@code setExactAndAllowWhileIdle}: that wants
+     * {@code SCHEDULE_EXACT_ALARM} from API 31, and exactness would buy nothing
+     * here, because this alarm is the fallback and
+     * {@code ACTION_POWER_CONNECTED} is the mechanism.
+     *
+     * <p>{@code ELAPSED_REALTIME_WAKEUP} rather than {@code RTC_WAKEUP}, for
+     * the same reason {@code PcPoller} times its probes on
+     * {@code elapsedRealtime}: a clock correction must not move the schedule.
+     */
+    private void armDormantAlarm() {
+        alarms.setAndAllowWhileIdle(
+                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                SystemClock.elapsedRealtime() + PcState.DORMANT_ALARM_MS,
+                dormantProbeIntent());
+    }
+
+    private void cancelDormantAlarm() {
+        alarms.cancel(dormantProbeIntent());
+    }
+
+    /**
+     * The alarm's {@code PendingIntent}, built the same way every time so that
+     * {@link #cancelDormantAlarm} matches what {@link #armDormantAlarm}
+     * registered — equality here is by action, package and flags, not by
+     * object.
+     *
+     * <p>{@code setPackage}, so this is a package-scoped broadcast rather than
+     * an implicit one that any app could see or send.
+     */
+    private PendingIntent dormantProbeIntent() {
+        return PendingIntent.getBroadcast(
+                this,
+                0,
+                new Intent(ACTION_DORMANT_PROBE).setPackage(getPackageName()),
+                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
     }
 
     /**
