@@ -100,12 +100,18 @@ def normalise_history(raw):
 
 def load_history(coins, days, get=get_json):
     """`{coin: [closes oldest-first]}` for every coin that answered."""
+    coins = list(coins or [])
     history = {}
-    for coin in coins or []:
+    failures = []
+    for coin in coins:
         try:
             history[to_coin(coin)] = normalise_history(fetch_history(coin, days, get=get))
-        except UpstreamError:
-            continue
+        except UpstreamError as exc:
+            failures.append(exc)
+    # See providers_awesomeapi.load_history: a total failure must not be
+    # cached as an answer.
+    if coins and failures and not history:
+        raise failures[0]
     return history
 
 

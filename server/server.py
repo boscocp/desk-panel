@@ -56,7 +56,12 @@ DEFAULT_CONFIG = {
     "fx": [],
     "city": "Sao Paulo",
     "timezone": "America/Sao_Paulo",
-    "quotes_interval_s": 300,
+    # 600, not 300, and the arithmetic is the reason. brapi's free plan allows
+    # one symbol per request and 15k requests a month, so three tickers cost
+    # three requests a refresh: at 300s that is 25,920 a month against a 15,000
+    # budget, and the B3 card would go permanently stale around the 17th. At
+    # 600s it is 12,960 with the PC logged in around the clock.
+    "quotes_interval_s": 600,
     "weather_interval_s": 900,
     # Daily closes change once a day, so the sparkline's series is fetched on
     # a clock measured in hours rather than minutes. Six is arbitrary and
@@ -306,6 +311,8 @@ class App:
             "fx": TimedCache(),
             "crypto": TimedCache(),
         }
+        self._history_lock = threading.Lock()
+        self._history_refreshing = set()
         # Coordinates never change, so the geocode is cached for the life of
         # the process rather than on a TTL (T3.4 step 1).
         self.coords = None
@@ -334,12 +341,42 @@ class App:
 
         history = self._history(now)
 
+        wanted = {"quotes": len(config.get("quotes", [])),
+                  "fx": len(config.get("fx", [])),
+                  "crypto": len(config.get("crypto", []))}
+
         payload = {}
         stale = False
         for market, produce in producers.items():
             rows, market_stale = self.market_caches[market].get(now, ttl, produce)
             rows = rows if rows is not None else []
-            key = "pair" if market == "fx" else "symbol"
+
+            # Fewer rows than were asked for is a failure the cache cannot see.
+            # brapi sends one symbol per request now, so a 429 on one ticker
+            # returns the other two and looks like a success: that row would
+            # vanish from the panel for a whole TTL with nothing marked. A
+            # rate-limited request is not a delisted ticker, and the badge is
+            # how the panel says "something here is missing".
+            if len(rows) < wanted.get(market, 0):
+                market_stale = True
+                # Named, not just counted. A partial market used to be
+                # completely silent: the row vanished, the cache recorded a
+                # success, and the only evidence was a gap on the panel. Seen
+                # on this desk when three brapi quote calls raced three
+                # history calls, which the per-symbol split and the background
+                # refresh made possible at the same moment.
+                # Separators stripped on both sides before comparing: config
+                # spells an FX pair USD-BRL and the row spells it USD/BRL, so
+                # a literal comparison would report every pair as missing
+                # whenever any one of them was.
+                got = {_bare(r.get(key, "")) for r in rows}
+                missing = sorted(str(x) for x in config.get(market, [])
+                                 if _bare(x) not in got)
+                print(f"{market}: {len(rows)} of {wanted[market]} rows"
+                      + (f", missing {', '.join(missing)}" if missing else ""),
+                      file=sys.stderr)
+
+            key = key_for(market)
             # Attached rather than merged into the cache, so a history that
             # failed or has not been fetched yet costs the row its picture and
             # nothing else. An absent series is an absent key: the page draws
@@ -353,31 +390,93 @@ class App:
         return payload
 
     def _history(self, now):
-        """`{market: {symbol: [values]}}`, on its own slow cache.
+        """`{market: {symbol: [values]}}`, refreshed off the request path.
 
-        Never marks the payload stale. A sparkline is a decoration on a row
-        that already carries the number it decorates, so failing to draw one
-        is not a reason to tell the panel its prices are old.
+        Never marks the payload stale, and never makes anybody wait for it. A
+        sparkline is a decoration on a row that already carries the number it
+        decorates, so it must not be able to call that number old and it must
+        not be able to delay it either: one cache miss here is up to six
+        sequential upstream calls, each with a ten second timeout, against a
+        phone that gives the whole request five seconds (DataPoller). Blocking
+        would mean a failed poll on every history cycle.
+
+        So a stale history refreshes in the background and the request serves
+        whatever is on hand, which on a cold start is nothing at all -- the
+        panel draws no lines for one cycle and then has them.
         """
-        config = self.config
-        ttl = config.get("history_interval_s", 21600)
-        days = config.get("history_days", 30)
+        history = {}
+        for market, cache in self.history_caches.items():
+            if not cache.fresh_at(now, self._history_ttl(market)):
+                self._refresh_history_async(market)
+            history[market] = cache.value or {}
+        return history
 
-        producers = {
+    def _history_ttl(self, market):
+        """Six hours once every row has a line, minutes while any is missing.
+
+        Daily closes do not move between refreshes, so the long TTL is right
+        for a complete answer. It is wrong for an incomplete one, and
+        incomplete is what a blip during the refresh leaves behind -- one
+        badly timed failure would otherwise cost a ticker its sparkline for
+        six hours, with no retry and nothing to say why. Seen on this desk:
+        SEER3 came back with zero points while the other six rows were fine.
+
+        Counting rather than checking for emptiness, because the partial case
+        is the common one: a total failure is a network outage, a single
+        missing symbol is an ordinary rate limit.
+        """
+        long_ttl = self.config.get("history_interval_s", 21600)
+        series = self.history_caches[market].value or {}
+        if len(series) >= len(self.config.get(market, [])):
+            return long_ttl
+        return min(long_ttl, self.config.get("quotes_interval_s", 600))
+
+    def _refresh_history_async(self, market):
+        """Start one background refresh for `market`, or leave the running one
+        alone. TimedCache's own lock would serialise callers rather than
+        letting them through, which is the opposite of what is wanted here."""
+        with self._history_lock:
+            if market in self._history_refreshing:
+                return
+            self._history_refreshing.add(market)
+
+        def run():
+            try:
+                self.history_caches[market].get(
+                    self.clock(), self._history_ttl(market),
+                    self._history_producer(market))
+            finally:
+                with self._history_lock:
+                    self._history_refreshing.discard(market)
+
+        thread = threading.Thread(target=run, name=f"history-{market}", daemon=True)
+        thread.start()
+
+    def _history_producer(self, market):
+        config = self.config
+        days = config.get("history_days", 30)
+        if market == "quotes":
             # Needs the token, like the prices beside it. Without one this
             # returns nothing and the B3 rows simply have no line.
-            "quotes": lambda: providers_brapi.load_history(
-                config.get("quotes", []), token=config.get("brapi_token", "")
-            ),
-            "fx": lambda: providers_awesomeapi.load_history(config.get("fx", []), days),
-            "crypto": lambda: providers_binance.load_history(config.get("crypto", []), days),
-        }
+            return lambda: providers_brapi.load_history(
+                config.get("quotes", []), token=config.get("brapi_token", ""), days=days
+            )
+        if market == "fx":
+            return lambda: providers_awesomeapi.load_history(config.get("fx", []), days)
+        return lambda: providers_binance.load_history(config.get("crypto", []), days)
 
-        history = {}
-        for market, produce in producers.items():
-            series, _ = self.history_caches[market].get(now, ttl, produce)
-            history[market] = series or {}
-        return history
+    def warm_history(self):
+        """Start fetching every series now, rather than on the first request.
+
+        Without it the panel's first payload after a login carries no history
+        at all -- the refresh is deliberately off the request path, so the
+        first poll is served before it finishes -- and every card would be
+        drawn without its lines for a cycle at exactly the moment somebody has
+        just sat down. Called once at startup; costs nothing if the phone is
+        not there, because the server only runs while somebody is logged in.
+        """
+        for market in self.history_caches:
+            self._refresh_history_async(market)
 
     def weather(self):
         """`{tempC, minC, maxC, code, city, stale}` for the configured city."""
@@ -385,11 +484,23 @@ class App:
         ttl = config.get("weather_interval_s", 900)
 
         def produce():
-            data, coords = providers_openmeteo.load(
-                config.get("city", ""), config.get("timezone", ""), coords=self.coords
-            )
-            self.coords = coords
-            return data
+            # Geocode first and keep the answer immediately. Folding both calls
+            # into one meant a forecast outage threw away coordinates that had
+            # just been resolved successfully, so every later refresh
+            # re-geocoded -- doubling the requests against a 10k/day budget
+            # exactly while the provider was already struggling. A city does
+            # not move; once located it stays located.
+            if self.coords is None:
+                located = providers_openmeteo.normalise_geocode(
+                    providers_openmeteo.fetch_geocode(config.get("city", "")))
+                if located is None:
+                    raise UpstreamError(
+                        f"no coordinates found for city {config.get('city', '')!r}")
+                self.coords = located
+            raw = providers_openmeteo.fetch_forecast(
+                self.coords["lat"], self.coords["lon"], config.get("timezone", ""))
+            return providers_openmeteo.normalise(
+                raw, city=self.coords.get("city") or config.get("city", ""))
 
         value, stale = self.weather_cache.get(self.clock(), ttl, produce)
         payload = dict(value or {
@@ -398,6 +509,26 @@ class App:
         })
         payload["stale"] = stale
         return payload
+
+
+def _bare(symbol):
+    """Pure: a symbol or pair reduced to letters and digits, upper case.
+
+    The one place the project's several spellings of the same thing have to be
+    compared rather than converted -- see providers_awesomeapi for the full
+    list of them.
+    """
+    return "".join(ch for ch in str(symbol).upper() if ch.isalnum())
+
+
+def key_for(market):
+    """Pure: which field identifies a row in `market`.
+
+    FX rows are keyed by `pair` and the other two by `symbol`, which is a
+    difference the payload contract makes and this is the one place that has
+    to know it.
+    """
+    return "pair" if market == "fx" else "symbol"
 
 
 def action_id(path):
@@ -611,7 +742,11 @@ def main(argv=None):
     # functools.partial rather than a class attribute: the app is per-server
     # state, and a class attribute would be shared by every server in a test
     # process that starts more than one.
-    server = Server((HOST, port), functools.partial(Handler, app=App(config)))
+    app = App(config)
+    # Before the socket is bound rather than after: the first poll lands within
+    # seconds of a login, and the series should already be on its way.
+    app.warm_history()
+    server = Server((HOST, port), functools.partial(Handler, app=app))
     try:
         server.serve_forever()
     except KeyboardInterrupt:

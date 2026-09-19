@@ -248,6 +248,7 @@ CONFIG = {
     "quotes": ["PETR4"], "fx": ["USD-BRL"], "crypto": ["BTC"],
     "city": "Sao Paulo", "timezone": "America/Sao_Paulo",
     "quotes_interval_s": 300, "weather_interval_s": 900, "brapi_token": "",
+    "history_interval_s": 21600, "history_days": 30,
 }
 
 
@@ -339,8 +340,11 @@ class AppPayloadTests(unittest.TestCase):
     def test_a_market_that_recovers_alone_clears_the_stale_flag(self):
         import server.server as server_module
 
+        # Every configured symbol has to come back, or the payload is stale by
+        # the rule below -- which is the point of that rule.
         self._stub_providers(quotes=[{"symbol": "PETR4", "price": 1.0, "changePct": 0.0}],
-                             fx=[], crypto=[])
+                             fx=[{"pair": "USD/BRL", "rate": 5.0, "changePct": 0.0}],
+                             crypto=[{"symbol": "BTC", "price": 1.0, "changePct": 0.0}])
         brapi = server_module.providers_brapi
         failing = {"now": True}
         working = brapi.load
@@ -366,6 +370,41 @@ class AppPayloadTests(unittest.TestCase):
         for key in ("quotes", "fx", "crypto"):
             self.assertIsInstance(payload[key], list)
 
+    def test_incomplete_history_is_retried_soon_rather_than_cached_for_hours(self):
+        # Seen on this desk: six rows got their series and SEER3 got none, and
+        # because the cache held *something* the gap would have been kept for
+        # the full six-hour TTL. A missing symbol is an ordinary rate limit,
+        # not an outage.
+        app = self.app
+        long_ttl = app.config["history_interval_s"]
+
+        app.history_caches["quotes"].value = {}
+        self.assertLess(app._history_ttl("quotes"), long_ttl)
+
+        app.history_caches["quotes"].value = {"PETR4": [1.0, 2.0]}
+        self.assertEqual(app._history_ttl("quotes"), long_ttl,
+                         "a complete history should keep the long TTL")
+
+        app.config["quotes"] = ["PETR4", "SEER3"]
+        self.assertLess(app._history_ttl("quotes"), long_ttl,
+                        "a partial history should be retried sooner")
+
+    def test_a_market_returning_fewer_rows_than_configured_is_stale(self):
+        # With one symbol per brapi request, a 429 on one ticker returns the
+        # other two and looks like a success. That row would disappear from the
+        # panel for a whole TTL with no badge, and a rate-limited request is
+        # not a delisted ticker.
+        self._stub_providers(
+            quotes=[],  # CONFIG asks for PETR4
+            fx=[{"pair": "USD/BRL", "rate": 5.0, "changePct": 0.0}],
+            crypto=[{"symbol": "BTC", "price": 1.0, "changePct": 0.0}],
+        )
+        payload = self.app.quotes()
+        self.assertTrue(payload["stale"])
+        # The markets that did answer keep their rows.
+        self.assertEqual(len(payload["fx"]), 1)
+        self.assertEqual(len(payload["crypto"]), 1)
+
     def test_quotes_are_cached_across_calls(self):
         calls = []
         import server.server as server_module
@@ -384,29 +423,59 @@ class AppPayloadTests(unittest.TestCase):
         self.app.quotes()
         self.assertEqual(len(calls), 2)
 
-    def test_weather_geocode_happens_once_and_is_reused(self):
+    def _stub_weather(self, forecast_fails=False):
+        """Replace the two outbound seams and count the geocodes."""
         import server.server as server_module
 
         module = server_module.providers_openmeteo
-        seen = []
+        counts = {"geocode": 0, "forecast": 0}
 
-        def load(city, timezone, coords=None, get=None):
-            seen.append(coords)
-            return ({"tempC": 24.0, "minC": 15.5, "maxC": 26.1, "code": 2,
-                     "city": "São Paulo"},
-                    {"lat": -23.5, "lon": -46.6, "city": "São Paulo"})
+        def fetch_geocode(city, get=None):
+            counts["geocode"] += 1
+            return {"results": [{"name": "São Paulo", "latitude": -23.5,
+                                 "longitude": -46.6}]}
 
-        self.addCleanup(setattr, module, "load", module.load)
-        module.load = load
+        def fetch_forecast(lat, lon, timezone, get=None):
+            counts["forecast"] += 1
+            if forecast_fails:
+                raise UpstreamError("forecast down")
+            return {"current": {"time": "2026-09-19T11:15", "temperature_2m": 24.0,
+                                "weather_code": 2},
+                    "daily": {"time": ["2026-09-19"], "temperature_2m_max": [26.1],
+                              "temperature_2m_min": [15.5]}}
 
-        self.app.weather()
-        self.clock.now = 1000
+        for name, stub in (("fetch_geocode", fetch_geocode),
+                           ("fetch_forecast", fetch_forecast)):
+            self.addCleanup(setattr, module, name, getattr(module, name))
+            setattr(module, name, stub)
+        return counts
+
+    def test_weather_geocode_happens_once_and_is_reused(self):
+        counts = self._stub_weather()
+
         payload = self.app.weather()
+        self.clock.now = 10000
+        self.app.weather()
 
-        self.assertIsNone(seen[0], "the first call should have no cached coordinates")
-        self.assertIsNotNone(seen[1], "the second call should reuse them")
+        self.assertEqual(counts["geocode"], 1, "a city that has not moved was located twice")
+        self.assertEqual(counts["forecast"], 2)
         self.assertEqual(payload["city"], "São Paulo")
         self.assertFalse(payload["stale"])
+
+    def test_a_forecast_outage_does_not_throw_away_the_coordinates(self):
+        # Geocoding and forecasting used to be one call, so a forecast failure
+        # discarded coordinates that had just been resolved -- and every later
+        # refresh re-geocoded, doubling the requests against a 10k/day budget
+        # exactly while the provider was already struggling.
+        counts = self._stub_weather(forecast_fails=True)
+
+        for tick in (0, 10000, 20000):
+            self.clock.now = tick
+            payload = self.app.weather()
+            self.assertTrue(payload["stale"])
+
+        self.assertEqual(counts["geocode"], 1, "the city was re-located after a forecast failure")
+        self.assertEqual(counts["forecast"], 3)
 
 
 class ActionIdTests(unittest.TestCase):
