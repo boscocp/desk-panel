@@ -12,11 +12,25 @@ tests can call them directly without a socket -- see server/CLAUDE.md and
 TT.2.
 """
 import argparse
+import functools
 import json
 import os
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+
+# Run two ways, and both are documented. `python -m unittest discover -t .`
+# imports this as `server.server`, with the repository root on sys.path; but
+# `python server/server.py` -- the command in server/CLAUDE.md and in every
+# launcher -- puts `server/` on sys.path and the root nowhere, so the absolute
+# imports below would not resolve. Adding the root first costs nothing in the
+# package case, where this branch is not taken at all.
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from server import providers_awesomeapi, providers_binance, providers_brapi, providers_openmeteo  # noqa: E402
+from server.upstream import UpstreamError  # noqa: E402
 
 HOST = "0.0.0.0"
 PORT = 8777
@@ -174,23 +188,193 @@ def check_python_version(version_info=None):
     return None
 
 
-def route(method, path):
+class TimedCache:
+    """One cached value, its age, and the last good copy of it.
+
+    Two jobs, and the second is the one that matters on a desk. It keeps the
+    panel off the upstreams between refreshes -- brapi's free tier is 15k
+    requests a month and a 2s poll would burn it in days (T3.3 step 4). And
+    when a refresh fails it serves the previous value with `stale` set,
+    because a slightly old price beats an empty panel (T3.3 step 5).
+
+    The clock is passed in rather than read, so TT.2 can move time without
+    sleeping.
+    """
+
+    def __init__(self):
+        self.value = None
+        self.fetched_at = None
+        self.stale = False
+        self.last_error = None
+
+    def fresh_at(self, now, ttl_s):
+        """Pure: whether the held value is still within `ttl_s` of `now`."""
+        return self.value is not None and self.fetched_at is not None and (
+            now - self.fetched_at < ttl_s
+        )
+
+    def get(self, now, ttl_s, produce):
+        """The cached value, refreshing through `produce` when it has aged out.
+
+        Returns `(value, stale)`. `stale` is True whenever the value on hand
+        is not the result of a successful call -- either an older one kept
+        after a failure, or nothing at all on a cold start that failed.
+        """
+        if self.fresh_at(now, ttl_s):
+            return self.value, self.stale
+
+        try:
+            self.value = produce()
+            self.fetched_at = now
+            self.stale = False
+            self.last_error = None
+        except UpstreamError as exc:
+            # Deliberately not re-raised: every caller would turn it into the
+            # same thing, and the last good value is a better answer than an
+            # error page on a panel nobody is sitting at.
+            #
+            # `fetched_at` moves on a failure too, so the contract is simply
+            # "at most one upstream attempt per TTL", success or failure. The
+            # alternative -- leaving it behind so the next request retries --
+            # looks like resilience and is the opposite: an upstream that is
+            # down turns into one outbound request per panel poll, which is
+            # precisely the traffic this cache exists to prevent, arriving
+            # exactly when the upstream can least afford it. The cost is that
+            # recovery waits out a TTL, which the `stale` flag makes visible.
+            self.last_error = str(exc)
+            self.stale = True
+            self.fetched_at = now
+        return self.value, self.stale
+
+
+class App:
+    """Config, caches and providers -- everything `route` needs and the
+    request handler must not know about.
+
+    Holding it in one object is what keeps `route` callable from a test with
+    a hand-built stub, which is the rule in server/CLAUDE.md: the handler
+    routes and serialises, and nothing else lives in the socket layer.
+    """
+
+    def __init__(self, config, clock=time.monotonic):
+        self.config = config
+        self.clock = clock
+        self.quotes_cache = TimedCache()
+        self.weather_cache = TimedCache()
+        # Coordinates never change, so the geocode is cached for the life of
+        # the process rather than on a TTL (T3.4 step 1).
+        self.coords = None
+
+    def quotes(self):
+        """`{quotes, fx, crypto, stale}` -- the three markets in one payload.
+
+        One cache for all three, because the panel asks for them together and
+        a partial refresh would mean three ages on one screen. A single
+        upstream failing therefore marks the whole payload stale, which is
+        the honest reading: something on this panel is older than it looks.
+        """
+        config = self.config
+        ttl = config.get("quotes_interval_s", 300)
+
+        def produce():
+            return {
+                "quotes": providers_brapi.load(
+                    config.get("quotes", []), token=config.get("brapi_token", "")
+                ),
+                "fx": providers_awesomeapi.load(config.get("fx", [])),
+                "crypto": providers_binance.load(config.get("crypto", [])),
+            }
+
+        value, stale = self.quotes_cache.get(self.clock(), ttl, produce)
+        payload = dict(value or {"quotes": [], "fx": [], "crypto": []})
+        payload["stale"] = stale
+        return payload
+
+    def weather(self):
+        """`{tempC, minC, maxC, code, city, stale}` for the configured city."""
+        config = self.config
+        ttl = config.get("weather_interval_s", 900)
+
+        def produce():
+            data, coords = providers_openmeteo.load(
+                config.get("city", ""), config.get("timezone", ""), coords=self.coords
+            )
+            self.coords = coords
+            return data
+
+        value, stale = self.weather_cache.get(self.clock(), ttl, produce)
+        payload = dict(value or {
+            "tempC": None, "minC": None, "maxC": None,
+            "code": None, "city": config.get("city", ""),
+        })
+        payload["stale"] = stale
+        return payload
+
+
+def action_id(path):
+    """Pure: the id in `/action/<id>`, or None if `path` is not that shape.
+
+    One segment, non-empty, no nesting. The id is not used for anything yet
+    (T3.7 returns 501), and when it is it will be looked up in a closed
+    allowlist from config -- never turned into a command, a path or an
+    argument. Matching narrowly here is the first half of that promise.
+    """
+    prefix = "/action/"
+    if not path.startswith(prefix):
+        return None
+    rest = path[len(prefix):]
+    if not rest or "/" in rest or "?" in rest:
+        return None
+    return rest
+
+
+def route(method, path, app=None):
     """Pure routing: (method, path) -> (status, body_bytes, content_type).
 
-    No side effects, no I/O -- callable directly from tests without
-    starting a server.
+    No I/O of its own -- callable directly from tests without starting a
+    server. `app` supplies the data routes; without one they answer 503
+    rather than pretending, which is what lets the existing two-argument
+    tests keep asserting that /ping and 404 need no state at all.
     """
     if method == "GET" and path == "/ping":
-        body = json.dumps({"ok": True}).encode("utf-8")
-        return 200, body, "application/json"
+        return _json(200, {"ok": True})
+
+    if method == "GET" and path == "/quotes":
+        if app is None:
+            return _json(503, {"error": "not configured"})
+        return _json(200, app.quotes())
+
+    if method == "GET" and path == "/weather":
+        if app is None:
+            return _json(503, {"error": "not configured"})
+        return _json(200, app.weather())
+
+    if method == "POST" and action_id(path) is not None:
+        # T3.7: the v2 placeholder. 501 is "not implemented", which is
+        # exactly what this is -- 404 would say the route does not exist and
+        # 200 would say something happened.
+        return _json(501, {"error": "not implemented"})
+
     return 404, b"", "text/plain"
+
+
+def _json(status, payload):
+    """(status, body, content_type) for a JSON response."""
+    return status, json.dumps(payload).encode("utf-8"), "application/json"
 
 
 class Handler(BaseHTTPRequestHandler):
     """Dumb by design: routes to `route()` and serialises its result."""
 
+    def __init__(self, *args, app=None, **kwargs):
+        # Before super().__init__, which handles the whole request before it
+        # returns -- anything set afterwards would not exist yet when
+        # do_GET runs.
+        self.app = app
+        super().__init__(*args, **kwargs)
+
     def _handle(self, method):
-        status, body, content_type = route(method, self.path)
+        status, body, content_type = route(method, self.path, getattr(self, "app", None))
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
@@ -306,7 +490,10 @@ def main(argv=None):
         return
 
     port = config.get("port", PORT)
-    server = Server((HOST, port), Handler)
+    # functools.partial rather than a class attribute: the app is per-server
+    # state, and a class attribute would be shared by every server in a test
+    # process that starts more than one.
+    server = Server((HOST, port), functools.partial(Handler, app=App(config)))
     try:
         server.serve_forever()
     except KeyboardInterrupt:
