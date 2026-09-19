@@ -231,7 +231,13 @@ body {
 }
 
 .row .change {
-    min-width: 4.4em;
+    /* A floor, and a smaller one than it looks like it should be. The
+     * percentage is right-aligned in a box that always ends at the row's edge,
+     * because the chart beside it absorbs every bit of slack -- so the column
+     * stays aligned however narrow this gets, and the only thing the floor
+     * does is hold empty space the chart could be using. A value wider than
+     * the floor simply grows the box. */
+    min-width: 3.4em;
     text-align: right;
 }
 
@@ -248,9 +254,21 @@ body {
      * whatever the label, price and change do not want, and the first to give
      * it back. Up to 72px where the card is roomy (B3, FX), down to 28px in
      * the crypto card, whose prices are the widest on the panel. */
+    /* `flex: 1 1 0` and no cap, and both halves are load-bearing.
+     *
+     * Basis zero means this element contributes nothing to the row's natural
+     * width, so it can never be the reason a ticker has to shrink. Every
+     * attempt at giving it a real basis -- 56px, 72px, an auto margin to push
+     * it right -- pushed the row over the card's width instead, and the label
+     * was the only thing left that could give, which is how BTC became "B…"
+     * three separate times.
+     *
+     * No max-width means it then grows into *all* the slack, which both makes
+     * it as wide as the card allows and closes the gap that used to sit
+     * between the line and the percentage. That gap was never a margin: it was
+     * leftover space with nothing claiming it. */
     flex: 1 1 0;
     min-width: 28px;
-    max-width: 72px;
     height: 16px;
     align-self: center;
     overflow: visible;
