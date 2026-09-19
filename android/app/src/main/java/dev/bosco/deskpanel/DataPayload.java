@@ -1,5 +1,6 @@
 package dev.bosco.deskpanel;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -58,10 +59,23 @@ public final class DataPayload {
             JSONObject quotes = new JSONObject(quotesJson);
             JSONObject weather = new JSONObject(weatherJson);
 
+            // Every section has to be there, and this is checked rather than
+            // assumed: JSONObject.put removes the mapping when handed null, so
+            // a body missing one array would produce a payload missing that
+            // key, app.js would fall back to `|| []`, and the section would be
+            // blanked while the cycle still logged data=ok -- the exact silent
+            // wipe the all-or-nothing rule above exists to prevent.
+            JSONArray quoteRows = quotes.optJSONArray("quotes");
+            JSONArray fxRows = quotes.optJSONArray("fx");
+            JSONArray cryptoRows = quotes.optJSONArray("crypto");
+            if (quoteRows == null || fxRows == null || cryptoRows == null) {
+                return null;
+            }
+
             JSONObject payload = new JSONObject();
-            payload.put("quotes", quotes.opt("quotes"));
-            payload.put("fx", quotes.opt("fx"));
-            payload.put("crypto", quotes.opt("crypto"));
+            payload.put("quotes", quoteRows);
+            payload.put("fx", fxRows);
+            payload.put("crypto", cryptoRows);
 
             // The server's weather response carries its own `stale`, which
             // belongs to the payload rather than to the weather card. Removing

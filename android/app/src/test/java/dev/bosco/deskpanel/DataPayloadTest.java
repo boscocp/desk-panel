@@ -2,6 +2,7 @@ package dev.bosco.deskpanel;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
@@ -74,6 +75,27 @@ public class DataPayloadTest {
     }
 
     @Test
+    public void aSectionMissingFromTheServerSkipsTheCycleRatherThanBlankingIt() {
+        // JSONObject.put removes the mapping when handed null, so an absent
+        // array used to produce a payload without that key -- app.js falls
+        // back to `|| []` and blanks the section, while the cycle still logs
+        // data=ok. Silent, and the opposite of what merge promises.
+        String noFx = QUOTES.replace("\"fx\":[{\"pair\":\"USD/BRL\",\"rate\":5.1434,"
+                + "\"changePct\":0.36882}],", "");
+        assertNull(DataPayload.merge(noFx, WEATHER));
+    }
+
+    @Test
+    public void anEmptySectionIsNotTheSameAsAMissingOne() {
+        // A config with no crypto configured is legitimate and must still
+        // render; only an absent key is a failure.
+        String emptyCrypto = QUOTES.replace(
+                "\"crypto\":[{\"symbol\":\"BTC\",\"price\":81470.0,\"changePct\":1.016}]",
+                "\"crypto\":[]");
+        assertNotNull(DataPayload.merge(emptyCrypto, WEATHER));
+    }
+
+    @Test
     public void malformedJsonIsAFailureNotAnException() {
         assertNull(DataPayload.merge("not json at all", WEATHER));
         assertNull(DataPayload.merge(QUOTES, "{unclosed"));
@@ -104,10 +126,10 @@ public class DataPayloadTest {
         // U+2028 and U+2029 are legal unescaped inside a JSON string and were
         // JavaScript line terminators before ES2019, so they would end the
         // statement mid-string with no error anyone can see.
-        String withSeparator = QUOTES.replace("PETR4", "PET R4");
+        String withSeparator = QUOTES.replace("PETR4", "PET\u2028R4");
         String merged = DataPayload.merge(withSeparator, WEATHER);
 
-        assertFalse(merged.contains(" "));
+        assertFalse(merged.contains("\u2028"));
         assertTrue(merged.contains("\\u2028"));
     }
 

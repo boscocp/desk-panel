@@ -16,8 +16,10 @@ import functools
 import json
 import os
 import sys
+import threading
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import traceback
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 # Run two ways, and both are documented. `python -m unittest discover -t .`
@@ -206,12 +208,23 @@ class TimedCache:
         self.fetched_at = None
         self.stale = False
         self.last_error = None
+        # Requests are served on threads (see Server below), so two polls
+        # arriving together must not both start the same refresh -- that would
+        # double the outbound traffic at exactly the moment the TTL expires.
+        # The lock is held across the fetch; the second caller waits and then
+        # finds the value fresh.
+        self._lock = threading.Lock()
 
     def fresh_at(self, now, ttl_s):
-        """Pure: whether the held value is still within `ttl_s` of `now`."""
-        return self.value is not None and self.fetched_at is not None and (
-            now - self.fetched_at < ttl_s
-        )
+        """Pure: whether the last *attempt* was within `ttl_s` of `now`.
+
+        The attempt, not the value. Requiring a non-None value here meant a
+        cold start whose first fetch failed was never fresh, so every request
+        after it tried again -- precisely the hammering this class exists to
+        prevent. It survived the warm-path test because that test had a value
+        to hold. A PC that boots before its router does is all it takes.
+        """
+        return self.fetched_at is not None and now - self.fetched_at < ttl_s
 
     def get(self, now, ttl_s, produce):
         """The cached value, refreshing through `produce` when it has aged out.
@@ -223,28 +236,35 @@ class TimedCache:
         if self.fresh_at(now, ttl_s):
             return self.value, self.stale
 
-        try:
-            self.value = produce()
-            self.fetched_at = now
-            self.stale = False
-            self.last_error = None
-        except UpstreamError as exc:
-            # Deliberately not re-raised: every caller would turn it into the
-            # same thing, and the last good value is a better answer than an
-            # error page on a panel nobody is sitting at.
-            #
-            # `fetched_at` moves on a failure too, so the contract is simply
-            # "at most one upstream attempt per TTL", success or failure. The
-            # alternative -- leaving it behind so the next request retries --
-            # looks like resilience and is the opposite: an upstream that is
-            # down turns into one outbound request per panel poll, which is
-            # precisely the traffic this cache exists to prevent, arriving
-            # exactly when the upstream can least afford it. The cost is that
-            # recovery waits out a TTL, which the `stale` flag makes visible.
-            self.last_error = str(exc)
-            self.stale = True
-            self.fetched_at = now
-        return self.value, self.stale
+        with self._lock:
+            # Re-checked under the lock: whoever held it may have just
+            # refreshed, and a second fetch would be pure waste.
+            if self.fresh_at(now, ttl_s):
+                return self.value, self.stale
+
+            try:
+                self.value = produce()
+                self.fetched_at = now
+                self.stale = False
+                self.last_error = None
+            except UpstreamError as exc:
+                # Deliberately not re-raised: every caller would turn it into
+                # the same thing, and the last good value is a better answer
+                # than an error page on a panel nobody is sitting at.
+                #
+                # `fetched_at` moves on a failure too, so the contract is
+                # simply "at most one upstream attempt per TTL", success or
+                # failure, warm or cold. The alternative -- leaving it behind
+                # so the next request retries -- looks like resilience and is
+                # the opposite: an upstream that is down becomes one outbound
+                # request per panel poll, which is the traffic this cache
+                # exists to prevent, arriving exactly when the upstream can
+                # least afford it. The cost is that recovery waits out a TTL,
+                # which the `stale` flag makes visible.
+                self.last_error = str(exc)
+                self.stale = True
+                self.fetched_at = now
+            return self.value, self.stale
 
 
 class App:
@@ -259,7 +279,17 @@ class App:
     def __init__(self, config, clock=time.monotonic):
         self.config = config
         self.clock = clock
-        self.quotes_cache = TimedCache()
+        # One cache per market, not one for the three together. They come from
+        # three unrelated upstreams, and sharing a cache meant the first one to
+        # fail took the other two down with it: a brapi 401 over a ticker that
+        # needs a token emptied FX and crypto as well, and the panel went
+        # blank while both of those upstreams were answering perfectly. A
+        # failure should cost its own market and nothing else.
+        self.market_caches = {
+            "quotes": TimedCache(),
+            "fx": TimedCache(),
+            "crypto": TimedCache(),
+        }
         self.weather_cache = TimedCache()
         # Coordinates never change, so the geocode is cached for the life of
         # the process rather than on a TTL (T3.4 step 1).
@@ -268,25 +298,29 @@ class App:
     def quotes(self):
         """`{quotes, fx, crypto, stale}` -- the three markets in one payload.
 
-        One cache for all three, because the panel asks for them together and
-        a partial refresh would mean three ages on one screen. A single
-        upstream failing therefore marks the whole payload stale, which is
-        the honest reading: something on this panel is older than it looks.
+        Fetched and cached independently, then assembled. `stale` is true if
+        any of the three is, because the badge means "something here is older
+        than it looks" and that is true if it is true of any part -- but a
+        market that is answering keeps its rows either way.
         """
         config = self.config
         ttl = config.get("quotes_interval_s", 300)
+        now = self.clock()
 
-        def produce():
-            return {
-                "quotes": providers_brapi.load(
-                    config.get("quotes", []), token=config.get("brapi_token", "")
-                ),
-                "fx": providers_awesomeapi.load(config.get("fx", [])),
-                "crypto": providers_binance.load(config.get("crypto", [])),
-            }
+        producers = {
+            "quotes": lambda: providers_brapi.load(
+                config.get("quotes", []), token=config.get("brapi_token", "")
+            ),
+            "fx": lambda: providers_awesomeapi.load(config.get("fx", [])),
+            "crypto": lambda: providers_binance.load(config.get("crypto", [])),
+        }
 
-        value, stale = self.quotes_cache.get(self.clock(), ttl, produce)
-        payload = dict(value or {"quotes": [], "fx": [], "crypto": []})
+        payload = {}
+        stale = False
+        for market, produce in producers.items():
+            rows, market_stale = self.market_caches[market].get(now, ttl, produce)
+            payload[market] = rows if rows is not None else []
+            stale = stale or market_stale
         payload["stale"] = stale
         return payload
 
@@ -374,7 +408,18 @@ class Handler(BaseHTTPRequestHandler):
         super().__init__(*args, **kwargs)
 
     def _handle(self, method):
-        status, body, content_type = route(method, self.path, getattr(self, "app", None))
+        try:
+            status, body, content_type = route(method, self.path, getattr(self, "app", None))
+        except Exception:  # noqa: BLE001 - deliberately everything
+            # route() used to be pure; it does I/O now, and TimedCache
+            # re-raises anything that is not an UpstreamError on purpose --
+            # a bug in a normaliser must not be laundered into "stale".
+            # Without this guard socketserver prints the traceback and closes
+            # the socket with no status line, so the phone sees an IOException
+            # and the operator sees nothing. A 500 is a failure somebody can
+            # read; a reset connection is one they have to guess at.
+            traceback.print_exc()
+            status, body, content_type = _json(500, {"error": "internal error"})
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
@@ -400,8 +445,21 @@ def _allow_reuse_address(os_name):
     return os_name != "nt"
 
 
-class Server(HTTPServer):
-    """HTTPServer with a platform-correct `allow_reuse_address`.
+class Server(ThreadingHTTPServer):
+    """A threading HTTP server with a platform-correct `allow_reuse_address`.
+
+    **Threading is not a performance choice; it protects invariant 2.** This
+    process is the login signal, and `/ping` answering is the whole of that
+    signal. Serving one request at a time meant a `/quotes` whose cache had
+    just expired could sit inside three sequential upstream calls -- up to 30s
+    of `urlopen` timeouts -- with `/ping` queued behind it. The phone gives a
+    ping 1500ms and `PcState` flips to OFFLINE on a single failure, so the
+    panel would go dark while its owner sat at the logged-in PC. An internet
+    hiccup would have looked exactly like a logout, which is the one thing
+    this server must never get wrong.
+
+    `TimedCache` takes a lock around its refresh, so concurrent requests share
+    one outbound fetch rather than starting several.
 
     On POSIX, SO_REUSEADDR just lets a restart rebind during TIME_WAIT --
     harmless, and http.server sets it to 1 by default. On Windows the same
@@ -412,6 +470,11 @@ class Server(HTTPServer):
     """
 
     allow_reuse_address = _allow_reuse_address(os.name)
+
+    # Nothing here should outlive the session this process belongs to
+    # (invariant 2): a request thread still blocked on a slow upstream must
+    # not keep the interpreter alive after the desktop has gone.
+    daemon_threads = True
 
 
 def parse_args(argv=None):

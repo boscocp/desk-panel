@@ -66,7 +66,15 @@ def normalise(raw):
     not carry a usable price. Skipping rather than raising is deliberate: one
     delisted ticker in a list of five should cost that row, not the panel.
     """
-    results = (raw or {}).get("results")
+    # isinstance, not `raw or {}`: an upstream that answers with a JSON array
+    # -- a captive portal, a proxy, a changed error envelope -- would otherwise
+    # raise AttributeError here, and an exception out of a normaliser is not
+    # an UpstreamError, so it escapes the cache and reaches the request
+    # handler. The empty-list case passed the old guard only because an empty
+    # list is falsy.
+    if not isinstance(raw, dict):
+        return []
+    results = raw.get("results")
     if not isinstance(results, list):
         return []
 

@@ -3,7 +3,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { formatPrice, formatChange, changeClass, weatherLabel, isNight } = require('../js/format.js');
+const {
+    formatPrice, formatRate, formatPair, formatChange, changeClass, weatherLabel, isNight,
+} = require('../js/format.js');
 
 test('formatPrice formats a BRL price with two decimals', () => {
     assert.equal(formatPrice(38.42, 'BRL'), 'R$38.42');
@@ -98,4 +100,36 @@ test('formatPrice still uses exactly two decimals at or above 1', () => {
     assert.equal(formatPrice(38.42, 'BRL'), 'R$38.42');
     assert.equal(formatPrice(1, 'USD'), '$1.00');
     assert.equal(formatPrice(0, 'USD'), '$0.00');
+});
+
+// An FX rate is not a price, and formatPrice gets one wrong in both
+// directions: it truncates USD/BRL at 5.1434 to R$5.14, and it opens the
+// sub-1 window meant for cheap crypto on CNY/BRL at 0.76749533, which
+// rendered as R$0.76749533 and pushed its own label out of the column. Both
+// were on the panel; the yuan is what made it visible.
+test('formatRate keeps three decimals regardless of magnitude', () => {
+    assert.equal(formatRate(5.1434, 'BRL'), 'R$5.143');
+    assert.equal(formatRate(0.76749533, 'BRL'), 'R$0.767');
+    assert.equal(formatRate(1, 'BRL'), 'R$1.00');
+});
+
+test('formatRate returns a placeholder for non-numeric input', () => {
+    assert.equal(formatRate(NaN, 'BRL'), '--');
+    assert.equal(formatRate(undefined, 'BRL'), '--');
+});
+
+// The card already says R$ on every value, so repeating the quote currency in
+// every label spends a third of the column saying the same thing three times.
+test('formatPair drops the quote half when the card is denominated in it', () => {
+    assert.equal(formatPair('USD/BRL', 'BRL'), 'USD');
+    assert.equal(formatPair('CNY/BRL', 'BRL'), 'CNY');
+});
+
+test('formatPair keeps both halves when the quote differs from the card', () => {
+    assert.equal(formatPair('EUR/USD', 'BRL'), 'EUR/USD');
+});
+
+test('formatPair passes through anything that is not a pair', () => {
+    assert.equal(formatPair('USD', 'BRL'), 'USD');
+    assert.equal(formatPair(undefined, 'BRL'), '');
 });
