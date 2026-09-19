@@ -191,7 +191,9 @@ body {
 .row {
     display: flex;
     align-items: baseline;
-    gap: 10px;
+    /* 8, not 10: the row gained a fourth child and three gaps of slack is
+     * 30px the crypto card does not have. */
+    gap: 8px;
     padding: 3px 0;
     font-size: 20px;
     line-height: 1.24;
@@ -203,7 +205,11 @@ body {
 
 .row .label {
     flex: 1 1 auto;
-    min-width: 0;
+    /* A floor, not zero. With a sparkline in the row there is no longer slack
+     * in the crypto card -- its prices are the widest on the panel -- and a
+     * label allowed to collapse rendered BTC as "B…", which is worse than no
+     * chart at all. The spark gives up its width before the name does. */
+    min-width: 3em;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -225,6 +231,50 @@ body {
 .row .change {
     min-width: 4.4em;
     text-align: right;
+}
+
+/* The sparkline. Fixed width so every row's number ends in the same place --
+ * a chart that changed width with its data would make the column ragged and
+ * the prices hard to compare down the card.
+ *
+ * vector-effect keeps the stroke one pixel however the viewBox is scaled;
+ * without it, preserveAspectRatio="none" stretches the line's thickness along
+ * with its geometry and the horizontal runs come out fatter than the vertical
+ * ones. */
+.row .spark {
+    /* Shrinkable, unlike the price and the change: a trend is still readable
+     * at half width, and a truncated number is not a number. 56px where the
+     * card has room, down to 26px in the crypto card where it does not. */
+    flex: 0 1 56px;
+    width: 56px;
+    min-width: 26px;
+    height: 16px;
+    align-self: center;
+    overflow: visible;
+}
+
+.row .spark path {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+}
+
+/* The line takes the same colour as the change beside it, so direction is
+ * said twice -- once as a shape and once as a hue -- and neither has to be
+ * read alone. */
+.spark.up {
+    color: var(--up);
+}
+
+.spark.down {
+    color: var(--down);
+}
+
+.spark.flat {
+    color: var(--accent-dim);
 }
 
 .change.up {

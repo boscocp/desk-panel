@@ -188,6 +188,22 @@ class AppPayloadTests(unittest.TestCase):
     def setUp(self):
         self.clock = FakeClock()
         self.app = App(dict(CONFIG), clock=self.clock)
+        self._stub_history()
+
+    def _stub_history(self):
+        """No history provider may reach the network from a unit test.
+
+        Stubbed for every test in this class rather than per test, because the
+        omission is silent: a live load_history simply fetches, the assertions
+        still pass, and the only symptom is the suite getting slower. It is
+        also what `unshare -n` would turn into a failure nobody could read.
+        """
+        import server.server as server_module
+
+        for name in ("providers_awesomeapi", "providers_binance"):
+            module = getattr(server_module, name)
+            self.addCleanup(setattr, module, "load_history", module.load_history)
+            module.load_history = lambda *args, **kwargs: {}
 
     def _stub_providers(self, quotes=None, fx=None, crypto=None, fail=None):
         import server.server as server_module

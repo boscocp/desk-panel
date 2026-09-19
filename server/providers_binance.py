@@ -30,6 +30,7 @@ import json
 from server.upstream import UpstreamError, get_json
 
 TICKER_URL = "https://api.binance.com/api/v3/ticker/24hr"
+KLINES_URL = "https://api.binance.com/api/v3/klines"
 
 # What a bare coin from config.json is quoted against.
 QUOTE_ASSET = "USDT"
@@ -62,6 +63,50 @@ def fetch(coins, get=get_json):
     # turns ", " into "%2C%20" inside it.
     symbols = json.dumps(pairs, separators=(",", ":"))
     return get(f"{TICKER_URL}?symbols={symbols}")
+
+
+def fetch_history(coin, days, get=get_json):
+    """One coin's recent daily candles. The seam TT.2 patches."""
+    return get(f"{KLINES_URL}?symbol={to_pair(coin)}&interval=1d&limit={int(days)}")
+
+
+# A kline is a twelve-element array, and the close is the fifth. Binance
+# documents it positionally and nothing in the response names it, so the index
+# is written down here rather than left as a bare 4 in the middle of a
+# comprehension -- reading the high (2) or the open (1) by mistake would give
+# a chart that is plausible and wrong.
+KLINE_CLOSE = 4
+
+
+def normalise_history(raw):
+    """Pure: the klines response -> `[close, ...]`, oldest first.
+
+    Binance already returns oldest first, unlike AwesomeAPI, so this does not
+    reverse. The two providers disagreeing about direction is exactly the kind
+    of thing that draws a rise as a fall, which is why each has its own test
+    against a recorded response.
+    """
+    if not isinstance(raw, list):
+        return []
+    closes = []
+    for candle in raw:
+        if not isinstance(candle, list) or len(candle) <= KLINE_CLOSE:
+            continue
+        close = _number(candle[KLINE_CLOSE])
+        if close is not None:
+            closes.append(close)
+    return closes
+
+
+def load_history(coins, days, get=get_json):
+    """`{coin: [closes oldest-first]}` for every coin that answered."""
+    history = {}
+    for coin in coins or []:
+        try:
+            history[to_coin(coin)] = normalise_history(fetch_history(coin, days, get=get))
+        except UpstreamError:
+            continue
+    return history
 
 
 def normalise(raw):
@@ -105,5 +150,6 @@ def load(coins, get=get_json):
     return normalise(fetch(coins, get=get))
 
 
-__all__ = ["QUOTE_ASSET", "TICKER_URL", "UpstreamError", "fetch", "load", "normalise",
-           "to_coin", "to_pair"]
+__all__ = ["KLINES_URL", "KLINE_CLOSE", "QUOTE_ASSET", "TICKER_URL", "UpstreamError",
+           "fetch", "fetch_history", "load", "load_history", "normalise",
+           "normalise_history", "to_coin", "to_pair"]
