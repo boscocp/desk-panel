@@ -311,10 +311,19 @@ public final class PanelService extends Service implements PcPoller.Listener {
             int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, BatteryReading.ABSENT);
             int tenths = intent.getIntExtra(
                     BatteryManager.EXTRA_TEMPERATURE, BatteryReading.ABSENT);
-            int status = intent.getIntExtra(
-                    BatteryManager.EXTRA_STATUS, BatteryManager.BATTERY_STATUS_UNKNOWN);
-
-            String reading = BatteryReading.json(level, scale, tenths, isCharging(status));
+            // EXTRA_PLUGGED, not EXTRA_STATUS. The panel's claim is "the cable
+            // is in", and STATUS does not answer that question: a phone reports
+            // BATTERY_STATUS_NOT_CHARGING whenever charging is paused with
+            // power still connected, which on this device is the normal state
+            // every time MIUI's charge optimisation or a thermal limit steps in,
+            // and on many devices is what sitting at 100% on a charger looks
+            // like. Reading STATUS would put "unplugged" on the panel with the
+            // cable plainly in -- and that word is not decoration: STATUS.md
+            // uses this line as the evidence for whether ADR 0014's wake lock
+            // is still affordable, so a false "unplugged" argues for rewriting
+            // the poll loop to solve a problem that does not exist.
+            boolean plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0;
+            String reading = BatteryReading.json(level, scale, tenths, plugged);
             if (reading == null) {
                 return;
             }
@@ -328,15 +337,6 @@ public final class PanelService extends Service implements PcPoller.Listener {
         }
     };
 
-    /**
-     * Charging or full, as one bit. FULL counts: the cable is in, which is what
-     * the panel is saying, and a phone that reaches 100 on the desk would
-     * otherwise appear to have been unplugged.
-     */
-    private static boolean isCharging(int status) {
-        return status == BatteryManager.BATTERY_STATUS_CHARGING
-                || status == BatteryManager.BATTERY_STATUS_FULL;
-    }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {

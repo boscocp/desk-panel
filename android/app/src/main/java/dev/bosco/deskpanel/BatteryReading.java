@@ -54,7 +54,13 @@ public final class BatteryReading {
      *                 {@link #ABSENT}. The level decides whether there is a
      *                 reading at all; a missing temperature only costs the
      *                 {@code tempC} key.
-     * @param charging whether {@code EXTRA_STATUS} says charging or full
+     * @param charging whether the cable is in, from {@code EXTRA_PLUGGED}.
+     *                 Deliberately not {@code EXTRA_STATUS}: a phone reports
+     *                 {@code BATTERY_STATUS_NOT_CHARGING} whenever a charge is
+     *                 paused with power still connected — MIUI's charge
+     *                 optimisation, a thermal limit, or simply sitting at 100%
+     *                 on a charger — and the panel's claim is about the cable,
+     *                 not about whether current is flowing this second.
      * @return a JSON object literal, or null if the broadcast carried no usable
      *         level. Null means "say nothing", never "say zero": a panel
      *         reporting 0% on a phone at 87% would be read as a flat battery,
