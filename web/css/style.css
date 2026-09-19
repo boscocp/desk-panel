@@ -277,3 +277,19 @@ body {
     padding: 0 7px;
     border-radius: 0 3px 0 3px;
 }
+
+/* --- Offline: the panel is not dimmed, it is gone -------------------------- *
+ *
+ * The body is already --ground, which is #000000, so hiding the two grid
+ * children leaves a page of pixels that are physically off on an AMOLED. That
+ * matters for the seconds between the PC going away and the display timeout
+ * actually taking the backlight down, and it is the whole of the fallback if
+ * MIUI ever refuses to sleep the screen at all (ADR 0005).
+ *
+ * visibility rather than display: the grid keeps its shape, so coming back
+ * online is a repaint and not a relayout of a panel that was measured against
+ * a viewport it is about to be shown in again.
+ */
+body.pc-offline > * {
+    visibility: hidden;
+}

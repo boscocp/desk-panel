@@ -33,7 +33,17 @@ import java.util.concurrent.TimeUnit;
  */
 public final class PcPoller {
 
-    private static final String TAG = "DeskPanel";
+    /**
+     * Told about transitions, on the main thread, and only about transitions.
+     * {@code PanelService} implements it: this class owns the socket and the
+     * schedule, and nothing that happens as a consequence of the answer — the
+     * marker, the wake lock, the screen — which is why it does not log the
+     * state itself.
+     */
+    public interface Listener {
+        /** @param online whether the PC answered, i.e. whether a human is logged in */
+        void onPcState(boolean online);
+    }
 
     /** The PC server's port (T3.1). Only the host varies, and only per build. */
     private static final int PORT = 8777;
@@ -46,8 +56,8 @@ public final class PcPoller {
      * the screen off when the PC disappears is the whole product. The platform
      * default is measured in tens of seconds, which would let a dead PC look
      * alive for most of a minute. At 1500 ms a probe against a host that has
-     * gone away reaches {@code state=offline} within about a second and a half
-     * of the poll that was due. There is no DNS to bound — the host is a bare
+     * gone away reaches the offline marker within about a second and a half of
+     * the poll that was due. There is no DNS to bound — the host is a bare
      * IPv4 address.
      *
      * <p>Note the arithmetic: the two timeouts are applied separately, so the
@@ -60,6 +70,8 @@ public final class PcPoller {
     private static final int TIMEOUT_MS = 1500;
 
     private final String pingUrl;
+
+    private final Listener listener;
 
     /** The state machine, kept across pause/resume so a stop is not a reset. */
     private final PcState state = new PcState();
@@ -102,15 +114,17 @@ public final class PcPoller {
      * @param host the PC's LAN address; {@code R.string.pc_host}, which the
      *             build substitutes from {@code .env} (ADR 0013). It is the one
      *             host {@code network_security_config.xml} allows in cleartext.
+     * @param listener told about transitions, on the main thread
      */
-    public PcPoller(String host) {
+    public PcPoller(String host, Listener listener) {
         this.pingUrl = "http://" + host + ":" + PORT + "/ping";
+        this.listener = listener;
     }
 
     /**
-     * Begins polling, first probe immediately. Called from {@code onResume};
-     * calling it twice is a no-op, so a resume without a matching pause cannot
-     * leave two loops running.
+     * Begins polling, first probe immediately. Called from {@code
+     * PanelService.onStartCommand}; calling it twice is a no-op, so a second
+     * start command cannot leave two loops running.
      */
     public void start() {
         if (running) {
@@ -132,9 +146,9 @@ public final class PcPoller {
     }
 
     /**
-     * Stops polling and releases the thread. Called from {@code onPause} — a
-     * poller that outlives the Activity is a leak that shows up as an overnight
-     * battery complaint rather than as a crash.
+     * Stops polling and releases the thread. Called from {@code
+     * PanelService.onDestroy} — a poller that outlives its owner is a leak that
+     * shows up as an overnight battery complaint rather than as a crash.
      */
     public void stop() {
         if (!running) {
@@ -207,25 +221,25 @@ public final class PcPoller {
     }
 
     /**
-     * The main thread, for transitions only. Marking every poll would drown the
-     * log and turn TT.6's "exactly one marker" count into noise, so this logs
-     * on the difference between {@link #delivered} and what the probe observed,
-     * and returns silently when they already agree.
+     * The main thread, for transitions only. Reporting every poll would drown
+     * the log and turn TT.6's "exactly one marker" count into noise, so this
+     * fires on the difference between {@link #delivered} and what the probe
+     * observed, and returns silently when they already agree.
      *
-     * <p>T4.3 hangs the screen off this method. It runs on the main thread
-     * because that is where the window can be touched, and {@link #isStale} —
-     * not a bare {@code running} check — gates it, because a transition
-     * detected microseconds before {@code onPause} must not drive a window the
-     * Activity has already given up. Dropping it here is safe precisely because
-     * {@code delivered} is left alone: the next generation's first poll sees
-     * the disagreement and delivers it then.
+     * <p>The screen hangs off this method, through the listener (T4.3). It runs
+     * on the main thread because that is where the window can be touched, and
+     * {@link #isStale} — not a bare {@code running} check — gates it, because a
+     * transition detected microseconds before a stop must not drive a window
+     * its Activity has already given up. Dropping it here is safe precisely
+     * because {@code delivered} is left alone: the next generation's first poll
+     * sees the disagreement and delivers it then.
      */
     private void deliver(PcState.State observed, String failure, int booked) {
         if (isStale(booked) || observed == delivered) {
             return;
         }
         delivered = observed;
-        Log.i(TAG, observed == PcState.State.ONLINE ? "state=online" : "state=offline");
+        listener.onPcState(observed == PcState.State.ONLINE);
         if (failure != null) {
             // The reason, once per transition rather than once per poll, and on
             // its own line so it can never be mistaken for a state marker. A
@@ -235,7 +249,7 @@ public final class PcPoller {
             // that tells them apart. It is also where Android's "Cleartext HTTP
             // traffic to ... not permitted" surfaces: the platform raises it as
             // an exception, and an exception nobody prints is a silent offline.
-            Log.w(TAG, "probe failed: " + failure);
+            Log.w(Markers.TAG, "probe failed: " + failure);
         }
     }
 

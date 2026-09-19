@@ -74,10 +74,16 @@ See [ADR 0005](adr/0005-real-screen-sleep.md).
 
 ## Data flow
 
-1. `PcPoller` hits `/ping` every 2s while online, backing off to 15s while offline.
+1. `PcPoller` hits `/ping` every 2s while online, backing off to 15s while offline. It is owned
+   by `PanelService`, a foreground service, and not by the Activity: the screen going out stops
+   the Activity, and a loop that stopped with it could never notice the PC coming back
+   ([ADR 0014](adr/0014-poll-loop-outlives-the-screen.md)).
 2. Transitions drive `PcState`, a plain class with no Android imports — which is why it is unit
    tested on the JVM.
-3. `PcState` changes do two things: set the screen state, and call `window.onPcState()`.
+3. `PcState` changes do three things: log `state=`, take or drop the offline wake lock, and hand
+   the transition to `MainActivity`, which sets the screen state and calls `window.onPcState()`.
+   Coming back online the service also raises the Activity, because `setTurnScreenOn` fires when
+   the window becomes visible and nothing else would make it.
 4. While online, `DataPoller` hits `/quotes` and `/weather` on their own slower intervals and
    pushes results through `window.onData()`. While offline it is paused entirely.
 5. `web/js/app.js` renders. All formatting logic lives in `web/js/format.js` as pure functions.

@@ -5,14 +5,43 @@
          makes a request. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- The poll loop outlives the screen, so it lives in a foreground service
+         (ADR 0014). specialUse is the honest type: this is not media, not a
+         download, not a location fix - it is a desk panel watching for a login,
+         and the platform has no category for that. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <!-- PARTIAL_WAKE_LOCK, held only while the PC is offline. A foreground
+         service does not keep the CPU awake; without this the device suspends
+         with the screen and the login goes unnoticed. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- API 33+ only, and on that API it is a runtime permission: declaring it
+         is necessary but not sufficient, and nothing here requests it yet. On
+         this device (API 31) the notification shows regardless. A port to a
+         newer phone has to add the request, or the service loses its
+         notification and the system eventually loses the service. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:label="Desk Panel"
         android:allowBackup="false"
         android:networkSecurityConfig="@xml/network_security_config">
-        <!-- sensorLandscape takes both landscape directions and refuses portrait,
-             so the panel can sit either way up depending on which side the cable
-             leaves the stand. It also ignores the system rotation lock, which is
-             what a panel wants. The no-action-bar theme is the third bar to go —
+        <!-- screenOrientation comes from PANEL_ORIENTATION in .env, defaulting
+             to sensorLandscape (see build.gradle.kts). sensorLandscape takes
+             both landscape directions and refuses portrait, so the panel can sit
+             either way up depending on which side the cable leaves the stand,
+             and it ignores the system rotation lock, which is what a panel
+             wants.
+
+             What it cannot do is stay put. It re-decides the direction every
+             time the Activity is created, and since T4.4 the wake from a real
+             screen sleep relaunches it — with the phone lying nearly flat in a
+             stand, where the accelerometer is ambiguous. The panel came back
+             upside down on this desk. Pinning landscape or reverseLandscape in
+             .env is the cure, and it is honest about what the direction is: a
+             property of the stand, decided once. The no-action-bar theme is the third bar to go —
              WindowInsetsControllerCompat hides the status and navigation bars but
              not the activity's own title strip, and a dark window background keeps
              the panel from flashing white before the WebView paints (T2.3).
@@ -31,13 +60,25 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:screenOrientation="sensorLandscape"
+            android:screenOrientation="${panelOrientation}"
             android:theme="@android:style/Theme.Material.NoActionBar">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Not exported: nothing outside the app has any business starting it.
+             MainActivity does, in onCreate, and stops it only when the panel is
+             actually finishing. -->
+        <service
+            android:name=".PanelService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Watches the PC login session so the phone screen can follow it." />
+        </service>
     </application>
 
 </manifest>
