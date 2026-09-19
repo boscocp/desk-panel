@@ -171,6 +171,35 @@ public final class PcPoller {
      * result.
      */
     private void poll(ScheduledExecutorService owner, int booked) {
+        try {
+            probeAndDeliver(booked);
+        } catch (Throwable unexpected) {
+            // The reschedule below is in a finally, so this catch is not what
+            // keeps the loop alive — it is what keeps the reason visible. An
+            // exception reaching a ScheduledExecutorService's runnable is
+            // swallowed whole: the Future holds it and nobody ever calls get(),
+            // so without this line the only trace of a broken poll would be the
+            // panel quietly not changing (T5.2 step 2).
+            //
+            // Throwable, not Exception: an Error on this thread — an OOM while
+            // reading a body, a NoClassDefFoundError from a component that was
+            // never going to load — ends the chain exactly as thoroughly as a
+            // RuntimeException does, and the panel cannot do anything useful by
+            // dying with it.
+            Log.e(Markers.TAG, "poll cycle failed", unexpected);
+        } finally {
+            reschedule(owner, booked);
+        }
+    }
+
+    /**
+     * One probe and whatever it means, with no scheduling of its own. Split out
+     * so the reschedule can sit in a {@code finally} and be unreachable by an
+     * exception: a loop that stops rescheduling is the failure this task calls
+     * the worst available, because the panel keeps showing its last state and
+     * nothing anywhere says the loop is gone.
+     */
+    private void probeAndDeliver(int booked) {
         if (isStale(booked)) {
             return;
         }
@@ -192,6 +221,15 @@ public final class PcPoller {
         // it is given.
         state.record(failure == null, SystemClock.elapsedRealtime());
 
+        // One line per probe, which is what makes the backoff assertable (T5.3):
+        // "at most four polls a minute while the PC is off" cannot be read off a
+        // log that only speaks on transitions, and the offline stretch is by
+        // definition the one with no transitions in it. Logged here rather than
+        // in deliver(), which fires on edges only, and after the staleness check
+        // above so a straggler from a replaced generation cannot inflate the
+        // count with polls that are no longer anybody's cadence.
+        Log.i(Markers.TAG, Markers.ping(failure == null ? "ok" : "err"));
+
         // Posted on the difference from what was last *delivered*, not on
         // record()'s boolean. In the steady state the two agree and nothing is
         // posted, so this stays as quiet as the transition-only contract
@@ -201,17 +239,29 @@ public final class PcPoller {
         if (observed != delivered) {
             main.post(() -> deliver(observed, failure, booked));
         }
+    }
 
-        if (!isStale(booked)) {
-            try {
-                owner.schedule(
-                        () -> poll(owner, booked),
-                        state.nextIntervalMs(),
-                        TimeUnit.MILLISECONDS);
-            } catch (RejectedExecutionException stopped) {
-                // stop() landed between the check and the schedule. Nothing to
-                // do: the loop is supposed to end.
-            }
+    /**
+     * Books the next probe at whatever interval {@link PcState} asks for, or
+     * books nothing if this generation has been stopped or replaced.
+     *
+     * <p>Called from a {@code finally}, so it runs whether the cycle succeeded,
+     * threw, or returned early. That is the whole point: the chain is only as
+     * durable as its least-guarded link, and every link that is not this one
+     * ends the loop for the life of the process when it breaks.
+     */
+    private void reschedule(ScheduledExecutorService owner, int booked) {
+        if (isStale(booked)) {
+            return;
+        }
+        try {
+            owner.schedule(
+                    () -> poll(owner, booked),
+                    state.nextIntervalMs(),
+                    TimeUnit.MILLISECONDS);
+        } catch (RejectedExecutionException stopped) {
+            // stop() landed between the check and the schedule. Nothing to
+            // do: the loop is supposed to end.
         }
     }
 
