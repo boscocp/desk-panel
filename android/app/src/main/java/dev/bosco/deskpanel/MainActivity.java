@@ -24,9 +24,7 @@ import androidx.webkit.WebViewClientCompat;
  * keeps web/js/mock.js inert on the device, since the mock loader in
  * index.html only fires under the file: protocol.
  */
-public class MainActivity extends Activity {
-
-    private static final String TAG = "DeskPanel";
+public class MainActivity extends Activity implements PanelService.Panel {
 
     /**
      * The virtual https origin WebViewAssetLoader answers for. /assets/ maps
@@ -43,14 +41,6 @@ public class MainActivity extends Activity {
             + "})()";
 
     private WebView webView;
-
-    /**
-     * Created once so its {@link PcState} survives a pause/resume pair: the
-     * panel has not changed its mind about the PC just because the Activity
-     * went away for a moment, and re-logging a marker it already logged would
-     * be a lie about a transition that never happened.
-     */
-    private PcPoller pcPoller;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -81,7 +71,7 @@ public class MainActivity extends Activity {
                 // pipeline, the https origin, JavaScript and the DOM all
                 // worked. The E2E suite greps for this marker.
                 view.evaluateJavascript(READ_CLOCK,
-                        value -> Log.i(TAG, "panel=rendered clock=" + value));
+                        value -> Log.i(Markers.TAG, "panel=rendered clock=" + value));
             }
         });
 
@@ -97,30 +87,72 @@ public class MainActivity extends Activity {
 
         // Landscape is pinned in the manifest; the other two halves of "looks
         // like a panel" are set here (T2.3).
+        //
+        // Held unconditionally at startup, before any probe has completed: the
+        // panel has just been launched, so somebody is looking at it. The first
+        // transition corrects it, and because nothing has been logged yet that
+        // first correction is a real transition rather than a repeat.
         setKeepScreenOn(true);
         enterImmersiveMode();
 
         webView.loadUrl(PANEL_URL);
 
-        // The panel's only network code, and it lives here rather than in the
-        // page: web/ never calls fetch (invariant 1). R.string.pc_host carries
-        // the address the build baked in from .env.
-        pcPoller = new PcPoller(getString(R.string.pc_host));
+        // The poll loop lives in a service, not here: the screen going out
+        // stops this Activity, and a loop that stopped with it could never
+        // notice the PC coming back (ADR 0014). This registration is the whole
+        // of the relationship — the service tells the window what happened, and
+        // the window is all this class owns.
+        PanelService.setPanel(this);
+        PanelService.start(this);
     }
 
     @Override
-    protected void onResume() {
-        super.onResume();
-        pcPoller.start();
+    protected void onDestroy() {
+        // Cleared first: the service holds this in a static field, and an
+        // Activity left in one is a leak. Compare-and-clear rather than a plain
+        // null, because a relaunch can create the replacement before this runs
+        // — see PanelService.clearPanel.
+        PanelService.clearPanel(this);
+        // Only when the panel is genuinely going away. A stop for a screen that
+        // went out does not reach onDestroy, which is exactly the distinction
+        // this task needed.
+        if (isFinishing()) {
+            PanelService.stop(this);
+        }
+        super.onDestroy();
     }
 
+    /**
+     * One PC transition, on the main thread, from {@link PanelService}.
+     *
+     * <p>Both halves of the product happen here. The page is told, so it can
+     * black itself out rather than sit lit behind a sleeping backlight; and the
+     * window is told, so the screen follows the PC and nothing else — never a
+     * timeout of ours (invariant 3).
+     *
+     * <p>Waking is two calls and an order. {@code setShowWhenLocked} gets the
+     * panel past the lock screen, {@code setTurnScreenOn} turns the display on
+     * when this Activity is next resumed — which is why the service raises it
+     * immediately afterwards. Both are API 27 and neither is deprecated; the
+     * old {@code FLAG_TURN_SCREEN_ON} and the {@code ACQUIRE_CAUSES_WAKEUP}
+     * wake locks are, and are not used here (ADR 0005).
+     *
+     * <p>{@code screenBrightness} is deliberately left alone, at the window
+     * default of {@code -1f}. Dimming to zero was the original design and is
+     * now the documented fallback, to be reinstated only if MIUI proves it will
+     * not wake the screen (T4.4, ADR 0005).
+     */
     @Override
-    protected void onPause() {
-        // Before super, so the loop is already down by the time the Activity is
-        // no longer foreground. A poller that outlives its Activity is a leak
-        // that bills itself to the battery rather than crashing.
-        pcPoller.stop();
-        super.onPause();
+    public void onPcState(boolean online) {
+        webView.evaluateJavascript("window.onPcState(" + online + ")", null);
+
+        if (online && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true);
+            setTurnScreenOn(true);
+        }
+        setKeepScreenOn(online);
+
+        Log.i(Markers.TAG, Markers.screen(online));
     }
 
     @Override
@@ -135,10 +167,14 @@ public class MainActivity extends Activity {
 
     /**
      * The one place that touches {@code FLAG_KEEP_SCREEN_ON}. Online, the panel
-     * holds it and the screen never sleeps; T4.4 clears it through this same
-     * method so Android's own timeout can put the screen out once the PC is
-     * gone. Screen state follows PC state, never a timer of ours (invariant 3),
-     * which is why nothing here schedules anything.
+     * holds it and the screen never sleeps; offline it is cleared, and Android's
+     * own display timeout — the device's, not one of ours — puts the screen out
+     * from there. Screen state follows PC state, never a timer of ours
+     * (invariant 3), which is why nothing here schedules anything.
+     *
+     * <p>The consequence is that the panel does not go dark the instant the PC
+     * does: it goes dark one system display timeout later. That delay is the
+     * device's setting to shorten, not the app's to override.
      *
      * <p>This is the flag the platform recommends; wake locks for keeping a
      * screen awake have been deprecated since API 17.

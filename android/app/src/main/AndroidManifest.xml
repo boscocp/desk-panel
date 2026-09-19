@@ -5,6 +5,23 @@
          makes a request. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- The poll loop outlives the screen, so it lives in a foreground service
+         (ADR 0014). specialUse is the honest type: this is not media, not a
+         download, not a location fix - it is a desk panel watching for a login,
+         and the platform has no category for that. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <!-- PARTIAL_WAKE_LOCK, held only while the PC is offline. A foreground
+         service does not keep the CPU awake; without this the device suspends
+         with the screen and the login goes unnoticed. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- API 33+ only. On this device (API 31) the notification shows without it;
+         declared so a newer phone does not silently lose the service's
+         notification and, with it, the service. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:label="Desk Panel"
         android:allowBackup="false"
@@ -38,6 +55,18 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Not exported: nothing outside the app has any business starting it.
+             MainActivity does, in onCreate, and stops it only when the panel is
+             actually finishing. -->
+        <service
+            android:name=".PanelService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Watches the PC login session so the phone screen can follow it." />
+        </service>
     </application>
 
 </manifest>
