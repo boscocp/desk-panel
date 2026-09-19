@@ -195,13 +195,24 @@ public final class PcPoller {
      * gone hands the schedule straight back to the alarm.
      *
      * <p>A no-op if the poller is stopped.
+     *
+     * <p><b>It takes a new generation</b>, which is what stops it forking the
+     * chain. Every cycle ends in a reschedule, so submitting one alongside a
+     * cycle that is already booked would leave two chains rescheduling each
+     * other for the life of the process — the panel polling at double rate
+     * overnight, which is the failure {@link #generation} was introduced to
+     * prevent and the one case it could not catch, because the extra chain
+     * carried the current number. Bumping it abandons whatever was pending and
+     * makes this the only live chain. Two triggers arriving together — the
+     * alarm coming due as the charger goes in — therefore cost one chain, not
+     * two.
      */
     public void probeNow() {
         ScheduledExecutorService owner = scheduler;
         if (!running || owner == null) {
             return;
         }
-        final int booked = generation;
+        final int booked = ++generation;
         try {
             owner.execute(() -> poll(owner, booked));
         } catch (RejectedExecutionException stopped) {

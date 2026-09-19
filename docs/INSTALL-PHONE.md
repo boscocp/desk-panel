@@ -53,8 +53,10 @@ look like a bug in the code.
 1. **Autostart** — Settings → Apps → Manage apps → desk-panel → **Autostart on**.
    Without it the app does not come back after a reboot.
 2. **Battery saver → No restrictions** — same screen, Battery saver → **No restrictions**.
-   This is the one that matters most. MIUI's battery manager will otherwise freeze the Activity
-   and the panel silently stops updating.
+   MIUI's battery manager will otherwise freeze the Activity and the panel silently stops
+   updating. **This is MIUI's own list, and it is not Android's** — see step 6, which is a
+   different exemption on a different list and is the one the sparse offline alarm depends on.
+   Doing this one does not do that one.
 3. **Lock in recents** — open the app switcher, pull the app card down to lock it. Reduces the
    chance of MIUI reclaiming it under memory pressure.
 4. **Show on Lock screen** — same screen, Other permissions → **Show on Lock screen**, and
@@ -76,6 +78,26 @@ look like a bug in the code.
    `screenBrightness = 0f`, and it is wrong now.
 6. **Auto-rotate off**, phone in landscape. The app locks orientation itself, but this avoids
    fighting the system during setup.
+
+6. **Android's battery optimisation exemption** — Settings → Apps → desk-panel → Battery →
+   **Unrestricted**, or from the host:
+
+   ```bash
+   adb shell dumpsys deviceidle whitelist +dev.bosco.deskpanel
+   adb shell dumpsys deviceidle whitelist | grep -q dev.bosco.deskpanel
+   ```
+
+   **This is a different list from step 2 and it is the one T5.6's sparse offline alarm lives
+   or dies on.** Without it, an `AlarmManager` allow-while-idle alarm requested for 15 minutes
+   was deferred to **three days** on this device — measured 2026-09-19, and visible as
+   `power_pending=+3d0h12m51s` on the alarm's `policyWhenElapsed` line while `requester` said
+   `+12m51s`. The alarm is still *listed* as armed the whole time, so anything that checks only
+   for its presence passes while recovery is three days away.
+
+   The failure this produces is the project's worst shape: offline on battery, the panel goes
+   dormant exactly as designed, and then nothing ever wakes it. Step 2 does not cover it —
+   MIUI's "No restrictions" left the app absent from `deviceidle whitelist` on this phone.
+   Check it the same way after every `adb install -r`, alongside the app-ops in step 4.
 
 Verify with a reboot: the panel should return to the foreground on its own within about two
 minutes, untouched.

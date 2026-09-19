@@ -121,6 +121,16 @@ the phone discharges at about 4.4% an hour *while the framework reports `status:
 arithmetic — the supply is simply smaller than the draw, and this ADR's reasoning never
 considered that a live cable might not be enough.
 
+**And the branch's trigger is narrower than the problem.** Dormancy means `EXTRA_PLUGGED == 0`,
+and a phone that drains *while plugged* is not that. Whether this desk ever reaches the dormant
+state depends on something still unmeasured: if the board keeps USB live with the PC off, the
+phone reads as plugged all night and the wake lock is held exactly as before. Keying dormancy on
+net discharge instead was considered and rejected — `Charge counter` is frozen on this device,
+`current_now` is unreadable, and `BATTERY_PROPERTY_CURRENT_NOW`'s sign convention varies by OEM,
+so it would be a threshold heuristic on a badly reported number deciding whether the panel may
+sleep. The branch is correct for the state it names; making that state occur on this desk is a
+power-source question.
+
 Two consequences, and they pull in different directions:
 
 - **The branch is more valuable than this ADR thought.** With the screen off, a partial wake
@@ -181,6 +191,13 @@ not to write something.**
   `docs/INSTALL-PHONE.md` rather than a footnote.
 - `START_STICKY`: if MIUI kills the process anyway, the panel comes back watching rather than
   staying dark with the PC on.
+- **The sparse alarm only works if the app is exempt from Android's battery optimisation**
+  (T5.6). Without it this device deferred a 15-minute allow-while-idle alarm to **three days**,
+  while still listing it as armed — so the panel would have gone dormant exactly as designed and
+  then never woken. MIUI's own "No restrictions" is a different list and does not cover it;
+  `docs/INSTALL-PHONE.md` step 6 is the one that does. This makes a per-device toggle
+  load-bearing for a code path, which is uncomfortable and is the honest position: the
+  alternative is a wake lock held all night, which is what this branch exists to stop.
 - **Offline on battery, recovery without a power event takes up to fifteen minutes** (T5.6).
   That is the cost of letting the device suspend, and it is bounded by
   `PcState.DORMANT_ALARM_MS` rather than by `BACKOFF_CAP_MS`. It is only ever paid in the
