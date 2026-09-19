@@ -72,8 +72,16 @@ const SPARK_H = 16;
 // An inline <svg>, built through createElementNS because SVG lives in its own
 // namespace -- createElement('svg') produces an HTML element of that name that
 // renders as nothing at all, silently.
+// Returns null when there is no series, and the caller appends nothing.
+// An empty <svg> still reserves its flex basis, which is how a B3 row with no
+// history -- brapi serves none without a paid range -- rendered TAEE11 as
+// "TAEE…": the label gave up the width, and it gave it to a picture of
+// nothing.
 function renderSparkline(history, changePct) {
     const d = sparklinePath(history, SPARK_W, SPARK_H);
+    if (!d) {
+        return null;
+    }
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('class', `spark ${changeClass(changePct)}`);
     svg.setAttribute('viewBox', `0 0 ${SPARK_W} ${SPARK_H}`);
@@ -82,11 +90,9 @@ function renderSparkline(history, changePct) {
     // so a screen reader gains nothing from the path and is better off
     // skipping it.
     svg.setAttribute('aria-hidden', 'true');
-    if (d) {
-        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        path.setAttribute('d', d);
-        svg.appendChild(path);
-    }
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', d);
+    svg.appendChild(path);
     return svg;
 }
 
@@ -107,8 +113,10 @@ function renderRow(label, value, currency, changePct, format = formatPrice, hist
     changeEl.textContent = formatChange(changePct);
 
     // Between the price and the change, so the eye reads name, number, shape,
-    // direction -- and so the two coloured things sit together.
-    row.append(labelEl, priceEl, renderSparkline(history, changePct), changeEl);
+    // direction -- and so the two coloured things sit together. append()
+    // ignores nothing, so a row with no series simply has no gap for one.
+    const spark = renderSparkline(history, changePct);
+    row.append(labelEl, priceEl, ...(spark ? [spark] : []), changeEl);
     return row;
 }
 

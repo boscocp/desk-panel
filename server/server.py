@@ -48,6 +48,9 @@ EXAMPLE_CONFIG_PATH = SCRIPT_DIR / "config.example.json"
 DEFAULT_CONFIG = {
     "port": PORT,
     "brapi_token": "",
+    # brapi's free plan refuses a request carrying more than one symbol, so
+    # every ticker costs a request. Raise it if the plan does.
+    "brapi_symbols_per_request": 1,
     "quotes": [],
     "crypto": [],
     "fx": [],
@@ -321,7 +324,9 @@ class App:
 
         producers = {
             "quotes": lambda: providers_brapi.load(
-                config.get("quotes", []), token=config.get("brapi_token", "")
+                config.get("quotes", []),
+                token=config.get("brapi_token", ""),
+                per_request=config.get("brapi_symbols_per_request", 1),
             ),
             "fx": lambda: providers_awesomeapi.load(config.get("fx", [])),
             "crypto": lambda: providers_binance.load(config.get("crypto", [])),
@@ -359,10 +364,11 @@ class App:
         days = config.get("history_days", 30)
 
         producers = {
-            # brapi's historical range needs a token, like its crypto and
-            # currency endpoints -- so B3 rows carry no series until one is
-            # configured, and the rest of the card is unaffected.
-            "quotes": lambda: {},
+            # Needs the token, like the prices beside it. Without one this
+            # returns nothing and the B3 rows simply have no line.
+            "quotes": lambda: providers_brapi.load_history(
+                config.get("quotes", []), token=config.get("brapi_token", "")
+            ),
             "fx": lambda: providers_awesomeapi.load_history(config.get("fx", []), days),
             "crypto": lambda: providers_binance.load_history(config.get("crypto", []), days),
         }

@@ -191,9 +191,9 @@ body {
 .row {
     display: flex;
     align-items: baseline;
-    /* 8, not 10: the row gained a fourth child and three gaps of slack is
-     * 30px the crypto card does not have. */
-    gap: 8px;
+    /* 6, not 10: the row gained a fourth child, and three gaps at the old
+     * width was 30px the crypto card does not have. */
+    gap: 6px;
     padding: 3px 0;
     font-size: 20px;
     line-height: 1.24;
@@ -204,12 +204,14 @@ body {
 }
 
 .row .label {
-    flex: 1 1 auto;
-    /* A floor, not zero. With a sparkline in the row there is no longer slack
-     * in the crypto card -- its prices are the widest on the panel -- and a
-     * label allowed to collapse rendered BTC as "B…", which is worse than no
-     * chart at all. The spark gives up its width before the name does. */
-    min-width: 3em;
+    /* Natural width, and it shrinks last. Getting this ordering wrong is what
+     * rendered BTC as "B…" and then TAEE11 as "TAEE…": a label set to grow was
+     * also the thing that gave width back, so every chart widened at the cost
+     * of a name. Now the name takes what it needs and the chart takes the
+     * remainder -- which is the right priority, because a truncated ticker is
+     * unreadable and a narrower trend line is merely smaller. */
+    flex: 0 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -242,12 +244,13 @@ body {
  * with its geometry and the horizontal runs come out fatter than the vertical
  * ones. */
 .row .spark {
-    /* Shrinkable, unlike the price and the change: a trend is still readable
-     * at half width, and a truncated number is not a number. 56px where the
-     * card has room, down to 26px in the crypto card where it does not. */
-    flex: 0 1 56px;
-    width: 56px;
-    min-width: 26px;
+    /* Takes the slack: `flex: 1 1 0` makes this the element that grows into
+     * whatever the label, price and change do not want, and the first to give
+     * it back. Up to 72px where the card is roomy (B3, FX), down to 28px in
+     * the crypto card, whose prices are the widest on the panel. */
+    flex: 1 1 0;
+    min-width: 28px;
+    max-width: 72px;
     height: 16px;
     align-self: center;
     overflow: visible;
@@ -275,6 +278,13 @@ body {
 
 .spark.flat {
     color: var(--accent-dim);
+}
+
+/* Pulled in against the percentage it describes. They are one statement --
+ * the shape and the number say the same thing -- and the row's even gaps made
+ * them read as two. */
+.row .spark + .change {
+    margin-left: -4px;
 }
 
 .change.up {

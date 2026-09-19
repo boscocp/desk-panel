@@ -91,8 +91,13 @@ class DataRouteTests(unittest.TestCase):
         # it live made this suite fetch thirty daily closes from two real
         # upstreams, which is exactly what server/CLAUDE.md forbids. It showed
         # up as the runtime tripling, and nothing else.
+        # Every provider with a load_history, and the list is the thing that
+        # goes stale: brapi gained one after this was written and promptly
+        # reached the network, which the assertion below caught only because
+        # it pins the exact series. A new provider must be added here too.
         for module, series in ((providers_awesomeapi, {"USD/BRL": [5.1, 5.2, 5.14]}),
-                               (providers_binance, {"BTC": [80000.0, 81000.0, 81470.0]})):
+                               (providers_binance, {"BTC": [80000.0, 81000.0, 81470.0]}),
+                               (providers_brapi, {"PETR4": [48.0, 48.2, 48.5]})):
             cls._restore.append((module, "load_history", module.load_history))
             module.load_history = (lambda series: lambda *a, **k: dict(series))(series)
 
@@ -137,11 +142,11 @@ class DataRouteTests(unittest.TestCase):
 
     def test_a_row_carries_its_own_series_and_an_unmatched_one_carries_none(self):
         payload = json.loads(self._request("/quotes")[1].decode("utf-8"))
-        # USD/BRL and BTC were stubbed with a series; PETR4 was not, because
-        # brapi has no history without a token.
+        # Each row gets the series its own symbol was stubbed with, and no
+        # other row's.
         self.assertEqual(payload["fx"][0]["history"], [5.1, 5.2, 5.14])
         self.assertEqual(payload["crypto"][0]["history"], [80000.0, 81000.0, 81470.0])
-        self.assertEqual(payload["quotes"][0]["history"], [])
+        self.assertEqual(payload["quotes"][0]["history"], [48.0, 48.2, 48.5])
         self.assertFalse(payload["stale"])
 
     def test_quotes_is_valid_utf8_json_over_the_wire(self):
