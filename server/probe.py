@@ -11,12 +11,14 @@ launched by path, never imported.
     probe.py --host H [--port P] --expect up|down [--timeout S]
     probe.py --serve --expect up            # starts server.py, probes, stops it
     probe.py --serve --url /action/x --method POST --expect-status 501
+    probe.py --host H --url /quotes --expect-json-keys quotes,fx,crypto
 
 Exit 0 iff reality matched the expectation, 1 if it did not, 2 on a probe
 error that is not itself an answer (bad hostname, permission error, the
 child server failing to start).
 """
 import argparse
+import json
 import socket
 import subprocess
 import sys
@@ -47,14 +49,20 @@ def parse_args(argv=None):
     parser.add_argument("--expect", choices=["up", "down"], default=None)
     parser.add_argument("--expect-status", type=int, dest="expect_status", default=None)
     parser.add_argument(
+        "--expect-json-keys",
+        dest="expect_json_keys",
+        default=None,
+        help="comma-separated keys that must all be present in the JSON response body",
+    )
+    parser.add_argument(
         "--serve",
         action="store_true",
         help="start this repo's server.py, probe it, then stop it",
     )
     args = parser.parse_args(argv)
 
-    if args.expect is None and args.expect_status is None:
-        parser.error("one of --expect or --expect-status is required")
+    if args.expect is None and args.expect_status is None and args.expect_json_keys is None:
+        parser.error("one of --expect, --expect-status or --expect-json-keys is required")
     if not args.serve and args.host is None:
         parser.error("--host is required unless --serve")
     if args.serve and args.host is None:
@@ -63,7 +71,8 @@ def parse_args(argv=None):
 
 
 def check(host, port, url, method, timeout):
-    """One HTTP request. Returns ("up", status_code) or ("down", None).
+    """One HTTP request. Returns ("up", status_code, body_bytes) or
+    ("down", None, b"").
 
     "down" covers both a refused connection (nothing listening) and a
     timeout (a firewall dropping packets instead of refusing them) --
@@ -76,10 +85,12 @@ def check(host, port, url, method, timeout):
         conn.request(method, url)
         response = conn.getresponse()
         status = response.status
-        response.read()
-        return "up", status
+        # Read it either way: the body is what --expect-json-keys needs, and
+        # an unread response leaves the socket unusable for keep-alive.
+        body = response.read()
+        return "up", status, body
     except (ConnectionRefusedError, socket.timeout, TimeoutError):
-        return "down", None
+        return "down", None, b""
     except socket.gaierror as exc:
         raise ProbeError(f"cannot resolve host {host!r}: {exc}") from exc
     except OSError as exc:
@@ -88,14 +99,50 @@ def check(host, port, url, method, timeout):
         conn.close()
 
 
+def missing_json_keys(body, wanted):
+    """Pure: which of `wanted` are absent from the JSON object in `body`.
+
+    Returns a list -- empty means every key is there. A body that is not a
+    JSON object counts as missing all of them, which is the right answer for
+    an endpoint that returned an HTML error page with a 200.
+
+    Presence only, never value: this is a contract check. A temperature can
+    be judged by a human and by nothing else, which is why T3.4 puts the
+    number in its manual check and the shape here.
+    """
+    try:
+        data = json.loads(body.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return list(wanted)
+    if not isinstance(data, dict):
+        return list(wanted)
+    return [key for key in wanted if key not in data]
+
+
 def evaluate(args):
-    """Run one probe against args.host/port and compare to the expectation."""
-    kind, status = check(args.host, args.port, args.url, args.method, args.timeout)
+    """Run one probe against args.host/port and compare to the expectation.
+
+    Expectations combine with AND when more than one is given, so
+    `--expect-status 200 --expect-json-keys a,b` fails if either does.
+    """
+    kind, status, body = check(args.host, args.port, args.url, args.method, args.timeout)
+
+    matched = True
+    detail = ""
+    if args.expect is not None:
+        matched = matched and kind == args.expect
     if args.expect_status is not None:
-        matched = kind == "up" and status == args.expect_status
-    else:
-        matched = kind == args.expect
-    return matched, kind, status
+        matched = matched and kind == "up" and status == args.expect_status
+    if args.expect_json_keys is not None:
+        wanted = [k.strip() for k in args.expect_json_keys.split(",") if k.strip()]
+        if kind != "up":
+            matched = False
+        else:
+            absent = missing_json_keys(body, wanted)
+            if absent:
+                matched = False
+                detail = f" (missing JSON keys: {', '.join(absent)})"
+    return matched, kind, status, detail
 
 
 def port_is_taken(host, port, timeout=0.5):
@@ -142,7 +189,7 @@ def run_server_and_probe(args):
                 raise ProbeError(
                     f"server.py exited early (code {process.returncode}): {stderr.strip()}"
                 )
-            kind, _ = check(args.host, args.port, "/ping", "GET", 0.5)
+            kind, _, _ = check(args.host, args.port, "/ping", "GET", 0.5)
             if kind == "up":
                 ready = True
                 break
@@ -165,9 +212,9 @@ def main(argv=None):
     args = parse_args(argv)
     try:
         if args.serve:
-            matched, kind, status = run_server_and_probe(args)
+            matched, kind, status, detail = run_server_and_probe(args)
         else:
-            matched, kind, status = evaluate(args)
+            matched, kind, status, detail = evaluate(args)
     except ProbeError as exc:
         print(f"probe error: {exc}", file=sys.stderr)
         return 2
@@ -175,6 +222,7 @@ def main(argv=None):
     description = f"{args.method} {args.host}:{args.port}{args.url} -> {kind}"
     if kind == "up":
         description += f" (status {status})"
+    description += detail
     print(description)
     return 0 if matched else 1
 

@@ -258,9 +258,16 @@ dark, and nobody has watched it come back without a hand on the phone. Both are 
 T4.4's manual check and neither can be automated — that is the point of the `## Manual check`
 convention.
 
-**Next: T5.1**, the `DataPoller`, on the state machine this wave built. T5.5 (thermal cutoff)
-now has the screen-state machine it was waiting for, and T5.3's backoff assertions have the
-heartbeat vocabulary they need, though neither `ping=` nor `data=` has an emitter yet.
+**Next is not T5.1**, though it reads that way from phase 4. T5.1's prereqs are `T4.3, T3.3,
+T3.4`, and both server proxies are still `todo` — its own acceptance asks `probe.py` for
+`/quotes`, which no endpoint answers yet. The path to data on the panel runs
+**T3.3 → T3.4 → T3.7 → TT.2 → TT.3 → T5.1**, which is wave 8. T3.7 is a 501 stub that costs
+minutes and is the other half of what TT.3 is `blocked` on, so it rides along rather than
+stranding TT.3 a second time.
+
+T5.5 (thermal cutoff) now has the screen-state machine it was waiting for, and T5.3's backoff
+assertions have the heartbeat vocabulary they need, though neither `ping=` nor `data=` has an
+emitter yet.
 
 Two device settings this wave discovered, both of which look like app bugs when wrong and
 **neither of which survives an `adb install -r`**:
