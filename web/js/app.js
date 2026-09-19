@@ -145,14 +145,22 @@ function renderWeather(weather) {
     weatherEl.appendChild(line);
 }
 
+// The one diagnostic on a panel of content, so it is a corner line rather than
+// a card (T5.4 step 3): no title, no border, and nothing until there is
+// something to say. An empty string leaves the corner genuinely empty, which is
+// what the panel should look like before the first battery broadcast arrives.
 function renderBattery(battery) {
     batteryEl.textContent = '';
-    if (!battery) {
+    const text = formatBattery(battery);
+    if (!text) {
         return;
     }
     const line = document.createElement('div');
-    const chargingSuffix = battery.charging ? ' (charging)' : '';
-    line.textContent = `Battery ${battery.level}% ${battery.tempC}°C${chargingSuffix}`;
+    // The whole line takes the colour, not just the number: at 20px in a
+    // corner, a single re-coloured word is easy to miss and the temperature is
+    // right there to explain it.
+    line.className = batteryWarm(battery.tempC) ? 'warm' : '';
+    line.textContent = text;
     batteryEl.appendChild(line);
 }
 

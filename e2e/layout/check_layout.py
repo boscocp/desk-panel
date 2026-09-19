@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Measure the panel at the phone's real viewport and fail if anything clips.
+"""Measure the panel at the phone's real viewport and fail if anything is wrong with it.
 
 Written for T6.1, kept for T6.2/T6.3/T6.4: every one of them changes sizes, and
 a size change is exactly what pushes the fifth card off the bottom of a 392 CSS
@@ -7,8 +7,9 @@ px tall screen. Standard library only, like server/ -- no npm, no driver binary,
 no Selenium.
 
 Exit codes, so this can be an acceptance command:
-    0  every section fits, in every pass
-    1  something clipped or overflowed -- the report says what
+    0  every section fits and nothing overlaps, in every pass
+    1  something clipped, overflowed or was drawn on top of something else --
+       the report says what
     2  the harness could not run (no firefox, no marionette, no calibration)
 
 See README.md in this directory.
@@ -212,6 +213,12 @@ def failures(result, viewport):
         bad.append("outside the viewport: %s" % item)
     for item in result["clippedContent"]:
         bad.append("clips its own content: %s" % item)
+    # Everything can fit and still be unreadable, if some of it is underneath
+    # the rest. This is the only check here that compares two sections against
+    # each other rather than against the viewport -- see measure.js, and T5.4,
+    # which is the bug that earned it.
+    for item in result.get("overlaps", []):
+        bad.append("drawn on top of something: %s" % item)
     return bad
 
 
@@ -230,7 +237,7 @@ def report(name, result, bad):
         for line in bad:
             print("    FAIL %s" % line)
     else:
-        print("    ok: nothing outside the viewport, nothing clipped")
+        print("    ok: nothing outside the viewport, nothing clipped, nothing overlapping")
 
 
 def main():
@@ -271,8 +278,11 @@ def main():
         report(name, results[name], bad)
         broken = broken or bool(bad)
 
-    print("FAIL: the layout does not fit %dx%d" % (width, height) if broken
-          else "PASS: all sections fit %dx%d in every pass" % (width, height))
+    # "is wrong at", not "does not fit": since T5.4 a pass can fail on an
+    # overlap, where everything fits and some of it is underneath the rest.
+    print("FAIL: the layout is wrong at %dx%d" % (width, height) if broken
+          else "PASS: every section fits %dx%d and nothing overlaps, in every pass"
+               % (width, height))
     return 1 if broken else 0
 
 

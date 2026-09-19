@@ -1,7 +1,8 @@
 # Layout check
 
-Measures `web/index.html` at the phone's real viewport and fails if any section is off screen
-or clipped. No phone needed — unlike the adb suite one directory up, this runs on the host.
+Measures `web/index.html` at the phone's real viewport and fails if any section is off screen,
+clipped, or drawn on top of another one. No phone needed — unlike the adb suite one directory
+up, this runs on the host.
 
 Built during T6.1, which existed because the fifth card had been hanging off the bottom of the
 screen for two tasks while every screenshot looked fine.
@@ -16,7 +17,7 @@ screen for two tasks while every screenshot looked fine.
 
 ```bash
 python e2e/layout/check_layout.py
-echo $?    # 0 = every section fits, 1 = something clips, 2 = the harness could not run
+echo $?    # 0 = the layout is sound, 1 = something is wrong, 2 = the harness could not run
 ```
 
 Useful flags:
@@ -32,13 +33,24 @@ fit?" without editing `web/` and without a rebuild.
 
 ## What it measures
 
-Three things, because "it rendered" answers none of them and a screenshot only answers the
+Four things, because "it rendered" answers none of them and a screenshot only answers the
 first:
 
 1. `documentElement.scrollHeight` against the viewport — is the page taller than the screen.
 2. Every element under `body` against the viewport box — did one card escape.
 3. Every section's `scrollHeight` against its `clientHeight` — is the card on screen but its
    contents not. Cards use `overflow: hidden`, so this failure is completely silent.
+4. Every section's **ink** against every other section's — is one thing drawn on top of
+   another. Added in T5.4, which is the bug that earned it: the battery corner line is
+   positioned absolutely and was set to `nowrap`, so its longest variant grew out of its column
+   and painted an opaque black box over the bottom of the CRYPTO card, hiding a live price's
+   change and its sparkline. Everything fitted. Everything was on screen. Nothing clipped.
+
+   Ink, not boxes, and the distinction is the whole design: `#battery` shares a rectangle with
+   the WEATHER card deliberately, and `#stale-badge` with `#panel`, so a box comparison would
+   either fail on both of those or have to allowlist the exact pair the bug was in. So it
+   compares the leaf elements that carry text and each sparkline's `<path>`. Sharing empty space
+   is fine. Sharing a pixel with a glyph in it is not.
 
 It also fails if a section renders **empty**. That is not a nicety: an empty card always fits,
 and before T6.1 the panel looked acceptable on the device for exactly that reason — the cards
@@ -69,6 +81,14 @@ python e2e/layout/check_layout.py --extra-css /tmp/regress.css
 echo $?    # 1, reporting #clock content 710x192 in a box of 296x192
 ```
 
+For the overlap check, take the cap off the battery line — which is how the T5.4 bug looked:
+
+```bash
+printf '#battery { max-width: none; white-space: nowrap; }\n' > /tmp/regress2.css
+python e2e/layout/check_layout.py --extra-css /tmp/regress2.css
+echo $?    # 1, on the stress pass: #crypto "-4.5%" overlaps #battery ... over 68x15px
+```
+
 Worth doing after any change to `measure.js`.
 
 ## Why 872x392
@@ -92,6 +112,8 @@ each value why it is there.
 
 ## Who should use this
 
+- **T6.6** (slow scroll on overflow) and **T6.7** (a theme boundary) — both move markup
+  around, which is exactly what the overlap check is for.
 - **T6.2** (glow, burn-in shift) — a shift that moves pixels can move them off screen.
 - **T6.3** (device legibility) — it raises type sizes, and its acceptance forbids any font
   under 20px. `--extra-css` will tell you whether a size still fits before you commit to it.

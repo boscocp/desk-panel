@@ -36,7 +36,11 @@ window.onData({
         { symbol: 'SHIBAINU-VERYLONGNAME', price: 0.00081, changePct: -4.5 },
     ],
     weather: { tempC: -10, minC: -12, maxC: 42, code: 99, city: 'Sao Jose dos Campos' },
-    battery: { level: 100, tempC: 42.5, charging: true },
+    // charging: false on purpose. This is the widest battery line the code can
+    // produce -- the 'unplugged' word is only in the discharging variant -- and
+    // with charging: true it was never measured, which is how T5.4 shipped a
+    // corner line that grew out of its column and covered the CRYPTO card.
+    battery: { level: 100, tempC: 42.5, charging: false },
     stale: true,
 });
 

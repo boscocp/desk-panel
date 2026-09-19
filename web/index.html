@@ -22,7 +22,10 @@
         <section id="fx" class="card-list"></section>
         <section id="crypto" class="card-list"></section>
         <section id="weather" class="card"></section>
-        <section id="battery" class="card"></section>
+        <!-- Not a .card: the battery is a diagnostic, and T5.4 demotes it to a
+             line in the corner rather than a fifth box with a title. The class
+             is what carried the border, the padding and the DEVICE label. -->
+        <section id="battery"></section>
         <div id="stale-badge" hidden>STALE</div>
     </div>
     <script src="js/format.js"></script>

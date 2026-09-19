@@ -132,15 +132,43 @@ public final class DataPoller {
     }
 
     private void poll(ScheduledExecutorService owner, int booked) {
+        // A failed cycle is the safe assumption for the schedule: if the body
+        // below dies before it has an answer, retrying sooner is the behaviour
+        // that recovers, and RETRY_MS is still slow enough not to hammer a
+        // server that may be the thing that is broken.
+        long delayMs = RETRY_MS;
+        try {
+            delayMs = fetchAndDeliver(booked) ? INTERVAL_MS : RETRY_MS;
+        } catch (Throwable unexpected) {
+            // See PcPoller.poll: the reschedule is in the finally, so this is
+            // about making the reason visible rather than about survival. A
+            // scheduled runnable's exception goes into a Future nobody reads,
+            // and the panel would simply stop refreshing with a healthy ping
+            // and a full log of nothing (T5.2 step 2).
+            Log.e(Markers.TAG, "data cycle failed", unexpected);
+        } finally {
+            reschedule(owner, booked, delayMs);
+        }
+    }
+
+    /**
+     * One fetch of both endpoints and, if they agree on a payload, one delivery.
+     * Split from {@link #poll} so the reschedule can live in a {@code finally}
+     * where no exception can step over it.
+     *
+     * @return whether the cycle produced a payload, which is the only thing the
+     *         schedule needs to know
+     */
+    private boolean fetchAndDeliver(int booked) {
         if (isStale(booked)) {
-            return;
+            return true;
         }
 
         String quotes = get(quotesUrl);
         String weather = get(weatherUrl);
 
         if (isStale(booked)) {
-            return;
+            return true;
         }
 
         String payload = DataPayload.merge(quotes, weather);
@@ -159,14 +187,22 @@ public final class DataPoller {
         } else {
             main.post(() -> deliver(payload, booked));
         }
+        return ok;
+    }
 
-        if (!isStale(booked)) {
-            try {
-                owner.schedule(() -> poll(owner, booked),
-                        ok ? INTERVAL_MS : RETRY_MS, TimeUnit.MILLISECONDS);
-            } catch (RejectedExecutionException stopped) {
-                // stop() landed between the check and the schedule.
-            }
+    /**
+     * Books the next cycle, or books nothing if this generation has been
+     * stopped or replaced. Called from a {@code finally} so that no failure
+     * above it can leave the panel on numbers that never change again.
+     */
+    private void reschedule(ScheduledExecutorService owner, int booked, long delayMs) {
+        if (isStale(booked)) {
+            return;
+        }
+        try {
+            owner.schedule(() -> poll(owner, booked), delayMs, TimeUnit.MILLISECONDS);
+        } catch (RejectedExecutionException stopped) {
+            // stop() landed between the check and the schedule.
         }
     }
 

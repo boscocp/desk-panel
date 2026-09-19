@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 
 const {
     formatPrice, formatRate, formatPair, formatChange, changeClass, weatherLabel, isNight,
-    sparklinePath, formatTemp,
+    sparklinePath, formatTemp, formatBattery, batteryWarm, BATTERY_WARN_C,
 } = require('../js/format.js');
 
 test('formatPrice formats a BRL price with two decimals', () => {
@@ -192,4 +192,61 @@ test('formatTemp keeps one decimal and does not round a real zero away', () => {
     assert.equal(formatTemp(15.5), '15.5');
     assert.equal(formatTemp(0), '0');
     assert.equal(formatTemp(-3.2), '-3.2');
+});
+
+// --- The battery corner line (T5.4) ---------------------------------------
+//
+// This is a diagnostic, so the thing worth testing is that it never says
+// something confidently wrong: a missing reading has to read as missing, and
+// the temperature has to keep the tenth the broadcast carries.
+
+test('formatBattery writes the level, the temperature and its own label', () => {
+    assert.equal(formatBattery({ level: 87, tempC: 31.5, charging: true }),
+                 'BAT 87% \u00B7 31.5\u00B0C');
+});
+
+test('formatBattery spells out only the interesting half of charging', () => {
+    // Charging is the resting state on a desk powered from the PC's USB, so it
+    // costs the line no width; running on the battery is the condition worth a
+    // word.
+    assert.equal(formatBattery({ level: 64, tempC: 29, charging: false }),
+                 'BAT 64% \u00B7 29\u00B0C \u00B7 unplugged');
+});
+
+test('formatBattery drops a temperature it was not given', () => {
+    // The native side leaves tempC out rather than sending a zero, the same
+    // way the server does for weather. -0.1 degrees from a missing extra is
+    // exactly the kind of wrong that looks right enough to render.
+    assert.equal(formatBattery({ level: 87, charging: true }), 'BAT 87%');
+    assert.equal(formatBattery({ level: 87, tempC: null, charging: true }), 'BAT 87%');
+});
+
+test('formatBattery renders nothing at all before the first broadcast', () => {
+    // '' rather than a placeholder: app.js appends no element for '', so the
+    // corner is genuinely empty instead of holding an empty box.
+    assert.equal(formatBattery(undefined), '');
+    assert.equal(formatBattery(null), '');
+    assert.equal(formatBattery({}), '');
+    assert.equal(formatBattery({ level: NaN, tempC: 31.5 }), '');
+});
+
+test('formatBattery keeps the level a whole percent', () => {
+    assert.equal(formatBattery({ level: 86.6, tempC: 30, charging: true }),
+                 'BAT 87% \u00B7 30\u00B0C');
+});
+
+test('batteryWarm fires above forty degrees and not at it', () => {
+    assert.equal(BATTERY_WARN_C, 40);
+    assert.equal(batteryWarm(42.5), true);
+    assert.equal(batteryWarm(40.1), true);
+    assert.equal(batteryWarm(40), false);
+    assert.equal(batteryWarm(31.5), false);
+});
+
+test('batteryWarm treats a missing temperature as not warm', () => {
+    // A warning the panel cannot justify is worse than no warning: there is no
+    // number beside it to explain the colour.
+    assert.equal(batteryWarm(undefined), false);
+    assert.equal(batteryWarm(null), false);
+    assert.equal(batteryWarm(NaN), false);
 });
