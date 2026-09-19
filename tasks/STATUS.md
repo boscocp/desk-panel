@@ -75,10 +75,10 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 |---|---|---|---|
 | T4.1 | `network_security_config.xml` | done | 2026-09-16. `res/xml/network_security_config.xml` grants cleartext to one `<domain-config>` and nothing else; no `base-config`, no `android:usesCleartextTraffic`. `includeSubdomains="false"` because a bare IP has no subdomains and the default would widen the exemption. Manifest gains `INTERNET` and `android:networkSecurityConfig` on `<application>`. Address is the agreed placeholder `192.168.1.100` — the DHCP reservation belongs to T3.8, which is `blocked` on the Windows PC, and T7.3's acceptance requires exactly this literal in committed non-doc source, so the placeholder is the correct committed value either way; a comment in the file says what to change. All five acceptance commands exit 0. Verified past the greps: `aapt2` on `out/app-debug.apk` shows the manifest attribute resolving to `@0x7f010000` = `xml/network_security_config`, and the packaged binary XML decodes to the single pinned domain |
 | T4.2 | `PcPoller` | done | 2026-09-16. All five criteria green on the real phone (Redmi Note 10, `303f1f9c`) against the dev box serving as the PC. `PcPoller` is the app's only network code and the thin shell it was specified to be: it owns the socket and the scheduling, `PcState` owns every decision, and it starts in `onResume`/stops in `onPause` while being constructed once in `onCreate`, so a pause/resume pair is not a state reset and cannot re-log a transition that never happened. 1500 ms on both timeouts, deliberately under `ONLINE_INTERVAL_MS`, so a dead PC cannot look alive for most of a minute; the failure path has to be as prompt as the success path because switching the screen off is the product. Measured: `state=online` 19:40:48, server killed and `state=offline` 19:41:13 with `probe failed: java.net.ConnectException`, recovery `state=online` 19:41:42, and **0** `state=` lines in 30 s of steady state against a `-le 1` budget. **Two acceptance criteria were wrong and are rewritten**; the task file carries both. (1) The online block cleared the buffer and slept, which observes a transition only by luck — in steady state nothing logs, by design. It is now `force-stop`, clear, `am start`, sleep, grep, the same ordering the backlog-run note argues for and for the same reason. (2) The cleartext grep was **unachievable from the shipping APK**, not merely unmet: `build.gradle.kts` substitutes one placeholder across the whole generated `res/` tree, so `pc_host` and the pinned domain are the same address by construction and the app never dials anything the pin forbids. Proved instead with a throwaway divergence build — `pc_host` set to a literal `192.168.15.4` the substitution does not touch, pin still at `192.168.15.3`, the build printing both — which yields `java.io.IOException: Cleartext HTTP traffic to 192.168.15.4 not permitted`. It surfaces through `PcPoller`'s per-transition reason line, exactly as that method's comment predicted: the platform raises it, and an exception nobody prints is a silent offline. Reverted and the revert proved, not assumed — placeholder back, rebuilt, reinstalled, `state=online`, zero cleartext lines. **Two environment facts that cost this run a session.** The Linux box acting as the PC runs **ufw**, and `docs/SERVER-SETUP.md` explicitly ships no firewall step for Linux; the phone is on `192.168.3.100/24` while the PC is on `192.168.15.3/24`, so the rule has to cover both and any NAT between them: `sudo ufw allow from 192.168.0.0/16 to any port 8777 proto tcp`. Until it was applied the phone pinged fine and the HTTP probe timed out — DROP, not refused, which is what the app reports as a plain offline. And **an adb install needs a human at the phone**. MIUI raises a confirmation dialog on the device for the first install of a session; unanswered, it returns `INSTALL_FAILED_USER_RESTRICTED: Install canceled by user` in about four seconds — fast enough to read as a hard policy refusal, which is what it was mistaken for here. Three attempts failed while nobody was looking at the phone, and the next one succeeded the moment the owner tapped *authorise* on the screen that had been sitting there. Later installs in the same session went through with no prompt. The mistaken reading recorded first was that MIUI refuses debug-signed APKs and accepts release-signed ones — the debug attempts simply happened to be the unattended ones, and were never retried after the authorisation, so nothing here says anything about signing at all. T2.2 hit the same error and cleared it by cycling Developer options → "Install via USB", so that toggle is the second thing to check when the dialog never appears. Independent of all of it: an on-device experiment has to go through `assembleRelease`, which overwrites `out/desk-panel-release.apk` — back it up first |
-| T4.3 | Wire to `onPcState()` + brightness | todo | 🏁 **Milestone B** — the product's soul |
-| T4.4 | Real screen sleep, replacing brightness zero | todo | Decides the ADR 0005 fallback |
+| T4.3 | Wire to `onPcState()` + brightness | done | 2026-09-19. 🏁 **Milestone B reached.** Both acceptance commands exit 0 on the device, and the PC going away now takes the screen with it. **Step 3 (brightness) was deliberately not implemented** — T4.4 landed in the same wave, so writing the dim-to-black path first would have meant writing code whose only purpose was to be deleted an hour later; `screenBrightness` stays at the window default `-1f` and the task file records the divergence. The real work was the question T4.2 opened and this task had to answer: **who owns the poll loop once the Activity is not resumed.** Answer, in [ADR 0014](../docs/adr/0014-poll-loop-outlives-the-screen.md): a started foreground service, `PanelService`, holding a `PARTIAL_WAKE_LOCK` for exactly the offline stretch, and raising the Activity with `REORDER_TO_FRONT` when the PC returns. The wake lock is affordable only because the board keeps USB powered with the PC off, so offline means *charging* with the screen off — that assumption is written into the ADR along with the power-aware branch to build if ErP Ready is ever disabled. Ownership is now one concern each: `PcState` decides meaning, `PcPoller` owns the socket and schedule, `PanelService` stays awake and logs `state=`, `MainActivity` owns the window and logs `screen=`. `PcPoller` lost its `Log` and took a `Listener`; `MainActivity` lost `onResume`/`onPause` entirely. One bug fixed before it could happen: unregistering the panel is compare-and-clear, not a null assignment, because the wake relaunches the Activity and a blind clear would unregister the live instance on behalf of the dead one — silent and total, since the markers keep coming from the service while the page is never told anything again. `web/js/app.js` toggles `body.pc-offline` (children hidden over a `#000000` ground) and stops the 1Hz clock interval while offline |
+| T4.4 | Real screen sleep, replacing brightness zero | done | 2026-09-19. **ADR 0005 keeps its primary design — MIUI honours `setTurnScreenOn`.** Four consecutive cycles took the display from `mWakefulness=Dozing` to `Awake` with nobody touching the phone; both acceptance commands exit 0 at their 30s windows and the tighter 20s ones too. The decision is written into ADR 0005 as the task required. **Two device settings decide it, and the app cannot reach either.** First, MIUI denies *Show on Lock screen* by default: with it denied the Activity is raised, `state=online` and `screen=wake` are both logged, and the screen stays dark — the only evidence anywhere is one `MIUILOG- Show when locked PermissionDenied` line. Second, Developer options → *Stay awake* was on, which pins the screen lit for as long as the phone is charging, i.e. always on this desk; `INSTALL-PHONE.md` had been **recommending it**, left over from the abandoned brightness design, and that step is now inverted. Both are app-ops or settings that `adb install -r` resets, which is documented with the numeric ops (10020, 10008) read off the device. The device PIN turned out not to matter — the keyguard was up in every successful cycle. Not done: the eyes-only half. `Dozing` is adb's word, not a human's, so *actually dark in a dark room* and *comes back without touching the phone* are still unconfirmed by anyone's eyes |
 | TT.5 | `PcState` extracted + JVM tests | done | 2026-09-16. `PcState.java` is plain Java — no Android imports, no clock read internally, no threads, no sleeps: every time-aware method takes `nowMs` as an argument, so T4.2 can drive it unmodified. It owns the state (`UNKNOWN`/`ONLINE`/`OFFLINE`, starting `UNKNOWN` so the first probe either way is a transition), the consecutive-failure count, `nextIntervalMs()` (2000 online; 2000/4000/8000 doubling, capped at 15000 offline, reset on first success), and `nextProbeAtMs()`/`isDue()` so `PcPoller` can keep no deadline of its own. It decides *that* a transition happened and returns it; emitting `state=online`/`state=offline` stays on the Android side (TT.6). 16 JUnit tests; both acceptance commands exit 0 and `./gradlew test` finishes in seconds. The suite was checked against 10 mutations of `PcState` — flapping, deaf, stuck, uncapped backoff, no reset, flat backoff, backoff one rung too fast, `isDue` off by one, deadline ignoring the backoff, failures uncounted — and every one turned it red |
-| TT.6 | Logcat markers | todo | Unblocked 2026-09-16: the phone is on adb and the PC is reachable from it, which is all it was waiting for. T4.2 already exercised the markers by hand — this is the task that makes the counting repeatable |
+| TT.6 | Logcat markers | done | 2026-09-19. `Markers.java` holds the vocabulary — `state=`, `screen=`, `night=`, `tick=`, `ping=`, `data=`, `battery=` and the `DeskPanel` tag — and the grep that no marker string exists anywhere else under `main/java` exits 0. **It builds the strings and does not log them**, against the task file's step 2, because `android/CLAUDE.md` says anything worth testing lives in a class with no Android imports: a contract the E2E suite greps for is exactly that, and `MarkersTest` now asserts all eleven literally on the JVM, which a class holding `Log.i` could not offer. The property the acceptance enforces — one place per string — holds either way, and the two call sites that own a transition do the logging. Only `state=` and `screen=` have emitters today; the rest are the contract their own tasks will wire. **The acceptance's own ordering was wrong and is fixed**: it said kill the server, then `adb logcat -c`, and the app notices within one 2s poll, so the clear usually lands after the transition and wipes the marker being asserted on. It failed exactly that way here, with an empty log and an app that had done everything right — the same trap `am start` cost a session over. All three task files and `docs/TESTING.md` now clear the buffer before touching the PC |
 
 ## Phase 5 — Real data
 
@@ -228,37 +228,73 @@ Quotes and weather come afterwards; they are the least risky part and the easies
 - **adb from inside the container is undocumented.** Answered: the container does not own the
   USB device. Gradle runs in the container and talks to the **host's** adb server over TCP —
   `make connected`, defined in TT.7. T7.2 covers wireless adb, which is a different question.
-- **Whether MIUI wakes the screen reliably** decides whether ADR 0005 keeps its primary design
-  or falls back. Resolved in T4.4, which must write the outcome into the ADR before it closes —
-  0005 is marked `accepted` today with its central mechanism still undecided.
+- ~~**Whether MIUI wakes the screen reliably**~~ **Resolved 2026-09-19, T4.4: it does.** ADR 0005
+  keeps its primary design and now says so. The catch is not in the API but around it — MIUI's
+  *Show on Lock screen* permission has to be granted or the wake is denied silently, and
+  Developer options → *Stay awake* has to be off or the screen never sleeps to begin with.
 - **Whether the local model can carry a task end to end** is what the two-agent setup is for.
   Resolved per task, by reviewing the PR. See ADR 0011 and `docs/LOCAL-MODELS.md`.
-- **Who keeps polling once the Activity is not resumed** is opened by T4.2 and has to be answered
-  by T4.3, before any brightness work: the screen going off is itself an `onPause`, so the loop
-  that would notice the PC returning is switched off by the very behaviour invariant 3 asks for.
-  The T4.3 task file carries the candidates and the battery argument against each.
+- ~~**Who keeps polling once the Activity is not resumed**~~ **Resolved 2026-09-19, T4.3:** a
+  started foreground service, `PanelService`, with a `PARTIAL_WAKE_LOCK` held for the offline
+  stretch only. Written up in [ADR 0014](../docs/adr/0014-poll-loop-outlives-the-screen.md),
+  including why the wake lock is affordable here and what has to be built if that stops being
+  true.
+- **Whether the wake lock stays affordable** is the one this opened in its place. It rests on
+  the board keeping USB powered with the PC off, which is true of this desk and is the opposite
+  of what `DEVICE-CARE.md` recommends. Disabling ErP Ready would make the phone discharge
+  through every offline hour with the CPU pinned awake, and the fix — drop the lock while
+  discharging, sparse `AlarmManager` probe, `ACTION_POWER_CONNECTED` as the real signal — is
+  specified in ADR 0014 and deliberately unwritten, because it cannot be tested on this desk.
 
-## Resuming after 2026-09-16 (evening)
+## Resuming after 2026-09-19
 
-Wave 6 (Milestone B) is open on `wave/6-milestone-b`, PR #10. T4.2 landed with all five criteria
-green on the device, plus the review fixes on top of it.
+Wave 7 is on `wave/7-screen-state`. TT.6, T4.3 and T4.4 are all `done`, every acceptance command
+exits 0 on the device, and **Milestone B is reached**: the PC going away takes the screen with
+it, and the PC coming back turns it on again with nobody touching the phone.
 
-**Take TT.6 first**, then T4.3, then T4.4. TT.6 is the cheap one and the path is warm: T4.2 has
-just exercised every marker it counts, by hand.
+**What is left of this wave is eyes-only.** `mWakefulness=Dozing` is adb's word for it. Nobody
+has yet confirmed in a dark room that the panel is *actually* dark rather than merely reported
+dark, and nobody has watched it come back without a hand on the phone. Both are written into
+T4.4's manual check and neither can be automated — that is the point of the `## Manual check`
+convention.
+
+**Next: T5.1**, the `DataPoller`, on the state machine this wave built. T5.5 (thermal cutoff)
+now has the screen-state machine it was waiting for, and T5.3's backoff assertions have the
+heartbeat vocabulary they need, though neither `ping=` nor `data=` has an emitter yet.
+
+Two device settings this wave discovered, both of which look like app bugs when wrong and
+**neither of which survives an `adb install -r`**:
+
+1. **MIUI "Show on Lock screen" must be granted.** Denied, the panel logs `state=online` and
+   `screen=wake` perfectly and the screen stays dark. From the host:
+   `adb shell appops set dev.bosco.deskpanel 10020 allow` (and `10008` with it). The durable
+   route is MIUI's Settings UI — see `docs/INSTALL-PHONE.md`.
+2. **Developer options → "Stay awake" must be off.**
+   `adb shell settings get global stay_on_while_plugged_in` has to answer `0`. It was `7` on
+   this phone, and with it on the screen simply never sleeps, so the whole wave asserts green
+   while doing nothing visible.
 
 Getting back to a testable rig takes three things, none of them automatic yet:
 
 1. **Start the server by hand** — `python server/server.py`. There is no autostart on this box:
    T3.9 (systemd user unit on `graphical-session.target`) is `todo`, and wave 3 never ran. The
-   server dies with whatever shell started it.
+   server dies with whatever shell started it. Start and stop it **by PID file**, not with
+   `pkill -f`: the pattern matches the command line of the shell doing the killing, which is a
+   fast way to kill your own session. It happened twice in this wave.
 2. **The firewall rule has to be in place.** The dev box runs ufw and `docs/SERVER-SETUP.md`
    ships no firewall step for Linux by design. The phone reaches the PC through a NAT — it holds
    `192.168.3.100` and arrives as `192.168.15.2` — so the rule cannot be written against the
    phone's own address: `sudo ufw allow from 192.168.0.0/16 to any port 8777 proto tcp`. Without
    it, ping succeeds and HTTP times out, and the panel reports a perfectly ordinary offline.
+   It was already in place for this wave; `toybox nc` from `adb shell` is the quickest check
+   that it still is.
 3. **Be at the phone for the first `adb install` of the session**, and build with
    `assembleRelease`. Both reasons are in the T4.2 notes above.
 
 The server's own log is the best instrument the project has for the poll loop: it prints one
 line per request with a timestamp, so the cadence — and any duplicate loop — is directly
 countable without touching the app.
+
+**Always `adb logcat -c` before changing the PC's state, never after.** The reverse order reads
+naturally and is a race the clear usually wins, leaving an empty log and an app that did
+everything right. It cost time in this wave and had cost time before, over `am start`.
