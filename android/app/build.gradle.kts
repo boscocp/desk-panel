@@ -281,6 +281,15 @@ dependencies {
     // JVM unit tests only — PcState and friends are plain Java with no Android
     // imports precisely so `./gradlew test` covers them without a device.
     testImplementation("junit:junit:4.13.2")
+
+    // org.json is part of Android and is NOT packaged into the APK; what
+    // android.jar hands a JVM unit test is a stub whose every method throws.
+    // DataPayload builds the panel's payload through it — which is what keeps
+    // a ticker name from being able to break out of an evaluateJavascript call
+    // — so without this the one class worth testing here could only be tested
+    // on a device. Test classpath only: `implementation` would ship a second
+    // copy of a library the platform already has.
+    testImplementation("org.json:json:20240303")
 }
 
 // Every other task (`make apk`, T3.6, CI) expects the APK at the repository
