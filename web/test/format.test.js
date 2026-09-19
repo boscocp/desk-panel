@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 
 const {
     formatPrice, formatRate, formatPair, formatChange, changeClass, weatherLabel, isNight,
-    sparklinePath,
+    sparklinePath, formatTemp,
 } = require('../js/format.js');
 
 test('formatPrice formats a BRL price with two decimals', () => {
@@ -111,7 +111,9 @@ test('formatPrice still uses exactly two decimals at or above 1', () => {
 test('formatRate keeps three decimals regardless of magnitude', () => {
     assert.equal(formatRate(5.1434, 'BRL'), 'R$5.143');
     assert.equal(formatRate(0.76749533, 'BRL'), 'R$0.767');
-    assert.equal(formatRate(1, 'BRL'), 'R$1.00');
+    assert.equal(formatRate(1, 'BRL'), 'R$1.000');
+    // The width is the point: every rendering is the same length.
+    assert.equal(formatRate(5.5, 'BRL').length, formatRate(5.1434, 'BRL').length);
 });
 
 test('formatRate returns a placeholder for non-numeric input', () => {
@@ -173,4 +175,21 @@ test('sparklinePath returns nothing to draw for nothing to draw', () => {
 test('sparklinePath ignores non-numeric entries instead of drawing NaN', () => {
     const path = sparklinePath([1, null, 3, 'x'], 56, 16);
     assert.ok(!path.includes('NaN'), path);
+});
+
+// The server returns null rather than 0 for a missing temperature, because
+// zero is a real reading in most of the world. That is only honest if the page
+// renders the null as an absence -- it used to interpolate it, and the panel
+// read "São Paulo: 24°C (null-null°C)".
+test('formatTemp renders a missing temperature as a dash', () => {
+    assert.equal(formatTemp(null), '--');
+    assert.equal(formatTemp(undefined), '--');
+    assert.equal(formatTemp(NaN), '--');
+});
+
+test('formatTemp keeps one decimal and does not round a real zero away', () => {
+    assert.equal(formatTemp(24), '24');
+    assert.equal(formatTemp(15.5), '15.5');
+    assert.equal(formatTemp(0), '0');
+    assert.equal(formatTemp(-3.2), '-3.2');
 });

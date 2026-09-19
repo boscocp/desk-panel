@@ -52,10 +52,31 @@ function formatRate(rate, currency) {
     }
     const symbol = CURRENCY_SYMBOLS[currency] || '';
     const formatted = rate.toLocaleString('en-US', {
-        minimumFractionDigits: 2,
+        // Three and three. A minimum of two made the comment above false: a
+        // rate that happened to land on two decimals rendered narrower than
+        // its neighbours, and "same width whatever the magnitude" was the
+        // whole point of having a separate formatter.
+        minimumFractionDigits: 3,
         maximumFractionDigits: 3,
     });
     return `${symbol}${formatted}`;
+}
+
+// c: a temperature in Celsius, or null/undefined when the upstream had none.
+//
+// The server returns null rather than 0 on purpose -- zero is a real reading
+// in most of the world, so a zero standing in for "no data" is a lie the panel
+// cannot detect. That only works if the page renders the null as an absence,
+// and it did not: the weather line interpolated it straight into a template
+// and produced "São Paulo: 24°C (null-null°C)". providers_openmeteo's own
+// docstring claimed this function existed before it did.
+function formatTemp(c) {
+    if (typeof c !== 'number' || !Number.isFinite(c)) {
+        return '--';
+    }
+    // One decimal, because the current reading has one and the daily range
+    // does too; rounding here would make 15.5 and 15.6 the same number.
+    return `${Math.round(c * 10) / 10}`;
 }
 
 // pair: "USD/BRL". quote: the currency the whole card is denominated in.
@@ -218,7 +239,8 @@ function isNight(now, start, end) {
 
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
-        formatPrice, formatRate, formatPair, formatChange, changeClass, weatherLabel, isNight,
+        formatPrice, formatRate, formatPair, formatTemp, formatChange, changeClass,
+        weatherLabel, isNight,
         sparklinePath,
     };
 }

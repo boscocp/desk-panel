@@ -90,14 +90,32 @@ def chunks(symbols, size):
 HISTORY_URL = "https://brapi.dev/api/quote"
 
 
-def fetch_history(symbol, token="", get=get_json, range_="1mo", interval="1d"):
+def range_for(days):
+    """Pure: a day count -> the nearest range brapi accepts.
+
+    brapi takes named ranges, not a number, so `history_days` has to be mapped
+    rather than passed. Rounding up keeps the sparkline at least as long as
+    asked for; the other two providers take a count directly and get exactly
+    what config says.
+    """
+    try:
+        days = int(days)
+    except (TypeError, ValueError):
+        days = 30
+    for limit, name in ((5, "5d"), (30, "1mo"), (90, "3mo"), (180, "6mo"), (365, "1y")):
+        if days <= limit:
+            return name
+    return "5y"
+
+
+def fetch_history(symbol, token="", get=get_json, days=30, interval="1d"):
     """One symbol's daily closes. The seam TT.2 patches.
 
     One per call, like `fetch`, because the free plan's one-asset-per-request
     limit applies here too.
     """
     headers = {"Authorization": f"Bearer {token}"} if token else {}
-    return get(f"{HISTORY_URL}/{symbol}?range={range_}&interval={interval}",
+    return get(f"{HISTORY_URL}/{symbol}?range={range_for(days)}&interval={interval}",
                headers=headers)
 
 
@@ -133,20 +151,32 @@ def normalise_history(raw):
     return [close for _, close in dated]
 
 
-def load_history(symbols, token="", get=get_json):
+def load_history(symbols, token="", get=get_json, days=30):
     """`{symbol: [closes oldest-first]}` for every symbol that answered.
 
     A symbol whose history fails is simply absent: a missing sparkline costs
-    that row its picture and never its price.
+    that row its picture and never its price. But a run where *every* symbol
+    failed raises, so the cache records it and retries rather than storing
+    emptiness for six hours with nothing to say why.
+
+    Keyed by the upstream's spelling, upper-cased, because that is how the
+    price rows are keyed -- a lowercase ticker in config.json would otherwise
+    silently lose its line.
     """
+    symbols = list(symbols or [])
     history = {}
-    for symbol in symbols or []:
+    failures = []
+    for symbol in symbols:
         try:
-            series = normalise_history(fetch_history(symbol, token=token, get=get))
-        except UpstreamError:
+            series = normalise_history(fetch_history(symbol, token=token, get=get, days=days))
+        except UpstreamError as exc:
+            failures.append(exc)
             continue
         if series:
-            history[symbol] = series
+            history[str(symbol).upper()] = series
+
+    if symbols and failures and not history:
+        raise failures[0]
     return history
 
 
@@ -231,4 +261,5 @@ def load(symbols, token="", get=get_json, per_request=DEFAULT_SYMBOLS_PER_REQUES
 
 __all__ = ["DEFAULT_SYMBOLS_PER_REQUEST", "FREE_TIER_SYMBOLS", "QUOTE_URL",
            "HISTORY_URL", "UpstreamError", "chunks", "fetch", "fetch_history", "load",
+           "range_for",
            "load_history", "normalise", "normalise_history"]

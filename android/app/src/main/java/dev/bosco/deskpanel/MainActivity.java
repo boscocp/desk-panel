@@ -173,6 +173,14 @@ public class MainActivity extends Activity implements PanelService.Panel {
     @Override
     public void onPcState(boolean online, boolean logTransition) {
         lastOnline = online;
+        if (!online) {
+            // Dropped here as well as in the service, and the second copy is
+            // the one that actually reaches the page: onPageFinished pushes
+            // whatever this holds, so a wake after a night offline reloaded
+            // the WebView and handed it last night's prices with stale:false.
+            // The service clearing its own copy was necessary and not enough.
+            lastPayload = null;
+        }
         pushPcStateToPage();
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {

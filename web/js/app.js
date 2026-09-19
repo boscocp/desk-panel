@@ -139,7 +139,9 @@ function renderWeather(weather) {
         return;
     }
     const line = document.createElement('div');
-    line.textContent = `${weather.city}: ${weather.tempC}°C (${weather.minC}-${weather.maxC}°C) ${weatherLabel(weather.code)}`;
+    line.textContent = `${weather.city}: ${formatTemp(weather.tempC)}°C `
+        + `(${formatTemp(weather.minC)}-${formatTemp(weather.maxC)}°C) `
+        + `${weatherLabel(weather.code)}`;
     weatherEl.appendChild(line);
 }
 

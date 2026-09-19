@@ -95,13 +95,19 @@ def load_history(pairs, days, get=get_json):
     that row its picture, and taking the whole payload down over a decoration
     would be the wrong trade.
     """
+    pairs = list(pairs or [])
     history = {}
-    for pair in pairs or []:
+    failures = []
+    for pair in pairs:
         try:
             history[to_display_pair(pair)] = normalise_history(
                 fetch_history(pair, days, get=get))
-        except UpstreamError:
-            continue
+        except UpstreamError as exc:
+            failures.append(exc)
+    # Every one failing raises, so the cache records a failure and retries
+    # instead of storing emptiness for a six-hour TTL with no signal.
+    if pairs and failures and not history:
+        raise failures[0]
     return history
 
 
