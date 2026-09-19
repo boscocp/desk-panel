@@ -67,7 +67,11 @@ def normalise_geocode(raw):
     into a log line naming the city. Raising here would only move that
     decision somewhere with less context.
     """
-    results = (raw or {}).get("results")
+    # isinstance rather than `raw or {}` -- see providers_brapi.normalise for
+    # why a JSON array body is the realistic case this guards.
+    if not isinstance(raw, dict):
+        return None
+    results = raw.get("results")
     if not isinstance(results, list) or not results:
         return None
     first = results[0]
@@ -106,7 +110,8 @@ def normalise(raw, city=""):
     a real reading in most of the world, so a zero standing in for "no data"
     is a lie the panel cannot detect; `format.js` renders None as a dash.
     """
-    raw = raw or {}
+    if not isinstance(raw, dict):
+        raw = {}
     current = raw.get("current") if isinstance(raw.get("current"), dict) else {}
     daily = raw.get("daily") if isinstance(raw.get("daily"), dict) else {}
 

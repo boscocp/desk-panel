@@ -65,7 +65,13 @@ class BrapiTests(unittest.TestCase):
         self.assertEqual(providers_brapi.normalise(raw)[0]["changePct"], 0.0)
 
     def test_garbage_input_returns_empty_list(self):
-        for raw in (None, {}, {"results": None}, {"results": "nope"}, []):
+        # A non-empty list is the one that matters: an upstream answering with
+        # a JSON array -- a proxy, a captive portal, a changed error envelope
+        # -- used to raise AttributeError here, and an exception out of a
+        # normaliser is not an UpstreamError, so it escaped the cache entirely.
+        # The empty list passed the old guard only because it is falsy.
+        for raw in (None, {}, {"results": None}, {"results": "nope"}, [],
+                    [{"symbol": "X"}], "a string", 7):
             self.assertEqual(providers_brapi.normalise(raw), [])
 
     def test_fetch_builds_the_documented_url_and_sends_no_empty_header(self):
@@ -187,8 +193,14 @@ class OpenMeteoTests(unittest.TestCase):
         self.assertEqual(located["city"], "São Paulo")
 
     def test_geocode_with_no_results_is_none_not_an_exception(self):
-        for raw in (None, {}, {"results": []}, {"results": "nope"}):
+        for raw in (None, {}, {"results": []}, {"results": "nope"},
+                    [{"a": 1}], "a string"):
             self.assertIsNone(providers_openmeteo.normalise_geocode(raw))
+
+    def test_a_list_body_normalises_to_empty_rather_than_raising(self):
+        weather = providers_openmeteo.normalise([1, 2])
+        self.assertIsNone(weather["tempC"])
+        self.assertEqual(set(weather), {"tempC", "minC", "maxC", "code", "city"})
 
     def test_forecast_fixture_normalises_to_the_contract_shape(self):
         weather = providers_openmeteo.normalise(fixture("openmeteo_forecast.json"),

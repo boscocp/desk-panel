@@ -100,6 +100,60 @@ class TimedCacheTests(unittest.TestCase):
         cache.get(1001, 300, fail)
         self.assertEqual(len(calls), 1)
 
+    def test_a_cold_failure_does_not_hammer_the_upstream_either(self):
+        # The warm case below was covered and the cold one was not, and the
+        # cold one is the realistic failure: a PC that boots before its router
+        # does. `fresh_at` used to require a non-None value, so a cache that
+        # had never succeeded was never fresh and retried on every request --
+        # three outbound calls per panel poll, for ever.
+        cache = TimedCache()
+        calls = []
+
+        def fail():
+            calls.append(1)
+            raise UpstreamError("down")
+
+        for now in range(5):
+            cache.get(now, 300, fail)
+        self.assertEqual(len(calls), 1)
+
+    def test_a_cold_failure_still_retries_once_the_ttl_is_spent(self):
+        cache = TimedCache()
+        calls = []
+
+        def fail():
+            calls.append(1)
+            raise UpstreamError("down")
+
+        cache.get(0, 300, fail)
+        cache.get(300, 300, fail)
+        self.assertEqual(len(calls), 2)
+
+    def test_concurrent_callers_share_one_refresh(self):
+        # Requests are served on threads now, so two polls landing together
+        # must not each start the same fetch.
+        import threading
+
+        cache = TimedCache()
+        calls = []
+        started = threading.Barrier(4)
+
+        def produce():
+            calls.append(1)
+            return "value"
+
+        def worker():
+            started.wait()
+            cache.get(0, 300, produce)
+
+        threads = [threading.Thread(target=worker) for _ in range(3)]
+        for thread in threads:
+            thread.start()
+        started.wait()
+        for thread in threads:
+            thread.join(timeout=5)
+        self.assertEqual(len(calls), 1)
+
     def test_only_upstream_errors_are_swallowed(self):
         # A bug in a normaliser must not be laundered into "stale". Anything
         # that is not an UpstreamError is a defect in this repository, and it
@@ -163,14 +217,63 @@ class AppPayloadTests(unittest.TestCase):
         self.assertFalse(payload["stale"])
         self.assertEqual(payload["quotes"][0]["symbol"], "PETR4")
 
-    def test_one_upstream_failing_marks_the_whole_payload_stale(self):
-        # One cache for three markets, so a partial failure is reported as
-        # what it is: something on this panel is older than it looks.
-        self._stub_providers(fail="brapi down")
+    def test_every_upstream_failing_still_returns_the_contract_shape(self):
+        self._stub_providers(fail="everything down")
         payload = self.app.quotes()
         self.assertTrue(payload["stale"])
         self.assertEqual(payload["quotes"], [])
         self.assertEqual(set(payload), {"quotes", "fx", "crypto", "stale"})
+
+    def test_one_market_failing_does_not_empty_the_other_two(self):
+        # Found on the desk, by changing a ticker to one that needs a token:
+        # brapi answered 401, and because the three markets shared a cache the
+        # panel went blank -- FX and crypto gone, with both of their upstreams
+        # answering perfectly. A failure has to cost its own market and no
+        # more. `stale` is still true, because something on the panel is
+        # missing and the badge is how it says so.
+        import server.server as server_module
+
+        for module, rows in ((server_module.providers_awesomeapi,
+                              [{"pair": "USD/BRL", "rate": 5.14, "changePct": 0.3}]),
+                             (server_module.providers_binance,
+                              [{"symbol": "BTC", "price": 81470.0, "changePct": 1.0}])):
+            self.addCleanup(setattr, module, "load", module.load)
+            module.load = (lambda rows: lambda *a, **k: list(rows))(rows)
+
+        brapi = server_module.providers_brapi
+        self.addCleanup(setattr, brapi, "load", brapi.load)
+
+        def unauthorised(*args, **kwargs):
+            raise UpstreamError("HTTP 401 from brapi: MISSING_TOKEN")
+
+        brapi.load = unauthorised
+
+        payload = self.app.quotes()
+        self.assertEqual(payload["quotes"], [])
+        self.assertEqual(len(payload["fx"]), 1, "a working market was emptied by another's failure")
+        self.assertEqual(len(payload["crypto"]), 1)
+        self.assertTrue(payload["stale"])
+
+    def test_a_market_that_recovers_alone_clears_the_stale_flag(self):
+        import server.server as server_module
+
+        self._stub_providers(quotes=[{"symbol": "PETR4", "price": 1.0, "changePct": 0.0}],
+                             fx=[], crypto=[])
+        brapi = server_module.providers_brapi
+        failing = {"now": True}
+        working = brapi.load
+
+        def sometimes(*args, **kwargs):
+            if failing["now"]:
+                raise UpstreamError("down")
+            return working(*args, **kwargs)
+
+        brapi.load = sometimes
+
+        self.assertTrue(self.app.quotes()["stale"])
+        failing["now"] = False
+        self.clock.now = 301
+        self.assertFalse(self.app.quotes()["stale"])
 
     def test_a_cold_failure_still_returns_the_contract_shape(self):
         # The panel must be able to render the response of a server whose

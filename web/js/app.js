@@ -64,7 +64,7 @@ const weatherEl = document.getElementById('weather');
 const batteryEl = document.getElementById('battery');
 const staleEl = document.getElementById('stale-badge');
 
-function renderRow(label, value, currency, changePct) {
+function renderRow(label, value, currency, changePct, format = formatPrice) {
     const row = document.createElement('div');
     row.className = 'row';
 
@@ -74,7 +74,7 @@ function renderRow(label, value, currency, changePct) {
 
     const priceEl = document.createElement('span');
     priceEl.className = 'price';
-    priceEl.textContent = formatPrice(value, currency);
+    priceEl.textContent = format(value, currency);
 
     const changeEl = document.createElement('span');
     changeEl.className = `change ${changeClass(changePct)}`;
@@ -84,10 +84,16 @@ function renderRow(label, value, currency, changePct) {
     return row;
 }
 
-function renderList(container, items, labelField, valueField, currency) {
+// `format` is how FX opts out of formatPrice: a rate is not a price, and
+// formatPrice's magnitude-dependent precision is wrong for one in both
+// directions. See formatRate in format.js.
+function renderList(container, items, labelField, valueField, currency,
+                   format = formatPrice, formatLabel = (label) => label) {
     container.textContent = '';
     for (const item of items) {
-        container.appendChild(renderRow(item[labelField], item[valueField], currency, item.changePct));
+        container.appendChild(
+            renderRow(formatLabel(item[labelField], currency), item[valueField],
+                      currency, item.changePct, format));
     }
 }
 
@@ -117,7 +123,7 @@ window.onData = (payload) => {
         return;
     }
     renderList(quotesEl, payload.quotes || [], 'symbol', 'price', 'BRL');
-    renderList(fxEl, payload.fx || [], 'pair', 'rate', 'BRL');
+    renderList(fxEl, payload.fx || [], 'pair', 'rate', 'BRL', formatRate, formatPair);
     renderList(cryptoEl, payload.crypto || [], 'symbol', 'price', 'USD');
     renderWeather(payload.weather);
     renderBattery(payload.battery);

@@ -34,6 +34,48 @@ function formatPrice(value, currency) {
     return `${symbol}${formatted}`;
 }
 
+// rate: number. An FX rate, which is not a price and does not want
+// formatPrice's rules.
+//
+// Exchange rates are quoted to four decimal places by convention, and the
+// convention exists because both of formatPrice's branches get them wrong.
+// Above 1 it truncates to two, so USD/BRL at 5.1434 rendered as R$5.14 and
+// threw away digits a rate is actually read for. Below 1 it opens the window
+// to eight, which is meant for a coin at 0.00081 and turned CNY/BRL into
+// R$0.76749533 -- a number so wide it pushed its own label out of the column.
+//
+// Three decimals, and magnitude-independent, so every row in the card is the
+// same width whether the rate is 5.143 or 0.767.
+function formatRate(rate, currency) {
+    if (typeof rate !== 'number' || !Number.isFinite(rate)) {
+        return '--';
+    }
+    const symbol = CURRENCY_SYMBOLS[currency] || '';
+    const formatted = rate.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 3,
+    });
+    return `${symbol}${formatted}`;
+}
+
+// pair: "USD/BRL". quote: the currency the whole card is denominated in.
+//
+// Drops the quote half when it is the same for every row, because then it is
+// a property of the card rather than of the line: the card already says R$ on
+// every value, and "USD/BRL" spends a third of the label column repeating it.
+// A pair quoted in anything else keeps both halves, so a future EUR/USD row
+// still says what it is.
+function formatPair(pair, quote) {
+    if (typeof pair !== 'string') {
+        return '';
+    }
+    const [base, counter] = pair.split('/');
+    if (!counter) {
+        return pair;
+    }
+    return counter === quote ? base : pair;
+}
+
 // pct: number (e.g. 1.23 for +1.23%). Sign, one decimal, percent sign.
 // Zero is shown without a sign, matching changeClass's "flat" bucket.
 function formatChange(pct) {
@@ -121,5 +163,7 @@ function isNight(now, start, end) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { formatPrice, formatChange, changeClass, weatherLabel, isNight };
+    module.exports = {
+        formatPrice, formatRate, formatPair, formatChange, changeClass, weatherLabel, isNight,
+    };
 }

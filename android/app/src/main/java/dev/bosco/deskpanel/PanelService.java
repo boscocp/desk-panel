@@ -310,6 +310,14 @@ public final class PanelService extends Service implements PcPoller.Listener {
             bringPanelToFront();
         } else {
             dataPoller.stop();
+            // Dropped, not kept. It is only ever written by a successful
+            // fetch, so holding it would mean the wake after a night offline
+            // replays last night's prices and weather -- with stale:false,
+            // because nothing in the payload knows how old it is. The panel
+            // is blank for the second or two until DataPoller's first fetch
+            // lands, and blank is honest where a confident wrong number is
+            // not.
+            lastPayload = null;
         }
     }
 
