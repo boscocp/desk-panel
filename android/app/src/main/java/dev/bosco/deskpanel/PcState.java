@@ -39,6 +39,33 @@ public final class PcState {
      */
     public static final long BACKOFF_CAP_MS = 15000L;
 
+    /**
+     * The sparse offline probe, for when the phone is offline <em>and</em> on
+     * its own battery (T5.6). This is not a rung on the ladder above: it is
+     * what replaces the ladder entirely, because in that state there is no
+     * in-process schedule at all — the device is allowed to suspend and
+     * {@code AlarmManager} owns the next probe.
+     *
+     * <p>15 minutes rather than something responsive, and the number is the
+     * platform's, not a preference. Doze clamps an allow-while-idle alarm to
+     * roughly nine minutes, so anything tighter is a promise that would not be
+     * kept.
+     *
+     * <p><b>This is the request, not the worst case.</b> {@code
+     * setAndAllowWhileIdle} is inexact, and the platform adds a delivery window
+     * of its own: measured on this device, 15 minutes was scheduled as "between
+     * +14m41s and +25m56s" — an 11-minute window on top. Anything reasoning
+     * about how long recovery can take has to read {@code maxWhenElapsed} in
+     * {@code dumpsys alarm}, never this constant.
+     *
+     * <p>It can afford to be this sparse only because it is a <em>backstop</em>.
+     * Where the phone's power dies with the PC, {@code ACTION_POWER_CONNECTED}
+     * arrives the instant the PC comes back and this never runs. Where it does
+     * not — a wall charger, a board that keeps USB live — this is the only
+     * mechanism, and half an hour is what recovery costs (ADR 0014).
+     */
+    public static final long DORMANT_ALARM_MS = 15 * 60 * 1000L;
+
     private State state = State.UNKNOWN;
     private boolean transitioned;
     private int consecutiveFailures;
@@ -109,6 +136,34 @@ public final class PcState {
             interval *= 2;
         }
         return Math.min(interval, BACKOFF_CAP_MS);
+    }
+
+    /**
+     * Whether the poll schedule should leave this process altogether (T5.6).
+     *
+     * <p>Dormant is one state and one only: <b>offline and on battery</b>.
+     * Offline on mains is the ADR 0014 arrangement and stays exactly as it was
+     * — a wake lock and the ladder above, which costs a little heat on a phone
+     * that is charging anyway. Offline on battery is the state that ADR 0014
+     * says makes its own decision wrong, and the difference is not a cadence
+     * but an owner: nothing in this process may hold the CPU awake, so there is
+     * no thread to run a ladder on and {@code AlarmManager} has to keep the
+     * time instead.
+     *
+     * <p>Online is never dormant, whatever the power. Somebody is looking at
+     * the panel, {@code FLAG_KEEP_SCREEN_ON} is holding the device up for the
+     * display's sake, and a 2s probe is the cheapest thing happening.
+     *
+     * <p>A parameter rather than a field, like the clock that {@link #record}
+     * takes: this class holds what it learned from probes, and power is not
+     * something a probe can tell it.
+     *
+     * @param onMains whether the charger is connected — {@code EXTRA_PLUGGED},
+     *                never {@code EXTRA_STATUS}, which reports
+     *                {@code NOT_CHARGING} for a paused charge on a live cable
+     */
+    public boolean isDormant(boolean onMains) {
+        return state == State.OFFLINE && !onMains;
     }
 
     /**

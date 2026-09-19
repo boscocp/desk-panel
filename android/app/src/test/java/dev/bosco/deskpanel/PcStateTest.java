@@ -222,4 +222,76 @@ public class PcStateTest {
         assertFalse(s.isDue(T0 + 6000L + 7999L));
         assertTrue(s.isDue(T0 + 6000L + 8000L));
     }
+
+    // --- Dormancy: offline and on battery (T5.6) ----------------------------
+    //
+    // The state where the schedule leaves this process entirely. Worth testing
+    // on the JVM precisely because it is impossible to observe on the device
+    // without waiting fifteen minutes for the alarm that replaces it.
+
+    @Test
+    public void offlineOnBatteryIsDormant() {
+        PcState s = new PcState();
+        s.record(false, T0);
+
+        assertTrue(s.isDormant(false));
+    }
+
+    @Test
+    public void offlineOnMainsIsNotDormant() {
+        // The ADR 0014 arrangement, unchanged: a wake lock and the ladder, on a
+        // phone that is charging anyway.
+        PcState s = new PcState();
+        s.record(false, T0);
+
+        assertFalse(s.isDormant(true));
+    }
+
+    @Test
+    public void onlineIsNeverDormantWhateverThePower() {
+        // Somebody is looking at the panel and FLAG_KEEP_SCREEN_ON is holding
+        // the device up for the display's sake, so a 2s probe is the cheapest
+        // thing happening. Going sparse here would make the panel stale on
+        // screen to save nothing.
+        PcState s = new PcState();
+        s.record(true, T0);
+
+        assertFalse(s.isDormant(true));
+        assertFalse(s.isDormant(false));
+    }
+
+    @Test
+    public void unknownIsNotDormantBeforeTheFirstProbe() {
+        // Nothing has been learned yet, and the first probe has to happen for
+        // anything else to. Dormancy here would mean never probing at all.
+        PcState s = new PcState();
+
+        assertFalse(s.isDormant(false));
+        assertFalse(s.isDormant(true));
+    }
+
+    @Test
+    public void dormancyFollowsTheStateAndNotTheFailureCount() {
+        // A single failure is enough: there is no "deeply offline" threshold to
+        // cross, because the cost being avoided is the wake lock, and that is
+        // held from the first failure onwards.
+        PcState s = new PcState();
+        s.record(false, T0);
+        assertTrue(s.isDormant(false));
+
+        s.record(true, T0 + 2000L);
+        assertFalse("one success is enough to leave dormancy", s.isDormant(false));
+
+        s.record(false, T0 + 4000L);
+        assertTrue(s.isDormant(false));
+    }
+
+    @Test
+    public void theSparseAlarmIsAboveTheFloorDozeImposes() {
+        // Doze clamps an allow-while-idle alarm to roughly nine minutes, so a
+        // tighter interval would be a promise the platform does not keep. This
+        // asserts the number stays on the right side of that.
+        assertTrue("an allow-while-idle alarm below ~9 minutes is not honoured",
+                PcState.DORMANT_ALARM_MS >= 9 * 60 * 1000L);
+    }
 }
