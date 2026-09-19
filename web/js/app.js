@@ -1,7 +1,3 @@
-window.onPcState = (online) => {
-    console.log("PC State:", online);
-};
-
 const clockEl = document.getElementById('clock');
 const dateEl = document.getElementById('date');
 
@@ -26,8 +22,34 @@ function updateClock() {
 
 // Initial call
 updateClock();
-// Update every second
-setInterval(updateClock, 1000);
+// Update every second, while anyone can see it. The handle is kept so the
+// offline state can stop it: see window.onPcState below.
+let clockTimer = setInterval(updateClock, 1000);
+
+// --- PC state --------------------------------------------------------------
+// Called from native Java on every transition and only on transitions
+// (MainActivity.onPcState), never from here: web/ has no network code at all
+// (invariant 1, ADR 0002). In the browser it is simply never called, and the
+// panel stays in its online look, which is the one worth developing against.
+
+window.onPcState = (online) => {
+    // One class on <body>; the stylesheet owns what that means. Pure black is
+    // not decoration on an AMOLED - a black pixel is an off pixel - so the
+    // offline look is the cheapest thing the display can show while the
+    // backlight is on its way out (ADR 0005).
+    document.body.classList.toggle('pc-offline', !online);
+
+    // Nothing is visible offline, so a per-second DOM write is pure cost, and
+    // it is cost paid in exactly the state the device holds a wake lock to
+    // survive (ADR 0014). Stopping the timer is worth more here than it looks.
+    if (online && clockTimer === null) {
+        updateClock();
+        clockTimer = setInterval(updateClock, 1000);
+    } else if (!online && clockTimer !== null) {
+        clearInterval(clockTimer);
+        clockTimer = null;
+    }
+};
 
 // --- Data rendering --------------------------------------------------------
 // window.onData(payload) is the one entry point for quotes, fx, crypto,
