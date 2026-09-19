@@ -46,8 +46,26 @@ QUOTE_URL = "https://brapi.dev/api/v2/stocks/quote"
 FREE_TIER_SYMBOLS = ("PETR4", "MGLU3", "VALE3", "ITUB4")
 
 
+# How many symbols may ride in one request. **One, because that is what
+# brapi's free plan allows**, and asking for more is not a partial success --
+# the whole request is refused:
+#
+#   HTTP 400 QUOTES_PER_REQUEST
+#   "Seu plano permite no máximo 1 ativo(s) por requisição. Você enviou 3."
+#
+# Measured 2026-09-19, with a real token, after the three symbols had each
+# answered individually. It is the same shape of trap as the free-tier ticker
+# list: a card that renders nothing, and an explanation that exists only in a
+# response body nobody reads. Paid plans raise the limit, so this is config
+# rather than a constant.
+DEFAULT_SYMBOLS_PER_REQUEST = 1
+
+
 def fetch(symbols, token="", get=get_json):
-    """Ask brapi for `symbols`. The seam TT.2 patches.
+    """Ask brapi for `symbols` in one request. The seam TT.2 patches.
+
+    Callers should go through `load`, which respects the per-request limit;
+    this stays single-request so a test can assert exactly one URL.
 
     `get` is injected rather than imported at the call site so a test can
     replace exactly this module's outbound call — see server/CLAUDE.md.
@@ -57,6 +75,79 @@ def fetch(symbols, token="", get=get_json):
     url = f"{QUOTE_URL}?symbols={','.join(symbols)}"
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     return get(url, headers=headers)
+
+
+def chunks(symbols, size):
+    """Pure: `symbols` split into lists of at most `size`, size floored at 1."""
+    size = max(1, int(size))
+    return [list(symbols[i:i + size]) for i in range(0, len(symbols), size)]
+
+
+# Historical closes come from the *legacy* path with a range, not from
+# /api/v2/stocks/quote -- measured 2026-09-19: the v2 endpoint accepts the
+# range parameters and returns no historicalDataPrice at all, silently. The
+# legacy one returns 21 daily points for range=1mo.
+HISTORY_URL = "https://brapi.dev/api/quote"
+
+
+def fetch_history(symbol, token="", get=get_json, range_="1mo", interval="1d"):
+    """One symbol's daily closes. The seam TT.2 patches.
+
+    One per call, like `fetch`, because the free plan's one-asset-per-request
+    limit applies here too.
+    """
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    return get(f"{HISTORY_URL}/{symbol}?range={range_}&interval={interval}",
+               headers=headers)
+
+
+def normalise_history(raw):
+    """Pure: the historical response -> `[close, ...]`, oldest first.
+
+    brapi returns the points ascending by date, so this sorts on `date`
+    anyway rather than trusting it: the two other providers in this project
+    disagree with each other about direction, and a series drawn backwards is
+    a rise rendered as a fall with nothing to say so.
+    """
+    if not isinstance(raw, dict):
+        return []
+    results = raw.get("results")
+    if not isinstance(results, list) or not results:
+        return []
+    entry = results[0]
+    if not isinstance(entry, dict):
+        return []
+    points = entry.get("historicalDataPrice")
+    if not isinstance(points, list):
+        return []
+
+    dated = []
+    for point in points:
+        if not isinstance(point, dict):
+            continue
+        close = _number(point.get("close"))
+        when = _number(point.get("date"))
+        if close is not None:
+            dated.append((when if when is not None else 0.0, close))
+    dated.sort(key=lambda pair: pair[0])
+    return [close for _, close in dated]
+
+
+def load_history(symbols, token="", get=get_json):
+    """`{symbol: [closes oldest-first]}` for every symbol that answered.
+
+    A symbol whose history fails is simply absent: a missing sparkline costs
+    that row its picture and never its price.
+    """
+    history = {}
+    for symbol in symbols or []:
+        try:
+            series = normalise_history(fetch_history(symbol, token=token, get=get))
+        except UpstreamError:
+            continue
+        if series:
+            history[symbol] = series
+    return history
 
 
 def normalise(raw):
@@ -113,9 +204,31 @@ def _number(value):
         return None
 
 
-def load(symbols, token="", get=get_json):
-    """fetch + normalise, with upstream failure surfaced as UpstreamError."""
-    return normalise(fetch(symbols, token=token, get=get))
+def load(symbols, token="", get=get_json, per_request=DEFAULT_SYMBOLS_PER_REQUEST):
+    """Every symbol, in as few requests as the plan allows, normalised.
+
+    A chunk that fails costs its own symbols and no more — the same rule
+    `normalise` already applies to a single delisted ticker. Only a run where
+    *every* chunk failed raises, because that is the case where the card has
+    nothing to show and the panel should say stale rather than empty-and-fine.
+    """
+    symbols = list(symbols or [])
+    if not symbols:
+        return []
+
+    rows = []
+    failures = []
+    for group in chunks(symbols, per_request):
+        try:
+            rows.extend(normalise(fetch(group, token=token, get=get)))
+        except UpstreamError as exc:
+            failures.append(exc)
+
+    if failures and not rows:
+        raise failures[0]
+    return rows
 
 
-__all__ = ["FREE_TIER_SYMBOLS", "QUOTE_URL", "UpstreamError", "fetch", "load", "normalise"]
+__all__ = ["DEFAULT_SYMBOLS_PER_REQUEST", "FREE_TIER_SYMBOLS", "QUOTE_URL",
+           "HISTORY_URL", "UpstreamError", "chunks", "fetch", "fetch_history", "load",
+           "load_history", "normalise", "normalise_history"]

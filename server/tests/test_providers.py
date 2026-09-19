@@ -100,6 +100,63 @@ class BrapiTests(unittest.TestCase):
         self.assertNotIn("sekrit", seen["url"])
         self.assertEqual(seen["headers"], {"Authorization": "Bearer sekrit"})
 
+    def test_chunks_splits_at_the_plan_limit(self):
+        self.assertEqual(providers_brapi.chunks(["A", "B", "C"], 1),
+                         [["A"], ["B"], ["C"]])
+        self.assertEqual(providers_brapi.chunks(["A", "B", "C"], 2),
+                         [["A", "B"], ["C"]])
+        self.assertEqual(providers_brapi.chunks(["A", "B", "C"], 10), [["A", "B", "C"]])
+        # A zero or negative size would loop for ever rather than fail.
+        self.assertEqual(providers_brapi.chunks(["A"], 0), [["A"]])
+
+    def test_load_sends_one_symbol_per_request_by_default(self):
+        # brapi's free plan refuses a request carrying more than one symbol,
+        # and refuses the *whole* request -- three tickers in one call is a
+        # 400, not a partial answer. Measured with a real token, 2026-09-19:
+        # "Seu plano permite no máximo 1 ativo(s) por requisição."
+        seen = []
+
+        def get(url, headers=None, timeout=None):
+            seen.append(url)
+            symbol = url.rsplit("=", 1)[1]
+            return {"results": [{"symbol": symbol,
+                                 "data": {"regularMarketPrice": 1.0,
+                                          "regularMarketChangePercent": 0.0}}]}
+
+        rows = providers_brapi.load(["PETR4", "SEER3", "TAEE11"], token="t", get=get)
+        self.assertEqual(len(seen), 3, "symbols were batched into one request")
+        self.assertEqual([r["symbol"] for r in rows], ["PETR4", "SEER3", "TAEE11"])
+
+    def test_a_paid_plan_may_batch(self):
+        seen = []
+
+        def get(url, headers=None, timeout=None):
+            seen.append(url)
+            return {"results": []}
+
+        providers_brapi.load(["A", "B", "C", "D"], get=get, per_request=3)
+        self.assertEqual(len(seen), 2)
+
+    def test_one_failing_chunk_costs_its_own_symbols_only(self):
+        def get(url, headers=None, timeout=None):
+            if "SEER3" in url:
+                raise providers_brapi.UpstreamError("HTTP 402")
+            symbol = url.rsplit("=", 1)[1]
+            return {"results": [{"symbol": symbol,
+                                 "data": {"regularMarketPrice": 1.0}}]}
+
+        rows = providers_brapi.load(["PETR4", "SEER3", "TAEE11"], get=get)
+        self.assertEqual([r["symbol"] for r in rows], ["PETR4", "TAEE11"])
+
+    def test_every_chunk_failing_raises_so_the_card_reads_stale(self):
+        # Empty-and-fine would be a lie: the panel would show a blank card
+        # with no badge, which is indistinguishable from "no tickers set".
+        def get(url, headers=None, timeout=None):
+            raise providers_brapi.UpstreamError("HTTP 401")
+
+        with self.assertRaises(providers_brapi.UpstreamError):
+            providers_brapi.load(["PETR4", "SEER3"], get=get)
+
     def test_no_symbols_makes_no_call(self):
         def explode(*args, **kwargs):
             raise AssertionError("fetch called with nothing to ask for")
