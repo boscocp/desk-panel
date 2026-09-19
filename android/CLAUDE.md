@@ -3,6 +3,14 @@
 Java, not Kotlin — deliberately (ADR 0001). One Activity, one WebView, no Jetpack Compose.
 Package `dev.bosco.deskpanel`. `minSdk 26`, `compileSdk`/`targetSdk 36`.
 
+There is also exactly one service, `PanelService`, and it is not a violation of the line above:
+that rule is about the UI, and this is not a second screen. **Do not fold the poll loop back
+into the Activity.** The screen going out stops the Activity, so a loop living there switches
+itself off at precisely the moment it would have to notice the PC returning — `screen=wake`
+then can never fire. The whole reasoning, including why a wake lock is affordable on this rig
+and what has to change if that stops being true, is in
+[ADR 0014](../docs/adr/0014-poll-loop-outlives-the-screen.md).
+
 ## Rules specific to this layer
 
 - **Never add a `fetch` to the web assets.** Network belongs here, in Java. See invariant 1 in
@@ -16,10 +24,12 @@ Package `dev.bosco.deskpanel`. `minSdk 26`, `compileSdk`/`targetSdk 36`.
 - **Keep logic out of Android classes.** Anything worth testing — the online/offline state
   machine, backoff timing, JSON shaping — goes in a plain class like `PcState.java` with no
   Android imports, so `./gradlew test` covers it on the JVM without a device.
-- **Emit logcat markers on every state transition**: `Log.i("DeskPanel", "state=online")`,
-  `state=offline`, `screen=sleep`, `screen=wake`. The E2E suite asserts on these, because
-  Android exposes no documented way to read screen state from adb (ADR 0009). Renaming or
-  dropping a marker breaks the E2E suite.
+- **Emit logcat markers on every state transition**, and take every marker string from
+  `Markers.java` — never write one inline. `state=online`, `state=offline`, `screen=sleep`,
+  `screen=wake` and the rest live there once, and the TT.6 acceptance greps that no copy exists
+  anywhere else under `main/java`, because a duplicated marker is how the E2E suite starts
+  passing against a stale string. The suite asserts on these because Android exposes no
+  documented way to read screen state from adb (ADR 0009). Renaming or dropping one breaks it.
 
 ## Build and test
 

@@ -86,6 +86,24 @@ than restating it — three copies had already drifted apart on scenario 5.
 The 20s allowances exist because the offline backoff caps at 15s (T5.3). Tighter windows
 produce flaky failures that are not bugs.
 
+**Clear the buffer before changing the PC's state, never after.** `adb logcat -c` followed by
+killing the server reads naturally and is a race: the app notices within one poll interval —
+2s while online — so the clear usually lands after the transition and wipes the marker the
+assertion is about. The run then fails in the most misleading way available, with an empty log
+and an app that did everything right. Measured 2026-09-19; the same trap cost a session once
+already, over `am start`.
+
+Two more things the markers do not say, both worth knowing before writing an assertion against
+them:
+
+- `screen=sleep` means the app cleared `FLAG_KEEP_SCREEN_ON`, not that the panel went dark. The
+  display goes out one device timeout later, and whether it is genuinely off is eyes-only
+  (T4.4's manual check, [ADR 0014](adr/0014-poll-loop-outlives-the-screen.md)).
+- `panel=rendered` is **not** once per session. The wake relaunches the Activity, so one lands
+  about a second after each `screen=wake`, and WebView is entitled to fire `onPageFinished`
+  twice for a single load — both have been seen on the device. Assert that it appears, never
+  how many times.
+
 Scenario 5 may need permissions MIUI withholds. If it does, it is marked manual rather than
 deleted — the scenario is real, the automation is what is missing.
 
