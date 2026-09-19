@@ -26,8 +26,10 @@ import org.json.JSONObject;
  *  stale:  bool}
  * </pre>
  *
- * <p>{@code battery} and {@code night} are absent on purpose: T5.4 and T6.4 own
- * them, and a key invented here would have to be un-invented there.
+ * <p>{@code battery} is added afterwards by {@link #withBattery}, because it
+ * comes from the device rather than from the server and arrives on its own
+ * schedule — a broadcast, never a poll (T5.4). {@code night} is still absent:
+ * T6.4 owns it, and a key invented here would have to be un-invented there.
  */
 public final class DataPayload {
 
@@ -95,6 +97,45 @@ public final class DataPayload {
             // A body that is not JSON is a failure like any other: keep what
             // the panel has. It reaches the log through the caller's marker.
             return null;
+        }
+    }
+
+    /**
+     * The same payload with the device's {@code battery} object folded in
+     * (T5.4).
+     *
+     * <p>A separate step rather than a third argument to {@link #merge},
+     * because the two halves do not share a clock. The server's data arrives on
+     * a 60s poll; the battery arrives when Android decides something changed,
+     * which may be twice in ten seconds or not for an hour. Folding here lets
+     * either event refresh the page with the other's last value still on it,
+     * and it keeps {@code merge} answering exactly one question — whether the
+     * <em>server</em> gave us a usable pair.
+     *
+     * <p><b>A bad battery never costs the payload.</b> Everything this method
+     * can fail at is a decoration in the corner of a panel whose content is the
+     * prices; every failure therefore returns the payload untouched rather than
+     * null, which is the opposite of {@code merge}'s all-or-nothing rule and is
+     * the right call for the opposite reason. Blanking B3, FX, CRYPTO and
+     * WEATHER because a temperature would not parse is not a trade anybody
+     * would make.
+     *
+     * @param payload the merged server payload, or null if the cycle failed
+     * @param battery a JSON object literal from {@link BatteryReading}, or null
+     *                if no broadcast has arrived yet
+     * @return a JSON object literal safe to interpolate into JavaScript, or
+     *         null exactly when {@code payload} was null
+     */
+    public static String withBattery(String payload, String battery) {
+        if (payload == null || battery == null) {
+            return payload;
+        }
+        try {
+            JSONObject merged = new JSONObject(payload);
+            merged.put("battery", new JSONObject(battery));
+            return escapeForScript(merged.toString());
+        } catch (JSONException malformed) {
+            return payload;
         }
     }
 

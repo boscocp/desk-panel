@@ -38,6 +38,14 @@
     --up: #3FD56C;          /* gain: the accent's hue complement */
     --down: #FF3D6E;        /* loss: the accent pushed toward red */
 
+    /* Caution, and only that. The battery line takes this above 40 degrees
+     * (T5.4 step 4), and nothing else on the panel uses it. Amber rather than
+     * --down because --down is the alarm colour -- it is a loss, and it is the
+     * fill behind STALE -- and a warm battery on a charger is a thing to notice
+     * on the way past, not a fault. 11.7:1 on black, so it is legible across
+     * the desk at the smallest size the panel uses. */
+    --warn: #FFB03F;        /* caution: the battery above its temperature floor */
+
     /* Derived, all from --accent. */
     --rule: rgba(213, 63, 167, 0.38);
     --rule-faint: rgba(213, 63, 167, 0.16);
@@ -148,8 +156,13 @@ body {
 #quotes  { grid-area: 1 / 1 / 2 / 2; }
 #fx      { grid-area: 2 / 1 / 3 / 2; }
 #crypto  { grid-area: 3 / 1 / 4 / 2; }
-#weather { grid-area: 1 / 2 / 3 / 3; }
-#battery { grid-area: 3 / 2 / 4 / 3; }
+/* All three rows, not two. DEVICE used to hold the bottom of this column as a
+ * card of equal weight to the content, which contradicted T5.4's own "render
+ * discreetly" and cost WEATHER the height it needs most: WEATHER is the
+ * tightest card on the panel in the worst case, because a city is server
+ * config and "Thunderstorm, heavy hail" is a real label. Free space inside it
+ * goes from 29.4px to 87.3px, measured at 872x392 under the stress payload. */
+#weather { grid-area: 1 / 2 / 4 / 3; }
 
 .card-list,
 .card {
@@ -186,7 +199,8 @@ body {
 #fx::before      { content: 'FX'; }
 #crypto::before  { content: 'CRYPTO'; }
 #weather::before { content: 'WEATHER'; }
-#battery::before { content: 'DEVICE'; }
+/* No DEVICE title: the battery is no longer a card, and formatBattery writes
+ * its own three-character prefix instead. */
 
 .row {
     display: flex;
@@ -333,12 +347,84 @@ body {
     line-height: 1.32;
     letter-spacing: 0.01em;
     color: var(--accent);
+
+    /* The foot the battery line sits in, reserved rather than shared. Deep
+     * enough for the two-line worst case (57px) plus the 1px inset, so the
+     * forecast is centred in what is left and the two can never meet --
+     * including for a longer city, which is server config and not a rebuild.
+     * This is what makes the corner line safe to position absolutely; without
+     * it the arrangement only works while the forecast happens to be short. */
+    padding-bottom: 62px;
 }
 
+/* --- The battery, demoted to a corner line (T5.4) -------------------------- *
+ *
+ * Not a card and not in the grid. It sits in the bottom-right corner of #panel,
+ * in the foot of the WEATHER card -- and #weather reserves that foot with
+ * padding-bottom, so the two cannot share it. Overlap is a real risk and not a
+ * theoretical one: this line is out of the flow, so nothing about the layout
+ * stops it landing on live content, and the first cut of it did exactly that.
+ * `check_layout.py` now measures ink against ink for every pair of sections,
+ * which is the check that catches it (measure.js, question 4).
+ *
+ * Out of the grid on purpose: leaving it as a grid item is what made it a card
+ * of equal weight to the content, and a diagnostic sitting peer to the prices
+ * is what T5.4 step 3 rules out. Taking it out of the flow is also what lets
+ * WEATHER have the whole column.
+ *
+ * 20px is not "small" by accident either -- T6.3's legibility floor applies to
+ * this line as much as to a price, so it is demoted by position, weight and
+ * colour, never by shrinking below what can be read from across the desk.
+ */
 #battery {
+    position: absolute;
+    /* 1px, not 0. The corner it sits in is the WEATHER card's corner, and that
+     * card's border runs through exactly those two pixel rows -- at 0 the black
+     * background below would paint over the border and leave the card looking
+     * broken open at one end. Inside the border, the line reads as a caption in
+     * the card's empty foot, which is what it is. */
+    right: 1px;
+    bottom: 1px;
+    /* Enough of the ground to sit on, so the line stays readable even if the
+     * card behind it ever grows into this corner. On an AMOLED this costs
+     * nothing: --ground is #000000, which is a pixel switched off. */
+    background: var(--ground);
+    padding: 2px 9px 3px 8px;
     font-size: 20px;
     line-height: 1.3;
+    letter-spacing: 0.04em;
     color: var(--accent-dim);
+
+    /* The column, and nothing wider. Both halves of this are load-bearing, and
+     * the first cut of this rule had neither.
+     *
+     * max-width, because the element is positioned against #panel -- which is
+     * 872px wide, the whole right side of the panel -- and not against the
+     * 224px track it appears to live in. Absolute positioning takes it out of
+     * the grid, so the track stops constraining it entirely.
+     *
+     * And wrapping rather than `white-space: nowrap`, because with a cap and no
+     * wrap the overflow just moves: the text would run out of the box to the
+     * left instead of stopping. The widest line the code can build is
+     * `BAT 100% - 42.5C - unplugged`, at 323px, which under the original rule
+     * grew out of the column and painted its opaque ground over the bottom of
+     * the CRYPTO card -- covering a live price's change and its sparkline, 68px
+     * of them, measured. Wrapped, the same string is two lines inside the
+     * column, which is why #weather reserves a foot deep enough for two. */
+    /* border-box, so 222 is the whole line and not 222 plus padding. Without
+     * it the box measured 239px -- 17px of padding outside the cap -- which put
+     * its left edge at x=622 against a CRYPTO card ending at x=630: inside the
+     * card, 3px clear of its rightmost glyph. Passing by 3px is not passing. */
+    box-sizing: border-box;
+    max-width: 222px;
+    text-align: right;
+}
+
+/* Above 40 degrees. Visible from across the room and still not an alarm: the
+ * colour changes, nothing flashes, nothing moves, and the number that earned it
+ * is right there in the same line. */
+#battery .warm {
+    color: var(--warn);
 }
 
 /* STALE is a warning, so it takes --down rather than the accent: it must not

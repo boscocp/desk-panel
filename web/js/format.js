@@ -202,6 +202,55 @@ function weatherLabel(code) {
     return WEATHER_LABELS[code] || 'Unknown';
 }
 
+// Above this, the panel says so. Lithium ageing is dominated by heat, and the
+// point of putting a thermometer on a device that lives on a desk all day is to
+// see the number climb before the back cover does (T5.4, ADR 0008).
+//
+// 40 is warm for a phone on a charger and not yet a fault, which is why the
+// treatment is a colour rather than a badge: something to notice on the way
+// past, not something to act on at once.
+const BATTERY_WARN_C = 40;
+
+// battery: {level, tempC, charging} from the payload, or undefined before the
+// first broadcast. Returns the whole corner line, or '' when there is nothing
+// worth saying -- app.js renders nothing at all for '', rather than an empty
+// box with a label in it.
+//
+// "BAT" rather than a card title: T5.4 demotes this from a card to a line, so
+// the line has to say what it is on its own. Three characters is the cheapest
+// way to do that.
+function formatBattery(battery) {
+    if (!battery || typeof battery.level !== 'number' || !Number.isFinite(battery.level)) {
+        return '';
+    }
+    const parts = [`BAT ${Math.round(battery.level)}%`];
+
+    // Reuses formatTemp, so an absent temperature is drawn as an absence here
+    // exactly as it is in the weather line. The native side leaves the key out
+    // rather than sending a zero, for the same reason the server does.
+    const temp = formatTemp(battery.tempC);
+    if (temp !== '--') {
+        parts.push(`${temp}°C`);
+    }
+
+    // Only the interesting half is spelled out. On this desk the phone is
+    // powered from the PC's USB, so charging is the resting state and saying so
+    // every second of every day would spend the line's width on no information;
+    // "unplugged" is the condition that is worth a word, because it means the
+    // panel is now running the battery down (ADR 0014).
+    if (battery.charging === false) {
+        parts.push('unplugged');
+    }
+    return parts.join(' · ');
+}
+
+// tempC: number. Whether the battery is warm enough to deserve the warning
+// colour. Separate from formatBattery because the text and the colour are two
+// different jobs, and app.js is the only thing that owns classes.
+function batteryWarm(tempC) {
+    return typeof tempC === 'number' && Number.isFinite(tempC) && tempC > BATTERY_WARN_C;
+}
+
 // now: Date. start/end: "HH:MM" as shipped in server/config.json
 // (night_start / night_end) and in the payload's night:{start,end} — a bare
 // hour integer is accepted too. Returns false if either bound is unparseable,
@@ -242,5 +291,6 @@ if (typeof module !== 'undefined' && module.exports) {
         formatPrice, formatRate, formatPair, formatTemp, formatChange, changeClass,
         weatherLabel, isNight,
         sparklinePath,
+        formatBattery, batteryWarm, BATTERY_WARN_C,
     };
 }

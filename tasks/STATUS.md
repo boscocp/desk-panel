@@ -86,9 +86,9 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 | # | Task | State | Notes |
 |---|---|---|---|
 | T5.1 | `DataPoller`, replacing the mock | done | 2026-09-19. Real quotes, FX, crypto and weather on the panel; all three acceptance commands exit 0 and the manual check was done against a screencap, value by value. `DataPoller` is a sibling of `PcPoller`, deliberately not merged with it: they answer different questions on different clocks, a 2s heartbeat that decides whether the screen is on at all against a 60s refresh of what it shows. It runs **only while online** — offline the panel is dark and the device is up on a wake lock held to notice a login, and spending that on numbers nobody can see is the opposite of ADR 0008. The interval is not config: the server decides how often to hit an upstream, the phone only decides how often to ask a server that is already caching, so a value here cannot burn anybody's API budget. `DataPayload` is the part worth testing and has no Android imports, so the merge is covered on the JVM — `org.json` is bundled with Android but its JVM stub throws, so the real artefact is on the **test** classpath only. **Merging is all-or-nothing**, and that is a choice about wiping: `onData` is a full replacement and `app.js` clears each section before rendering it, so half a payload erases the half that failed, which is worse than sending nothing when the panel already holds values a minute old. A hostile ticker is a test, not a hope: a symbol that closes its own literal and appends a call survives as data, because the payload is built through `org.json` rather than concatenated. U+2028/U+2029 are escaped too — legal unescaped in JSON, line terminators in pre-ES2019 JavaScript, and silent. `web/js/app.js` needed **no changes**, which is what the contract was for |
-| T5.2 | Timeouts, retry, failure tolerance | todo | |
-| T5.3 | Adaptive polling with backoff | todo | Requirement, not polish — see ADR 0008 |
-| T5.4 | Battery telemetry | todo | |
+| T5.2 | Timeouts, retry, failure tolerance | done | 2026-09-19. All four assertions exit 0 against a real 30s Wi-Fi outage. Most of what this task asks for was already standing — 1500ms timeouts on `PcPoller`, a catch-all around every probe, an all-or-nothing merge that keeps the last values rather than blanking a card, a failure counter that a single success resets — because T4.2 and T5.1 had to build it to work at all. **The one real gap was the reschedule.** Both pollers booked the next cycle at the end of the runnable, so any exception raised after the probe returned would end the chain for the life of the process: a `ScheduledExecutorService` parks a runnable's exception in a `Future` nobody reads, and the panel would have gone on showing the last payload with nothing anywhere saying the loop was gone — this task's own "worst failure mode available". The reschedule now lives in a `finally` in both pollers, with the body split out so no path can step over it, and a `Throwable` catch above it exists only to make the reason visible. **The acceptance itself was wrong and is fixed**, the same way TT.6's was: it cleared the log *after* the outage, throwing away the part of the log the test is about, and then asserted `grep -q 'state='` to prove the poller was alive. `state=` is a transition marker, so a healthy panel that has been online for a minute logs none — the assertion measured whether a transition happened to fall inside the window, not whether anything was running, and it fails on a perfectly healthy device. Proved here: run verbatim, it reported `note: no state= in a steady-state window`. The clear now goes before the Wi-Fi is dropped and liveness is asserted on `ping=ok`, the heartbeat T5.3 adds. Measured on the device: the panel noticed the network go, backed off 2/4/8/15/15, came back 13s after Wi-Fi returned, restarted the data poller in the same second, and no crash, ANR or exception trace appears anywhere in 3340 lines of log |
+| T5.3 | Adaptive polling with backoff | done | 2026-09-19. Requirement, not polish — ADR 0008. Three of the five steps were already in `PcState` (the 2/4/8…15s ladder as a pure function of consecutive failures, the reset on first success) and in `PanelService` (the data poller stopped on the way down, started on the way up), all covered by the JVM tests T4.2 shipped. **What was missing was the evidence.** `Markers.ping` had been defined by TT.6 and was emitted by nothing, so the acceptance's `grep -c 'ping='` counted zero and passed `-le 4` while proving exactly nothing about the cadence. `PcPoller` now logs it once per probe, after the staleness check so a straggler from a replaced generation cannot inflate the count with polls that are no longer anybody's cadence. Measured with the server stopped: **4 pings and 0 data requests in the minute**, and `state=online` 11s after the server came back. **The `-le 4` only holds in a steady-state minute** — 4 is `60 / BACKOFF_CAP_MS`, and a minute measured from the moment the PC goes away legitimately holds seven, because it contains the 2, 4 and 8 second rungs too. The task file now says to give the panel twenty seconds before clearing the log, and fixes the recovery check's ordering to clear before starting the server rather than after |
+| T5.4 | Battery telemetry | done | 2026-09-19. The DEVICE card is no longer empty, and is no longer a card. Both acceptance commands exit 0; on the device the corner reads `BAT 22% · 25.2°C`, which matches `dumpsys battery` (level 22, scale 100, temperature 252) exactly. **The receiver lives in `PanelService`, not `MainActivity` as the task header said** — the Activity is stopped for the whole offline stretch, so an Activity-scoped receiver would be gone precisely while the phone is running warm on a wake lock in a dark room, which is the case a thermometer is for. `BatteryReading` is plain Java and carries everything that can be wrong about the numbers: the level is read against its own `EXTRA_SCALE` (a device reporting out of 255 would render a full battery as 34%), clamped rather than trusted, and the temperature keeps the tenth the extra actually carries. **`ABSENT` is `Integer.MIN_VALUE` and not -1**, because -1 tenths is -0.1 degrees — a real if unlikely reading, so the obvious sentinel would have made a missing extra indistinguishable from a cold morning. `DataPayload.withBattery` folds it in as a second step rather than a third argument to `merge`, because the two halves do not share a clock, and its failure rule is the **opposite** of `merge`'s on purpose: a battery that will not parse returns the payload untouched, since blanking B3, FX, CRYPTO and WEATHER over a temperature is not a trade anybody would make. **The broadcast is not a render.** It fires roughly every eight seconds while charging, on voltage movements that change nothing visible at one decimal place, and `onData` is a full rebuild of every card — so `publish()` compares the folded payload against what the page already has and stays quiet when they match; the `battery=` marker still fires per broadcast, because a receiver that silently never fires is the failure this task names. The demotion the task asked for is done and measured: `#battery` leaves the grid for the panel's bottom-right corner, WEATHER spans all three rows, and `check_layout.py` passes both payloads at 872x392 with WEATHER at 224x372. Inset by 1px, not 0 — at 0 the line's black ground painted over the card's border and left it looking broken open. Above 40 degrees the line takes a new `--warn` amber (11.7:1 on black): a colour, not a badge, because a warm battery on a charger is worth noticing on the way past and is not a fault. **Reviewed before merge, four findings, all applied, and two were real bugs this desk would have hit.** The corner line was `nowrap` and positioned against `#panel` rather than the 224px track it appears to live in, so its widest variant — `BAT 100% · 42.5°C · unplugged`, 323px — grew out of the column and painted its opaque black ground over the bottom of the CRYPTO card, hiding a live price's change and its sparkline over 68x15px. It is now `box-sizing: border-box` with a 222px cap and allowed to wrap, and `#weather` **reserves** the foot it sits in with `padding-bottom` instead of sharing it — verified with a city more than twice the stress fixture's length. And `isCharging` read `EXTRA_STATUS`, which reports `BATTERY_STATUS_NOT_CHARGING` whenever a charge is paused with power still connected — MIUI's own optimisation, a thermal limit, 100% on a charger — so the panel would have said "unplugged" with the cable plainly in. It reads `EXTRA_PLUGGED` now. That word is not decoration: this file uses it as the evidence for whether ADR 0014's wake lock is still affordable, so a false one argues for rewriting the poll loop to solve a problem that does not exist |
 | T5.5 | Thermal screen cutoff | todo | New. Temperature becomes a second authority over the screen — ADR 0012 amends invariant 3. Must land **after** T4.3/T4.4, which build the screen-state machine |
 | TT.7 | Espresso-Web assertions | todo | |
 
@@ -254,46 +254,91 @@ Quotes and weather come afterwards; they are the least risky part and the easies
   discharging, sparse `AlarmManager` probe, `ACTION_POWER_CONNECTED` as the real signal — is
   specified in ADR 0014 and deliberately unwritten, because it cannot be tested on this desk.
 
-## Resuming after 2026-09-19 (wave 8)
+## Resuming after 2026-09-19 (wave 9)
 
-Wave 8 is on `wave/8-real-data`. **The panel shows real data**: B3 quotes, FX, crypto and
-weather, fetched by the PC and pushed into the page through `window.onData`. T3.3, T3.4, T3.7,
-TT.2, TT.3 and T5.1 are all `done`.
+Wave 9 is on `wave/9-resilience-and-battery`. **The panel survives a flaky network, backs off
+while the PC is away, and reports its own battery.** T5.2, T5.3 and T5.4 are `done`; every
+acceptance command in all three exits 0 on the real device.
 
-Wave 7 before it reached **Milestone B** — the screen follows the PC in both directions,
-confirmed by eye at the device.
+What that looks like from outside: drop the phone's Wi-Fi and the panel notices, sleeps the
+screen, and retries at 2, 4, 8, 15, 15 seconds until it comes back — 4 probes a minute while
+the PC is off, and no data requests at all. Bring it back and the screen wakes within 15s with
+the data poller running in the same second. The bottom-right corner now reads `BAT 22% ·
+25.2°C`, and goes amber above 40.
 
-T6.5 (sparklines) landed inside this wave, out of phase order, because it was asked for at the
-desk while the panel was up.
+**Next: T5.5** (thermal screen cutoff), which now has both halves it was waiting for — the
+screen-state machine from T4.3/T4.4, and a temperature to act on from T5.4. It amends invariant
+3 by way of ADR 0012, so read that before writing any of it. After that the phase is empty and
+T6.x is the natural continuation; T6.6 and T6.7 are both `todo`, both touch only `web/`, and
+T6.6 wants T6.7 first.
 
-**Next: T5.2** (timeouts, retry, failure tolerance), then T5.3 (adaptive polling) and T5.4
-(battery, which is why the DEVICE card on the panel is still empty). T5.5 (thermal cutoff) has
-the screen-state machine it was waiting for. T6.x is parallel and touches only `web/`.
+### Two acceptance blocks were wrong and are fixed
 
-Wave 8 corrected a claim this file made: the resume note said "Next: T5.1", and T5.1's prereqs
-are `T4.3, T3.3, T3.4` with both server proxies `todo`. Its own acceptance asks `probe.py` for
-`/quotes`, which no endpoint answered. **Read a task's `Prereqs:` line before promising it is
-next.**
+Both in the same way TT.6's was, and both were **passing** while proving nothing:
+
+- **T5.2** cleared the logcat buffer *after* the outage it was testing, then asserted
+  `grep -q 'state='` to show the poller was alive. `state=` is a transition marker, so a healthy
+  panel that has been online for a minute logs none — run verbatim here it reported `note: no
+  state= in a steady-state window` on a device that was working perfectly. It now clears before
+  the Wi-Fi is dropped and asserts on `ping=ok`.
+- **T5.3** counted `ping=` lines to prove the backoff. Nothing emitted `ping=` — `Markers.ping`
+  had been defined by TT.6 and wired to nothing — so `-le 4` was satisfied by a count of zero.
+  `PcPoller` emits it per probe now.
+
+The pattern is worth naming, because it is three for three: **an assertion that passes on a
+log nobody has proved contains anything is not an assertion.** Check that the marker you are
+counting is emitted by something before trusting the count.
+
+### The layout harness now measures overlap, and that is new
+
+`check_layout.py` asked three questions — does the page scroll, is anything outside the
+viewport, does any section clip its own content — and **none of them is "is one section drawn
+on top of another"**. T5.4's corner line is positioned absolutely, so it was free to land on
+live content, and it did: the harness reported PASS on a panel with a black box over the
+crypto card's last row. Worse, the stress fixture used `charging: true`, so the widest battery
+line the code can produce was never rendered in either pass.
+
+`measure.js` now compares **ink against ink** — the text-bearing leaves and each sparkline's
+`<path>`, for every pair of sections. Boxes would have been the wrong comparison: `#battery`
+shares a rectangle with the WEATHER card by design, and so does `#stale-badge` with `#panel`,
+so a box check would either fail on both or have to allowlist the exact pair the bug was in.
+Sharing empty space is fine; sharing a pixel with a glyph in it is not.
+
+The fixture is fixed too (`charging: false`), so the 323px variant is measured on every run.
+**T6.6 and T6.7 both move markup around** — that is what they are for — so this check is worth
+more to them than it was to T5.4.
 
 ### What is still only true on this desk
 
-- **`brapi_token` is empty**, and the three configured tickers are in brapi's free sample set
-  (PETR4, VALE3, ITUB4 — MGLU3 is the fourth). Adding any other ticker needs a token in
-  `server/config.json`, and nothing warns: the row simply does not appear.
+- **The DEVICE corner says 22%, and that is not a healthy number.** The phone was at 22% and
+  charging (`status: 2`, USB powered) through this wave, which means it had been running the
+  battery down. ADR 0014's wake lock is affordable *only* while the board keeps USB powered with
+  the PC off; if this phone is arriving at the morning under 30% the assumption has stopped
+  holding, and the power-aware branch specified in ADR 0014 is the work to do. The new corner
+  line is what makes that visible without `dumpsys`.
+- **The server is still started by hand** and T3.9 is still `todo`. This wave stopped and
+  restarted it for T5.3's acceptance; it is running again, detached, logging to the session
+  scratchpad rather than to wherever it was before. Stop it **by PID**, found through
+  `ss -ltnp 'sport = :8777'`, never `pkill -f "server/server.py"`.
+- **B3 now carries real rows** — PETR4, SEER3 and TAEE11 render with prices and sparklines — so
+  a brapi token has been put in `server/config.json` since wave 8's note. That note is no longer
+  true and has been dropped.
 - **Crypto and FX do not come from brapi at all** — it answers `401` for both without a token.
   Binance and AwesomeAPI serve them, key-free. If either changes shape the panel loses that
   card, not the whole page.
-- **The DEVICE card is empty** because T5.4 has not landed. That is the design, not a fault.
-- **B3 is empty and will stay so**, because `config.json` asks for SEER3 and TAEE11 and both
-  need a brapi token. Worse than it looks: one paid ticker 401s the *whole* request, so PETR4
-  would not survive alongside them either. Put a token in `server/config.json` (no rebuild, just
-  a restart) or go back to the free four — PETR4, MGLU3, VALE3, ITUB4.
+- **One paid ticker 401s the whole brapi request**, so a B3 list is all-free or all-paid: PETR4
+  would not survive alongside SEER3 without a token covering both. The free sample set is
+  PETR4, MGLU3, VALE3, ITUB4.
+- **The battery broadcast fires about every eight seconds** on this device while charging. That
+  is why the render is deduplicated rather than pushed straight through, and it is a device
+  fact, not a guarantee: a phone that broadcasts rarely would show a level that lags by that
+  much. Nothing polls to cover it, deliberately (T5.4 step 5).
 
 ### The rig, unchanged from wave 7
 
-1. **Start the server by hand** — `python server/server.py`. T3.9 is still `todo`. Start and
-   stop it **by PID file**, never `pkill -f "server/server.py"`: that pattern matches the
-   command line of the shell doing the killing, and it killed the session twice in wave 7.
+1. **Start the server by hand** — `python server/server.py`. Start and stop it **by PID**, never
+   `pkill -f "server/server.py"`: that pattern matches the command line of the shell doing the
+   killing, and it killed the session twice in wave 7.
 2. **The ufw rule has to be in place** — `sudo ufw allow from 192.168.0.0/16 to any port 8777
    proto tcp`. The phone arrives through a NAT, so the rule cannot name the phone's own address.
    `toybox nc` from `adb shell` is the quickest check that it still is.
@@ -309,4 +354,5 @@ next.**
 race the clear usually wins, leaving an empty log and an app that did everything right.
 
 The server's own log prints one line per request with a timestamp, so the panel's poll cadence —
-2s for `/ping`, 60s for the data pair — is directly countable without touching the app.
+2s for `/ping`, 60s for the data pair — is directly countable without touching the app. The app
+now says the same thing from its own side: `ping=` per probe, `data=` per cycle.

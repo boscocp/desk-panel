@@ -99,6 +99,14 @@ them:
 - `screen=sleep` means the app cleared `FLAG_KEEP_SCREEN_ON`, not that the panel went dark. The
   display goes out one device timeout later, and whether it is genuinely off is eyes-only
   (T4.4's manual check, [ADR 0014](adr/0014-poll-loop-outlives-the-screen.md)).
+- `ping=ok|err` is one line per probe, so counting it over a window measures the *cadence*, not
+  the health: 2s while online, and 2/4/8/15/15 climbing to the cap while offline. A minute
+  measured from the moment the PC goes away holds seven, a settled offline minute holds four.
+  Give the ladder twenty seconds to finish climbing before asserting a count (T5.3).
+- `battery=` is one line per broadcast, which on this device is about every eight seconds while
+  charging. It is **not** one line per render: the page is only re-rendered when the level or
+  the temperature actually changes, so the marker count and the render count differ on purpose
+  (T5.4).
 - `panel=rendered` is **not** once per session. The wake relaunches the Activity, so one lands
   about a second after each `screen=wake`, and WebView is entitled to fire `onPageFinished`
   twice for a single load — both have been seen on the device. Assert that it appears, never
