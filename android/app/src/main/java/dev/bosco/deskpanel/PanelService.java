@@ -5,14 +5,18 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.ServiceInfo;
+import android.os.BatteryManager;
 import android.os.IBinder;
 import android.os.PowerManager;
 import android.util.Log;
 
 import androidx.core.app.ServiceCompat;
+import androidx.core.content.ContextCompat;
 
 /**
  * Owns the poll loop, so that the loop outlives the screen (ADR 0014).
@@ -129,8 +133,29 @@ public final class PanelService extends Service implements PcPoller.Listener {
      * a minute, so without this a wake would show an empty panel for up to a
      * minute after the screen came back — which is exactly the moment somebody
      * is looking at it.
+     *
+     * <p>This is the <em>folded</em> payload: server data plus
+     * {@link #lastBattery}. What the page last saw, in other words, which is
+     * also what {@link #publish} compares against to decide whether a battery
+     * broadcast is worth a render.
      */
     private static volatile String lastPayload;
+
+    /**
+     * The server half, before the battery is folded in. Kept apart from
+     * {@link #lastPayload} because the two halves arrive on different clocks
+     * and either one has to be able to refresh the page with the other's last
+     * value still on it.
+     */
+    private static volatile String lastServerPayload;
+
+    /**
+     * The device half: the most recent battery broadcast, as the object literal
+     * {@link BatteryReading} builds. Not cleared when the PC goes away — unlike
+     * the server data, a battery level does not go stale by being offline, it
+     * is simply the last thing the phone said about itself.
+     */
+    private static volatile String lastBattery;
 
     /**
      * The running service, for the static entry points that have to reach an
@@ -217,6 +242,18 @@ public final class PanelService extends Service implements PcPoller.Listener {
         String host = getString(R.string.pc_host);
         poller = new PcPoller(host, this);
         dataPoller = new DataPoller(host, this::onData);
+
+        // RECEIVER_NOT_EXPORTED because nothing outside the system should be
+        // able to tell this app what the battery is doing.
+        // ACTION_BATTERY_CHANGED is sticky, so this call itself delivers the
+        // current reading straight away rather than waiting for the phone to
+        // change its mind — which is what makes the panel show a level within a
+        // second of starting instead of within an hour.
+        ContextCompat.registerReceiver(
+                this,
+                batteryReceiver,
+                new IntentFilter(Intent.ACTION_BATTERY_CHANGED),
+                ContextCompat.RECEIVER_NOT_EXPORTED);
     }
 
     /**
@@ -226,11 +263,79 @@ public final class PanelService extends Service implements PcPoller.Listener {
      * refreshes is not left blank — the same replay {@link #lastOnline} gets.
      */
     private void onData(String json) {
-        lastPayload = json;
+        lastServerPayload = json;
+        publish();
+    }
+
+    /**
+     * Folds the two halves together and hands the result to the page, if it
+     * differs from what the page already has.
+     *
+     * <p>The comparison is not an optimisation, it is what makes a push-based
+     * battery affordable. {@code window.onData} is a full re-render — {@code
+     * app.js} rebuilds every card from scratch — and {@code
+     * ACTION_BATTERY_CHANGED} fires on voltage and temperature movements that
+     * change nothing anybody can see at one decimal place. Without this, a
+     * charging phone would repaint the whole panel every few seconds to draw
+     * the same characters, on a display whose whole power story is that
+     * unchanged pixels cost nothing (ADR 0008).
+     */
+    private void publish() {
+        String folded = DataPayload.withBattery(lastServerPayload, lastBattery);
+        if (folded == null || folded.equals(lastPayload)) {
+            return;
+        }
+        lastPayload = folded;
         Panel target = panel;
         if (target != null) {
-            target.onData(json);
+            target.onData(folded);
         }
+    }
+
+    /**
+     * One {@code ACTION_BATTERY_CHANGED}, which Android sends rather than
+     * letting anybody ask (T5.4 step 5: polling this would spend exactly the
+     * power the reading exists to protect).
+     *
+     * <p>Registered by the service rather than the Activity, and that is the
+     * one design decision here. The receiver has to be alive whenever there is
+     * a payload to fold it into, and the Activity is stopped for the entire
+     * offline stretch — so an Activity-scoped receiver would be gone precisely
+     * when the phone is running warm on a wake lock in a dark room, which is
+     * the case this number is for.
+     */
+    private final BroadcastReceiver batteryReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            int level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, BatteryReading.ABSENT);
+            int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, BatteryReading.ABSENT);
+            int tenths = intent.getIntExtra(
+                    BatteryManager.EXTRA_TEMPERATURE, BatteryReading.ABSENT);
+            int status = intent.getIntExtra(
+                    BatteryManager.EXTRA_STATUS, BatteryManager.BATTERY_STATUS_UNKNOWN);
+
+            String reading = BatteryReading.json(level, scale, tenths, isCharging(status));
+            if (reading == null) {
+                return;
+            }
+            // Per broadcast, not per change: this marker is the only evidence
+            // that the receiver is firing at all, and a receiver that silently
+            // never fires is the failure T5.4 names. The render below is the
+            // half that is rate-limited.
+            Log.i(Markers.TAG, Markers.battery(BatteryReading.percent(level, scale)));
+            lastBattery = reading;
+            publish();
+        }
+    };
+
+    /**
+     * Charging or full, as one bit. FULL counts: the cable is in, which is what
+     * the panel is saying, and a phone that reaches 100 on the desk would
+     * otherwise appear to have been unplugged.
+     */
+    private static boolean isCharging(int status) {
+        return status == BatteryManager.BATTERY_STATUS_CHARGING
+                || status == BatteryManager.BATTERY_STATUS_FULL;
     }
 
     @Override
@@ -257,6 +362,7 @@ public final class PanelService extends Service implements PcPoller.Listener {
     public void onDestroy() {
         poller.stop();
         dataPoller.stop();
+        unregisterReceiver(batteryReceiver);
         releaseOfflineWakeLock();
         instance = null;
         super.onDestroy();
@@ -317,6 +423,12 @@ public final class PanelService extends Service implements PcPoller.Listener {
             // is blank for the second or two until DataPoller's first fetch
             // lands, and blank is honest where a confident wrong number is
             // not.
+            //
+            // Both halves, because withBattery() would otherwise rebuild the
+            // folded payload out of the server data this line exists to
+            // forget. lastBattery survives on purpose: it is the phone's own
+            // reading, and it is exactly as true offline as online.
+            lastServerPayload = null;
             lastPayload = null;
         }
     }

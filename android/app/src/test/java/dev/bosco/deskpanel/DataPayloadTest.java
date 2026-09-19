@@ -137,4 +137,55 @@ public class DataPayloadTest {
     public void escapeForScriptLeavesOrdinaryTextAlone() {
         assertEquals("{\"a\":\"b\"}", DataPayload.escapeForScript("{\"a\":\"b\"}"));
     }
+
+    // --- withBattery (T5.4) -------------------------------------------------
+
+    private static final String BATTERY = "{\"level\":87,\"tempC\":31.5,\"charging\":true}";
+
+    @Test
+    public void batteryIsFoldedInWithoutDisturbingTheRest() throws Exception {
+        String merged = DataPayload.merge(QUOTES, WEATHER);
+        JSONObject payload = new JSONObject(DataPayload.withBattery(merged, BATTERY));
+
+        assertEquals(87, payload.getJSONObject("battery").getInt("level"));
+        assertEquals(31.5, payload.getJSONObject("battery").getDouble("tempC"), 0.001);
+        // Everything merge produced is still there and still itself.
+        assertEquals(1, payload.getJSONArray("quotes").length());
+        assertEquals("São Paulo", payload.getJSONObject("weather").getString("city"));
+        assertFalse(payload.getBoolean("stale"));
+    }
+
+    @Test
+    public void noBroadcastYetLeavesThePayloadExactlyAsItWas() {
+        String merged = DataPayload.merge(QUOTES, WEATHER);
+        assertEquals(merged, DataPayload.withBattery(merged, null));
+    }
+
+    @Test
+    public void aBadBatteryCostsTheBatteryAndNotThePanel() {
+        // The opposite of merge's all-or-nothing rule, deliberately: this is a
+        // diagnostic in the corner, and blanking B3, FX, CRYPTO and WEATHER
+        // because a temperature would not parse is not a trade worth making.
+        String merged = DataPayload.merge(QUOTES, WEATHER);
+
+        assertEquals(merged, DataPayload.withBattery(merged, "not json"));
+        assertEquals(merged, DataPayload.withBattery(merged, "[1,2,3]"));
+    }
+
+    @Test
+    public void aFailedCycleStaysFailedWhateverTheBatterySays() {
+        // withBattery must not conjure a payload out of a battery reading: a
+        // cycle that produced nothing still has nothing to render.
+        assertNull(DataPayload.withBattery(null, BATTERY));
+    }
+
+    @Test
+    public void theFoldedPayloadIsStillSafeToInterpolate() {
+        String merged = DataPayload.merge(QUOTES.replace("PETR4", "PET R4"), WEATHER);
+        String folded = DataPayload.withBattery(merged, BATTERY);
+
+        // Re-parsing and re-serialising must not undo the escape merge applied.
+        assertFalse(folded.contains(" "));
+        assertTrue(folded.contains("\\u2028"));
+    }
 }
