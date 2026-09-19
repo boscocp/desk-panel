@@ -191,7 +191,9 @@ body {
 .row {
     display: flex;
     align-items: baseline;
-    gap: 10px;
+    /* 6, not 10: the row gained a fourth child, and three gaps at the old
+     * width was 30px the crypto card does not have. */
+    gap: 6px;
     padding: 3px 0;
     font-size: 20px;
     line-height: 1.24;
@@ -202,7 +204,13 @@ body {
 }
 
 .row .label {
-    flex: 1 1 auto;
+    /* Natural width, and it shrinks last. Getting this ordering wrong is what
+     * rendered BTC as "B…" and then TAEE11 as "TAEE…": a label set to grow was
+     * also the thing that gave width back, so every chart widened at the cost
+     * of a name. Now the name takes what it needs and the chart takes the
+     * remainder -- which is the right priority, because a truncated ticker is
+     * unreadable and a narrower trend line is merely smaller. */
+    flex: 0 1 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -223,8 +231,78 @@ body {
 }
 
 .row .change {
-    min-width: 4.4em;
+    /* A floor, and a smaller one than it looks like it should be. The
+     * percentage is right-aligned in a box that always ends at the row's edge,
+     * because the chart beside it absorbs every bit of slack -- so the column
+     * stays aligned however narrow this gets, and the only thing the floor
+     * does is hold empty space the chart could be using. A value wider than
+     * the floor simply grows the box. */
+    min-width: 3.4em;
     text-align: right;
+}
+
+/* The sparkline. Fixed width so every row's number ends in the same place --
+ * a chart that changed width with its data would make the column ragged and
+ * the prices hard to compare down the card.
+ *
+ * vector-effect keeps the stroke one pixel however the viewBox is scaled;
+ * without it, preserveAspectRatio="none" stretches the line's thickness along
+ * with its geometry and the horizontal runs come out fatter than the vertical
+ * ones. */
+.row .spark {
+    /* Takes the slack: `flex: 1 1 0` makes this the element that grows into
+     * whatever the label, price and change do not want, and the first to give
+     * it back. Up to 72px where the card is roomy (B3, FX), down to 28px in
+     * the crypto card, whose prices are the widest on the panel. */
+    /* `flex: 1 1 0` and no cap, and both halves are load-bearing.
+     *
+     * Basis zero means this element contributes nothing to the row's natural
+     * width, so it can never be the reason a ticker has to shrink. Every
+     * attempt at giving it a real basis -- 56px, 72px, an auto margin to push
+     * it right -- pushed the row over the card's width instead, and the label
+     * was the only thing left that could give, which is how BTC became "B…"
+     * three separate times.
+     *
+     * No max-width means it then grows into *all* the slack, which both makes
+     * it as wide as the card allows and closes the gap that used to sit
+     * between the line and the percentage. That gap was never a margin: it was
+     * leftover space with nothing claiming it. */
+    flex: 1 1 0;
+    min-width: 28px;
+    height: 16px;
+    align-self: center;
+    overflow: visible;
+}
+
+.row .spark path {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+}
+
+/* The line takes the same colour as the change beside it, so direction is
+ * said twice -- once as a shape and once as a hue -- and neither has to be
+ * read alone. */
+.spark.up {
+    color: var(--up);
+}
+
+.spark.down {
+    color: var(--down);
+}
+
+.spark.flat {
+    color: var(--accent-dim);
+}
+
+/* Pulled in against the percentage it describes. They are one statement --
+ * the shape and the number say the same thing -- and the row's even gaps made
+ * them read as two. */
+.row .spark + .change {
+    margin-left: -4px;
 }
 
 .change.up {

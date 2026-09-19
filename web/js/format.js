@@ -34,6 +34,123 @@ function formatPrice(value, currency) {
     return `${symbol}${formatted}`;
 }
 
+// rate: number. An FX rate, which is not a price and does not want
+// formatPrice's rules.
+//
+// Exchange rates are quoted to four decimal places by convention, and the
+// convention exists because both of formatPrice's branches get them wrong.
+// Above 1 it truncates to two, so USD/BRL at 5.1434 rendered as R$5.14 and
+// threw away digits a rate is actually read for. Below 1 it opens the window
+// to eight, which is meant for a coin at 0.00081 and turned CNY/BRL into
+// R$0.76749533 -- a number so wide it pushed its own label out of the column.
+//
+// Three decimals, and magnitude-independent, so every row in the card is the
+// same width whether the rate is 5.143 or 0.767.
+function formatRate(rate, currency) {
+    if (typeof rate !== 'number' || !Number.isFinite(rate)) {
+        return '--';
+    }
+    const symbol = CURRENCY_SYMBOLS[currency] || '';
+    const formatted = rate.toLocaleString('en-US', {
+        // Three and three. A minimum of two made the comment above false: a
+        // rate that happened to land on two decimals rendered narrower than
+        // its neighbours, and "same width whatever the magnitude" was the
+        // whole point of having a separate formatter.
+        minimumFractionDigits: 3,
+        maximumFractionDigits: 3,
+    });
+    return `${symbol}${formatted}`;
+}
+
+// c: a temperature in Celsius, or null/undefined when the upstream had none.
+//
+// The server returns null rather than 0 on purpose -- zero is a real reading
+// in most of the world, so a zero standing in for "no data" is a lie the panel
+// cannot detect. That only works if the page renders the null as an absence,
+// and it did not: the weather line interpolated it straight into a template
+// and produced "São Paulo: 24°C (null-null°C)". providers_openmeteo's own
+// docstring claimed this function existed before it did.
+function formatTemp(c) {
+    if (typeof c !== 'number' || !Number.isFinite(c)) {
+        return '--';
+    }
+    // One decimal, because the current reading has one and the daily range
+    // does too; rounding here would make 15.5 and 15.6 the same number.
+    return `${Math.round(c * 10) / 10}`;
+}
+
+// pair: "USD/BRL". quote: the currency the whole card is denominated in.
+//
+// Drops the quote half when it is the same for every row, because then it is
+// a property of the card rather than of the line: the card already says R$ on
+// every value, and "USD/BRL" spends a third of the label column repeating it.
+// A pair quoted in anything else keeps both halves, so a future EUR/USD row
+// still says what it is.
+function formatPair(pair, quote) {
+    if (typeof pair !== 'string') {
+        return '';
+    }
+    const [base, counter] = pair.split('/');
+    if (!counter) {
+        return pair;
+    }
+    return counter === quote ? base : pair;
+}
+
+// values: array of numbers, oldest first. width/height: the SVG viewBox.
+//
+// Returns the `d` of a polyline through the series, scaled to fill the box,
+// or '' when there is nothing to draw. Pure, and it is the whole of the
+// sparkline: app.js only wraps the string in an <svg>, which is what keeps
+// the drawing testable without a DOM.
+//
+// Two decisions worth naming, because both are about not lying with a
+// picture. The series is scaled to its own min and max rather than to zero,
+// so the line uses the full height and shows the shape of the movement -- a
+// currency that moved 0.4% would otherwise be a flat line, which is true of
+// the magnitude and useless about the trend. And a series with no range at
+// all is drawn as a centred flat line rather than divided by zero.
+function sparklinePath(values, width, height) {
+    if (!Array.isArray(values)) {
+        return '';
+    }
+    const points = values.filter((v) => typeof v === 'number' && Number.isFinite(v));
+    if (points.length === 0) {
+        return '';
+    }
+
+    // Half the stroke would be clipped at the extremes without an inset, so
+    // the line is drawn into a slightly shorter box than the one it sits in.
+    const inset = 1;
+    const usable = Math.max(0, height - inset * 2);
+
+    const min = Math.min(...points);
+    const max = Math.max(...points);
+    const range = max - min;
+
+    const x = (i) => (points.length === 1 ? width : (i / (points.length - 1)) * width);
+    const y = (value) => (range === 0
+        ? inset + usable / 2
+        // SVG y grows downward, so the higher value gets the smaller y.
+        : inset + (1 - (value - min) / range) * usable);
+
+    if (points.length === 1) {
+        // One point is a value, not a trend: draw it as a flat line across the
+        // box so the row still has the same shape as its neighbours.
+        return `M0,${round2(y(points[0]))} L${width},${round2(y(points[0]))}`;
+    }
+
+    return points
+        .map((value, i) => `${i === 0 ? 'M' : 'L'}${round2(x(i))},${round2(y(value))}`)
+        .join(' ');
+}
+
+// Two decimals is plenty for a 56px box and keeps the path short -- this
+// string is rebuilt for every row on every refresh.
+function round2(n) {
+    return Math.round(n * 100) / 100;
+}
+
 // pct: number (e.g. 1.23 for +1.23%). Sign, one decimal, percent sign.
 // Zero is shown without a sign, matching changeClass's "flat" bucket.
 function formatChange(pct) {
@@ -121,5 +238,9 @@ function isNight(now, start, end) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { formatPrice, formatChange, changeClass, weatherLabel, isNight };
+    module.exports = {
+        formatPrice, formatRate, formatPair, formatTemp, formatChange, changeClass,
+        weatherLabel, isNight,
+        sparklinePath,
+    };
 }

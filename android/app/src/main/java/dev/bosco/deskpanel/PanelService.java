@@ -73,6 +73,13 @@ public final class PanelService extends Service implements PcPoller.Listener {
          *                      Activity relaunch is not a transition.
          */
         void onPcState(boolean online, boolean logTransition);
+
+        /**
+         * A fresh data payload for the page (T5.1).
+         *
+         * @param json a JSON object literal, already safe to interpolate
+         */
+        void onData(String json);
     }
 
     private static final String CHANNEL_ID = "panel";
@@ -117,12 +124,28 @@ public final class PanelService extends Service implements PcPoller.Listener {
     private static volatile boolean screenMarkerPending;
 
     /**
+     * The last payload the page was given, replayed to a window that arrives
+     * late for the same reason {@link #lastOnline} is. The data refreshes once
+     * a minute, so without this a wake would show an empty panel for up to a
+     * minute after the screen came back — which is exactly the moment somebody
+     * is looking at it.
+     */
+    private static volatile String lastPayload;
+
+    /**
      * The running service, for the static entry points that have to reach an
      * instance field. Null between destroy and create.
      */
     private static volatile PanelService instance;
 
     private PcPoller poller;
+
+    /**
+     * Runs only while the PC is online. Offline the panel is dark and the
+     * device is up on a wake lock held to notice a login; spending that on
+     * numbers nobody can see is the opposite of what ADR 0008 asks for.
+     */
+    private DataPoller dataPoller;
 
     /**
      * Held while the PC is offline, and only then. Online, {@code
@@ -151,6 +174,10 @@ public final class PanelService extends Service implements PcPoller.Listener {
             boolean logIt = screenMarkerPending;
             screenMarkerPending = false;
             newPanel.onPcState(state, logIt);
+        }
+        String payload = lastPayload;
+        if (newPanel != null && payload != null) {
+            newPanel.onData(payload);
         }
     }
 
@@ -187,7 +214,23 @@ public final class PanelService extends Service implements PcPoller.Listener {
         offlineWakeLock.setReferenceCounted(false);
 
         // R.string.pc_host carries the address the build baked in from .env.
-        poller = new PcPoller(getString(R.string.pc_host), this);
+        String host = getString(R.string.pc_host);
+        poller = new PcPoller(host, this);
+        dataPoller = new DataPoller(host, this::onData);
+    }
+
+    /**
+     * One merged payload, on the main thread, from {@link DataPoller}.
+     *
+     * <p>Held as well as forwarded, so a window that appears between two
+     * refreshes is not left blank — the same replay {@link #lastOnline} gets.
+     */
+    private void onData(String json) {
+        lastPayload = json;
+        Panel target = panel;
+        if (target != null) {
+            target.onData(json);
+        }
     }
 
     @Override
@@ -213,6 +256,7 @@ public final class PanelService extends Service implements PcPoller.Listener {
     @Override
     public void onDestroy() {
         poller.stop();
+        dataPoller.stop();
         releaseOfflineWakeLock();
         instance = null;
         super.onDestroy();
@@ -259,7 +303,21 @@ public final class PanelService extends Service implements PcPoller.Listener {
         }
 
         if (online) {
+            // Started only now, and stopped below: the data poll exists to
+            // keep a visible panel current, and there is no visible panel
+            // while the PC is away (T5.1 step 4).
+            dataPoller.start();
             bringPanelToFront();
+        } else {
+            dataPoller.stop();
+            // Dropped, not kept. It is only ever written by a successful
+            // fetch, so holding it would mean the wake after a night offline
+            // replays last night's prices and weather -- with stale:false,
+            // because nothing in the payload knows how old it is. The panel
+            // is blank for the second or two until DataPoller's first fetch
+            // lands, and blank is honest where a confident wrong number is
+            // not.
+            lastPayload = null;
         }
     }
 

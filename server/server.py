@@ -12,11 +12,27 @@ tests can call them directly without a socket -- see server/CLAUDE.md and
 TT.2.
 """
 import argparse
+import functools
 import json
 import os
 import sys
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import threading
+import time
+import traceback
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+# Run two ways, and both are documented. `python -m unittest discover -t .`
+# imports this as `server.server`, with the repository root on sys.path; but
+# `python server/server.py` -- the command in server/CLAUDE.md and in every
+# launcher -- puts `server/` on sys.path and the root nowhere, so the absolute
+# imports below would not resolve. Adding the root first costs nothing in the
+# package case, where this branch is not taken at all.
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from server import providers_awesomeapi, providers_binance, providers_brapi, providers_openmeteo  # noqa: E402
+from server.upstream import UpstreamError  # noqa: E402
 
 HOST = "0.0.0.0"
 PORT = 8777
@@ -32,13 +48,26 @@ EXAMPLE_CONFIG_PATH = SCRIPT_DIR / "config.example.json"
 DEFAULT_CONFIG = {
     "port": PORT,
     "brapi_token": "",
+    # brapi's free plan refuses a request carrying more than one symbol, so
+    # every ticker costs a request. Raise it if the plan does.
+    "brapi_symbols_per_request": 1,
     "quotes": [],
     "crypto": [],
     "fx": [],
     "city": "Sao Paulo",
     "timezone": "America/Sao_Paulo",
-    "quotes_interval_s": 300,
+    # 600, not 300, and the arithmetic is the reason. brapi's free plan allows
+    # one symbol per request and 15k requests a month, so three tickers cost
+    # three requests a refresh: at 300s that is 25,920 a month against a 15,000
+    # budget, and the B3 card would go permanently stale around the 17th. At
+    # 600s it is 12,960 with the PC logged in around the clock.
+    "quotes_interval_s": 600,
     "weather_interval_s": 900,
+    # Daily closes change once a day, so the sparkline's series is fetched on
+    # a clock measured in hours rather than minutes. Six is arbitrary and
+    # generous: it costs four requests a day across two providers.
+    "history_interval_s": 21600,
+    "history_days": 30,
     "night_start": "22:00",
     "night_end": "07:00",
     "actions": {},
@@ -174,23 +203,409 @@ def check_python_version(version_info=None):
     return None
 
 
-def route(method, path):
+class TimedCache:
+    """One cached value, its age, and the last good copy of it.
+
+    Two jobs, and the second is the one that matters on a desk. It keeps the
+    panel off the upstreams between refreshes -- brapi's free tier is 15k
+    requests a month and a 2s poll would burn it in days (T3.3 step 4). And
+    when a refresh fails it serves the previous value with `stale` set,
+    because a slightly old price beats an empty panel (T3.3 step 5).
+
+    The clock is passed in rather than read, so TT.2 can move time without
+    sleeping.
+    """
+
+    def __init__(self):
+        self.value = None
+        self.fetched_at = None
+        self.stale = False
+        self.last_error = None
+        # Requests are served on threads (see Server below), so two polls
+        # arriving together must not both start the same refresh -- that would
+        # double the outbound traffic at exactly the moment the TTL expires.
+        # The lock is held across the fetch; the second caller waits and then
+        # finds the value fresh.
+        self._lock = threading.Lock()
+
+    def fresh_at(self, now, ttl_s):
+        """Pure: whether the last *attempt* was within `ttl_s` of `now`.
+
+        The attempt, not the value. Requiring a non-None value here meant a
+        cold start whose first fetch failed was never fresh, so every request
+        after it tried again -- precisely the hammering this class exists to
+        prevent. It survived the warm-path test because that test had a value
+        to hold. A PC that boots before its router does is all it takes.
+        """
+        return self.fetched_at is not None and now - self.fetched_at < ttl_s
+
+    def get(self, now, ttl_s, produce):
+        """The cached value, refreshing through `produce` when it has aged out.
+
+        Returns `(value, stale)`. `stale` is True whenever the value on hand
+        is not the result of a successful call -- either an older one kept
+        after a failure, or nothing at all on a cold start that failed.
+        """
+        if self.fresh_at(now, ttl_s):
+            return self.value, self.stale
+
+        with self._lock:
+            # Re-checked under the lock: whoever held it may have just
+            # refreshed, and a second fetch would be pure waste.
+            if self.fresh_at(now, ttl_s):
+                return self.value, self.stale
+
+            try:
+                self.value = produce()
+                self.fetched_at = now
+                self.stale = False
+                self.last_error = None
+            except UpstreamError as exc:
+                # Deliberately not re-raised: every caller would turn it into
+                # the same thing, and the last good value is a better answer
+                # than an error page on a panel nobody is sitting at.
+                #
+                # `fetched_at` moves on a failure too, so the contract is
+                # simply "at most one upstream attempt per TTL", success or
+                # failure, warm or cold. The alternative -- leaving it behind
+                # so the next request retries -- looks like resilience and is
+                # the opposite: an upstream that is down becomes one outbound
+                # request per panel poll, which is the traffic this cache
+                # exists to prevent, arriving exactly when the upstream can
+                # least afford it. The cost is that recovery waits out a TTL,
+                # which the `stale` flag makes visible.
+                self.last_error = str(exc)
+                self.stale = True
+                self.fetched_at = now
+            return self.value, self.stale
+
+
+class App:
+    """Config, caches and providers -- everything `route` needs and the
+    request handler must not know about.
+
+    Holding it in one object is what keeps `route` callable from a test with
+    a hand-built stub, which is the rule in server/CLAUDE.md: the handler
+    routes and serialises, and nothing else lives in the socket layer.
+    """
+
+    def __init__(self, config, clock=time.monotonic):
+        self.config = config
+        self.clock = clock
+        # One cache per market, not one for the three together. They come from
+        # three unrelated upstreams, and sharing a cache meant the first one to
+        # fail took the other two down with it: a brapi 401 over a ticker that
+        # needs a token emptied FX and crypto as well, and the panel went
+        # blank while both of those upstreams were answering perfectly. A
+        # failure should cost its own market and nothing else.
+        self.market_caches = {
+            "quotes": TimedCache(),
+            "fx": TimedCache(),
+            "crypto": TimedCache(),
+        }
+        self.weather_cache = TimedCache()
+        # Its own clock, and a much slower one: the series is daily closes,
+        # which do not move between refreshes of the prices beside them.
+        self.history_caches = {
+            "quotes": TimedCache(),
+            "fx": TimedCache(),
+            "crypto": TimedCache(),
+        }
+        self._history_lock = threading.Lock()
+        self._history_refreshing = set()
+        # Coordinates never change, so the geocode is cached for the life of
+        # the process rather than on a TTL (T3.4 step 1).
+        self.coords = None
+
+    def quotes(self):
+        """`{quotes, fx, crypto, stale}` -- the three markets in one payload.
+
+        Fetched and cached independently, then assembled. `stale` is true if
+        any of the three is, because the badge means "something here is older
+        than it looks" and that is true if it is true of any part -- but a
+        market that is answering keeps its rows either way.
+        """
+        config = self.config
+        ttl = config.get("quotes_interval_s", 300)
+        now = self.clock()
+
+        producers = {
+            "quotes": lambda: providers_brapi.load(
+                config.get("quotes", []),
+                token=config.get("brapi_token", ""),
+                per_request=config.get("brapi_symbols_per_request", 1),
+            ),
+            "fx": lambda: providers_awesomeapi.load(config.get("fx", [])),
+            "crypto": lambda: providers_binance.load(config.get("crypto", [])),
+        }
+
+        history = self._history(now)
+
+        wanted = {"quotes": len(config.get("quotes", [])),
+                  "fx": len(config.get("fx", [])),
+                  "crypto": len(config.get("crypto", []))}
+
+        payload = {}
+        stale = False
+        for market, produce in producers.items():
+            rows, market_stale = self.market_caches[market].get(now, ttl, produce)
+            rows = rows if rows is not None else []
+
+            # Fewer rows than were asked for is a failure the cache cannot see.
+            # brapi sends one symbol per request now, so a 429 on one ticker
+            # returns the other two and looks like a success: that row would
+            # vanish from the panel for a whole TTL with nothing marked. A
+            # rate-limited request is not a delisted ticker, and the badge is
+            # how the panel says "something here is missing".
+            if len(rows) < wanted.get(market, 0):
+                market_stale = True
+                # Named, not just counted. A partial market used to be
+                # completely silent: the row vanished, the cache recorded a
+                # success, and the only evidence was a gap on the panel. Seen
+                # on this desk when three brapi quote calls raced three
+                # history calls, which the per-symbol split and the background
+                # refresh made possible at the same moment.
+                # Separators stripped on both sides before comparing: config
+                # spells an FX pair USD-BRL and the row spells it USD/BRL, so
+                # a literal comparison would report every pair as missing
+                # whenever any one of them was.
+                got = {_bare(r.get(key, "")) for r in rows}
+                missing = sorted(str(x) for x in config.get(market, [])
+                                 if _bare(x) not in got)
+                print(f"{market}: {len(rows)} of {wanted[market]} rows"
+                      + (f", missing {', '.join(missing)}" if missing else ""),
+                      file=sys.stderr)
+
+            key = key_for(market)
+            # Attached rather than merged into the cache, so a history that
+            # failed or has not been fetched yet costs the row its picture and
+            # nothing else. An absent series is an absent key: the page draws
+            # no line rather than a line through no data.
+            payload[market] = [
+                dict(row, history=history.get(market, {}).get(row.get(key), []))
+                for row in rows
+            ]
+            stale = stale or market_stale
+        payload["stale"] = stale
+        return payload
+
+    def _history(self, now):
+        """`{market: {symbol: [values]}}`, refreshed off the request path.
+
+        Never marks the payload stale, and never makes anybody wait for it. A
+        sparkline is a decoration on a row that already carries the number it
+        decorates, so it must not be able to call that number old and it must
+        not be able to delay it either: one cache miss here is up to six
+        sequential upstream calls, each with a ten second timeout, against a
+        phone that gives the whole request five seconds (DataPoller). Blocking
+        would mean a failed poll on every history cycle.
+
+        So a stale history refreshes in the background and the request serves
+        whatever is on hand, which on a cold start is nothing at all -- the
+        panel draws no lines for one cycle and then has them.
+        """
+        history = {}
+        for market, cache in self.history_caches.items():
+            if not cache.fresh_at(now, self._history_ttl(market)):
+                self._refresh_history_async(market)
+            history[market] = cache.value or {}
+        return history
+
+    def _history_ttl(self, market):
+        """Six hours once every row has a line, minutes while any is missing.
+
+        Daily closes do not move between refreshes, so the long TTL is right
+        for a complete answer. It is wrong for an incomplete one, and
+        incomplete is what a blip during the refresh leaves behind -- one
+        badly timed failure would otherwise cost a ticker its sparkline for
+        six hours, with no retry and nothing to say why. Seen on this desk:
+        SEER3 came back with zero points while the other six rows were fine.
+
+        Counting rather than checking for emptiness, because the partial case
+        is the common one: a total failure is a network outage, a single
+        missing symbol is an ordinary rate limit.
+        """
+        long_ttl = self.config.get("history_interval_s", 21600)
+        series = self.history_caches[market].value or {}
+        if len(series) >= len(self.config.get(market, [])):
+            return long_ttl
+        return min(long_ttl, self.config.get("quotes_interval_s", 600))
+
+    def _refresh_history_async(self, market):
+        """Start one background refresh for `market`, or leave the running one
+        alone. TimedCache's own lock would serialise callers rather than
+        letting them through, which is the opposite of what is wanted here."""
+        with self._history_lock:
+            if market in self._history_refreshing:
+                return
+            self._history_refreshing.add(market)
+
+        def run():
+            try:
+                self.history_caches[market].get(
+                    self.clock(), self._history_ttl(market),
+                    self._history_producer(market))
+            finally:
+                with self._history_lock:
+                    self._history_refreshing.discard(market)
+
+        thread = threading.Thread(target=run, name=f"history-{market}", daemon=True)
+        thread.start()
+
+    def _history_producer(self, market):
+        config = self.config
+        days = config.get("history_days", 30)
+        if market == "quotes":
+            # Needs the token, like the prices beside it. Without one this
+            # returns nothing and the B3 rows simply have no line.
+            return lambda: providers_brapi.load_history(
+                config.get("quotes", []), token=config.get("brapi_token", ""), days=days
+            )
+        if market == "fx":
+            return lambda: providers_awesomeapi.load_history(config.get("fx", []), days)
+        return lambda: providers_binance.load_history(config.get("crypto", []), days)
+
+    def warm_history(self):
+        """Start fetching every series now, rather than on the first request.
+
+        Without it the panel's first payload after a login carries no history
+        at all -- the refresh is deliberately off the request path, so the
+        first poll is served before it finishes -- and every card would be
+        drawn without its lines for a cycle at exactly the moment somebody has
+        just sat down. Called once at startup; costs nothing if the phone is
+        not there, because the server only runs while somebody is logged in.
+        """
+        for market in self.history_caches:
+            self._refresh_history_async(market)
+
+    def weather(self):
+        """`{tempC, minC, maxC, code, city, stale}` for the configured city."""
+        config = self.config
+        ttl = config.get("weather_interval_s", 900)
+
+        def produce():
+            # Geocode first and keep the answer immediately. Folding both calls
+            # into one meant a forecast outage threw away coordinates that had
+            # just been resolved successfully, so every later refresh
+            # re-geocoded -- doubling the requests against a 10k/day budget
+            # exactly while the provider was already struggling. A city does
+            # not move; once located it stays located.
+            if self.coords is None:
+                located = providers_openmeteo.normalise_geocode(
+                    providers_openmeteo.fetch_geocode(config.get("city", "")))
+                if located is None:
+                    raise UpstreamError(
+                        f"no coordinates found for city {config.get('city', '')!r}")
+                self.coords = located
+            raw = providers_openmeteo.fetch_forecast(
+                self.coords["lat"], self.coords["lon"], config.get("timezone", ""))
+            return providers_openmeteo.normalise(
+                raw, city=self.coords.get("city") or config.get("city", ""))
+
+        value, stale = self.weather_cache.get(self.clock(), ttl, produce)
+        payload = dict(value or {
+            "tempC": None, "minC": None, "maxC": None,
+            "code": None, "city": config.get("city", ""),
+        })
+        payload["stale"] = stale
+        return payload
+
+
+def _bare(symbol):
+    """Pure: a symbol or pair reduced to letters and digits, upper case.
+
+    The one place the project's several spellings of the same thing have to be
+    compared rather than converted -- see providers_awesomeapi for the full
+    list of them.
+    """
+    return "".join(ch for ch in str(symbol).upper() if ch.isalnum())
+
+
+def key_for(market):
+    """Pure: which field identifies a row in `market`.
+
+    FX rows are keyed by `pair` and the other two by `symbol`, which is a
+    difference the payload contract makes and this is the one place that has
+    to know it.
+    """
+    return "pair" if market == "fx" else "symbol"
+
+
+def action_id(path):
+    """Pure: the id in `/action/<id>`, or None if `path` is not that shape.
+
+    One segment, non-empty, no nesting. The id is not used for anything yet
+    (T3.7 returns 501), and when it is it will be looked up in a closed
+    allowlist from config -- never turned into a command, a path or an
+    argument. Matching narrowly here is the first half of that promise.
+    """
+    prefix = "/action/"
+    if not path.startswith(prefix):
+        return None
+    rest = path[len(prefix):]
+    if not rest or "/" in rest or "?" in rest:
+        return None
+    return rest
+
+
+def route(method, path, app=None):
     """Pure routing: (method, path) -> (status, body_bytes, content_type).
 
-    No side effects, no I/O -- callable directly from tests without
-    starting a server.
+    No I/O of its own -- callable directly from tests without starting a
+    server. `app` supplies the data routes; without one they answer 503
+    rather than pretending, which is what lets the existing two-argument
+    tests keep asserting that /ping and 404 need no state at all.
     """
     if method == "GET" and path == "/ping":
-        body = json.dumps({"ok": True}).encode("utf-8")
-        return 200, body, "application/json"
+        return _json(200, {"ok": True})
+
+    if method == "GET" and path == "/quotes":
+        if app is None:
+            return _json(503, {"error": "not configured"})
+        return _json(200, app.quotes())
+
+    if method == "GET" and path == "/weather":
+        if app is None:
+            return _json(503, {"error": "not configured"})
+        return _json(200, app.weather())
+
+    if method == "POST" and action_id(path) is not None:
+        # T3.7: the v2 placeholder. 501 is "not implemented", which is
+        # exactly what this is -- 404 would say the route does not exist and
+        # 200 would say something happened.
+        return _json(501, {"error": "not implemented"})
+
     return 404, b"", "text/plain"
+
+
+def _json(status, payload):
+    """(status, body, content_type) for a JSON response."""
+    return status, json.dumps(payload).encode("utf-8"), "application/json"
 
 
 class Handler(BaseHTTPRequestHandler):
     """Dumb by design: routes to `route()` and serialises its result."""
 
+    def __init__(self, *args, app=None, **kwargs):
+        # Before super().__init__, which handles the whole request before it
+        # returns -- anything set afterwards would not exist yet when
+        # do_GET runs.
+        self.app = app
+        super().__init__(*args, **kwargs)
+
     def _handle(self, method):
-        status, body, content_type = route(method, self.path)
+        try:
+            status, body, content_type = route(method, self.path, getattr(self, "app", None))
+        except Exception:  # noqa: BLE001 - deliberately everything
+            # route() used to be pure; it does I/O now, and TimedCache
+            # re-raises anything that is not an UpstreamError on purpose --
+            # a bug in a normaliser must not be laundered into "stale".
+            # Without this guard socketserver prints the traceback and closes
+            # the socket with no status line, so the phone sees an IOException
+            # and the operator sees nothing. A 500 is a failure somebody can
+            # read; a reset connection is one they have to guess at.
+            traceback.print_exc()
+            status, body, content_type = _json(500, {"error": "internal error"})
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
@@ -216,8 +631,21 @@ def _allow_reuse_address(os_name):
     return os_name != "nt"
 
 
-class Server(HTTPServer):
-    """HTTPServer with a platform-correct `allow_reuse_address`.
+class Server(ThreadingHTTPServer):
+    """A threading HTTP server with a platform-correct `allow_reuse_address`.
+
+    **Threading is not a performance choice; it protects invariant 2.** This
+    process is the login signal, and `/ping` answering is the whole of that
+    signal. Serving one request at a time meant a `/quotes` whose cache had
+    just expired could sit inside three sequential upstream calls -- up to 30s
+    of `urlopen` timeouts -- with `/ping` queued behind it. The phone gives a
+    ping 1500ms and `PcState` flips to OFFLINE on a single failure, so the
+    panel would go dark while its owner sat at the logged-in PC. An internet
+    hiccup would have looked exactly like a logout, which is the one thing
+    this server must never get wrong.
+
+    `TimedCache` takes a lock around its refresh, so concurrent requests share
+    one outbound fetch rather than starting several.
 
     On POSIX, SO_REUSEADDR just lets a restart rebind during TIME_WAIT --
     harmless, and http.server sets it to 1 by default. On Windows the same
@@ -228,6 +656,11 @@ class Server(HTTPServer):
     """
 
     allow_reuse_address = _allow_reuse_address(os.name)
+
+    # Nothing here should outlive the session this process belongs to
+    # (invariant 2): a request thread still blocked on a slow upstream must
+    # not keep the interpreter alive after the desktop has gone.
+    daemon_threads = True
 
 
 def parse_args(argv=None):
@@ -306,7 +739,14 @@ def main(argv=None):
         return
 
     port = config.get("port", PORT)
-    server = Server((HOST, port), Handler)
+    # functools.partial rather than a class attribute: the app is per-server
+    # state, and a class attribute would be shared by every server in a test
+    # process that starts more than one.
+    app = App(config)
+    # Before the socket is bound rather than after: the first poll lands within
+    # seconds of a login, and the series should already be on its way.
+    app.warm_history()
+    server = Server((HOST, port), functools.partial(Handler, app=app))
     try:
         server.serve_forever()
     except KeyboardInterrupt:

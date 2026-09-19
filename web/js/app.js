@@ -64,7 +64,39 @@ const weatherEl = document.getElementById('weather');
 const batteryEl = document.getElementById('battery');
 const staleEl = document.getElementById('stale-badge');
 
-function renderRow(label, value, currency, changePct) {
+// The sparkline's drawing box, in SVG user units. The element is sized in CSS
+// and the viewBox scales to it, so these are a shape rather than a size.
+const SPARK_W = 56;
+const SPARK_H = 16;
+
+// An inline <svg>, built through createElementNS because SVG lives in its own
+// namespace -- createElement('svg') produces an HTML element of that name that
+// renders as nothing at all, silently.
+// Returns null when there is no series, and the caller appends nothing.
+// An empty <svg> still reserves its flex basis, which is how a B3 row with no
+// history -- brapi serves none without a paid range -- rendered TAEE11 as
+// "TAEE…": the label gave up the width, and it gave it to a picture of
+// nothing.
+function renderSparkline(history, changePct) {
+    const d = sparklinePath(history, SPARK_W, SPARK_H);
+    if (!d) {
+        return null;
+    }
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', `spark ${changeClass(changePct)}`);
+    svg.setAttribute('viewBox', `0 0 ${SPARK_W} ${SPARK_H}`);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    // Decoration: the row already states the number and the change in text,
+    // so a screen reader gains nothing from the path and is better off
+    // skipping it.
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', d);
+    svg.appendChild(path);
+    return svg;
+}
+
+function renderRow(label, value, currency, changePct, format = formatPrice, history = []) {
     const row = document.createElement('div');
     row.className = 'row';
 
@@ -74,20 +106,30 @@ function renderRow(label, value, currency, changePct) {
 
     const priceEl = document.createElement('span');
     priceEl.className = 'price';
-    priceEl.textContent = formatPrice(value, currency);
+    priceEl.textContent = format(value, currency);
 
     const changeEl = document.createElement('span');
     changeEl.className = `change ${changeClass(changePct)}`;
     changeEl.textContent = formatChange(changePct);
 
-    row.append(labelEl, priceEl, changeEl);
+    // Between the price and the change, so the eye reads name, number, shape,
+    // direction -- and so the two coloured things sit together. append()
+    // ignores nothing, so a row with no series simply has no gap for one.
+    const spark = renderSparkline(history, changePct);
+    row.append(labelEl, priceEl, ...(spark ? [spark] : []), changeEl);
     return row;
 }
 
-function renderList(container, items, labelField, valueField, currency) {
+// `format` is how FX opts out of formatPrice: a rate is not a price, and
+// formatPrice's magnitude-dependent precision is wrong for one in both
+// directions. See formatRate in format.js.
+function renderList(container, items, labelField, valueField, currency,
+                   format = formatPrice, formatLabel = (label) => label) {
     container.textContent = '';
     for (const item of items) {
-        container.appendChild(renderRow(item[labelField], item[valueField], currency, item.changePct));
+        container.appendChild(
+            renderRow(formatLabel(item[labelField], currency), item[valueField],
+                      currency, item.changePct, format, item.history));
     }
 }
 
@@ -97,7 +139,9 @@ function renderWeather(weather) {
         return;
     }
     const line = document.createElement('div');
-    line.textContent = `${weather.city}: ${weather.tempC}°C (${weather.minC}-${weather.maxC}°C) ${weatherLabel(weather.code)}`;
+    line.textContent = `${weather.city}: ${formatTemp(weather.tempC)}°C `
+        + `(${formatTemp(weather.minC)}-${formatTemp(weather.maxC)}°C) `
+        + `${weatherLabel(weather.code)}`;
     weatherEl.appendChild(line);
 }
 
@@ -117,7 +161,7 @@ window.onData = (payload) => {
         return;
     }
     renderList(quotesEl, payload.quotes || [], 'symbol', 'price', 'BRL');
-    renderList(fxEl, payload.fx || [], 'pair', 'rate', 'BRL');
+    renderList(fxEl, payload.fx || [], 'pair', 'rate', 'BRL', formatRate, formatPair);
     renderList(cryptoEl, payload.crypto || [], 'symbol', 'price', 'USD');
     renderWeather(payload.weather);
     renderBattery(payload.battery);
