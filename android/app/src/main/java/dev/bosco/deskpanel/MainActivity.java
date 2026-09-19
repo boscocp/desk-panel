@@ -42,6 +42,15 @@ public class MainActivity extends Activity implements PanelService.Panel {
 
     private WebView webView;
 
+    /**
+     * The PC state this window has been told about, or null before the first
+     * word from the service. Kept because the page can outlive a message: the
+     * WebView reloads on a wake, and a page that reloaded in its online look
+     * while the PC is offline would sit lit behind a sleeping backlight.
+     * {@code onPageFinished} pushes this back into every page that loads.
+     */
+    private Boolean lastOnline;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -72,6 +81,14 @@ public class MainActivity extends Activity implements PanelService.Panel {
                 // worked. The E2E suite greps for this marker.
                 view.evaluateJavascript(READ_CLOCK,
                         value -> Log.i(Markers.TAG, "panel=rendered clock=" + value));
+
+                // The page defines window.onPcState as it parses, so a state
+                // delivered before this point hit nothing — a silent
+                // ReferenceError, discarded with the null callback. Since only
+                // edges are delivered, the page would never hear about it
+                // again. Pushing it here closes that window, and covers the
+                // reload the wake causes.
+                pushPcStateToPage();
             }
         });
 
@@ -115,9 +132,12 @@ public class MainActivity extends Activity implements PanelService.Panel {
         PanelService.clearPanel(this);
         // Only when the panel is genuinely going away. A stop for a screen that
         // went out does not reach onDestroy, which is exactly the distinction
-        // this task needed.
+        // this task needed. stopIfUnclaimed, not stop, for the same reason the
+        // clear above compares first: a replacement may already have started
+        // the service, and stopping it then would leave the live window with no
+        // poll loop and nothing to say so.
         if (isFinishing()) {
-            PanelService.stop(this);
+            PanelService.stopIfUnclaimed(this);
         }
         super.onDestroy();
     }
@@ -143,16 +163,35 @@ public class MainActivity extends Activity implements PanelService.Panel {
      * not wake the screen (T4.4, ADR 0005).
      */
     @Override
-    public void onPcState(boolean online) {
-        webView.evaluateJavascript("window.onPcState(" + online + ")", null);
+    public void onPcState(boolean online, boolean logTransition) {
+        lastOnline = online;
+        pushPcStateToPage();
 
-        if (online && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            setShowWhenLocked(true);
-            setTurnScreenOn(true);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            // Paired with the state rather than latched on. Both are sticky
+            // window properties, so leaving them true after going offline would
+            // mean that any later resume of this Activity with the PC off — the
+            // MIUI relaunch, a notification tap — turned the screen on and
+            // showed the panel over the keyguard, with nobody logged in.
+            setShowWhenLocked(online);
+            setTurnScreenOn(online);
         }
         setKeepScreenOn(online);
 
-        Log.i(Markers.TAG, Markers.screen(online));
+        if (logTransition) {
+            Log.i(Markers.TAG, Markers.screen(online));
+        }
+    }
+
+    /**
+     * Hands the current PC state to the page, if there is one to hand over.
+     * Safe to call repeatedly: {@code window.onPcState} only toggles a class
+     * and a timer, so a repeat is a no-op rather than a second transition.
+     */
+    private void pushPcStateToPage() {
+        if (lastOnline != null) {
+            webView.evaluateJavascript("window.onPcState(" + lastOnline + ")", null);
+        }
     }
 
     @Override
@@ -162,6 +201,10 @@ public class MainActivity extends Activity implements PanelService.Panel {
         // focus, so the request has to be repeated rather than made once.
         if (hasFocus) {
             enterImmersiveMode();
+            // Focus is the first moment anything can be sure the display is
+            // actually on, which is why the service drops its offline wake lock
+            // here and not at the startActivity that asked for the wake.
+            PanelService.panelVisible();
         }
     }
 

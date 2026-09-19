@@ -44,9 +44,13 @@ this needed.
   MIUI's exemptions are written against. It does not replace the manual toggles; it is what
   makes them mean something. The price is a permanent notification, which the panel hides
   anyway (the status bar is gone, T2.3) and which nobody sees while the screen is off.
-- **CPU awake (2):** a `PARTIAL_WAKE_LOCK`, acquired on the transition to offline and released
-  on the transition back. Online it would be redundant, because `FLAG_KEEP_SCREEN_ON` already
-  keeps the device up.
+- **CPU awake (2):** a `PARTIAL_WAKE_LOCK`, acquired on the transition to offline and dropped
+  once the panel's window actually has focus again. Online it would be redundant, because
+  `FLAG_KEEP_SCREEN_ON` already keeps the device up — but *asking* for the wake is not the same
+  as getting it. `startActivity` only hands the request to the ActivityManager and returns, so
+  releasing there would drop the app's only claim on the CPU with the wake still in flight, and
+  in the MIUI denial described below the window never comes up at all. Focus is the first moment
+  anything can be sure the display is on, so that is where the lock goes.
 - **Resuming (3):** on the transition to online the service starts `MainActivity` with
   `FLAG_ACTIVITY_REORDER_TO_FRONT`, so the existing task is raised rather than a second one
   created. That is a background activity start, permitted because the app has an activity in
@@ -57,6 +61,24 @@ this needed.
 Ownership after this change: `PcState` decides what a probe means, `PcPoller` owns the socket
 and the schedule, `PanelService` stays awake and logs `state=`, `MainActivity` owns the window
 and logs `screen=`. No component holds two of those.
+
+### The service replays state to a window that arrives late
+
+`PcPoller` delivers edges and nothing else, which is what keeps one marker per transition
+honest. It also means a window that appears *between* two transitions is told nothing at all,
+and both ways that happens are real on this device: MIUI relaunches the Activity on the way back
+from a doze, and `START_STICKY` can restart the service into a process with no Activity in it.
+
+Left alone, the newcomer keeps whatever state `onCreate` guessed. `onCreate` guesses online —
+correctly, for a launch somebody is watching — so a relaunch during an offline night would hold
+`FLAG_KEEP_SCREEN_ON` and show the online layout until the PC next came back. That is the exact
+breach of invariant 3 this wave exists to prevent, arrived at from the other direction.
+
+So `PanelService` remembers the last state and replays it on registration. A replay does not log
+a marker, because an Activity relaunch is not a transition — with one exception that matters:
+when the transition itself happened while no window was registered, the marker was never logged
+at all, and the window that finally registers owns it. Without that exception the `START_STICKY`
+restart this ADR asks for would come back watching and never say so.
 
 ### Why a wake lock is affordable, and the assumption under it
 
