@@ -167,6 +167,75 @@ class TimedCacheTests(unittest.TestCase):
             cache.get(0, 300, bug)
 
 
+def history_providers():
+    """Every provider module in `server.server` that can fetch a history.
+
+    Discovered rather than listed, because a hand-written list is exactly what
+    went stale three times: a provider gains a `load_history`, the stub list
+    does not, and the unit suite quietly starts fetching thirty daily closes
+    from a real upstream. Nothing failed -- the only symptom was the runtime
+    going up -- which is the worst kind of test bug, because the suite still
+    says OK.
+    """
+    import server.server as server_module
+
+    return [
+        getattr(server_module, name)
+        for name in dir(server_module)
+        if name.startswith("providers_")
+        and hasattr(getattr(server_module, name), "load_history")
+    ]
+
+
+class NoNetworkGuardTests(unittest.TestCase):
+    """The rule in server/CLAUDE.md, enforced rather than trusted.
+
+    `unshare -n` proves the suite *passes* without a network; it cannot prove
+    the suite never *reaches* for one, because a refused connection and a
+    stubbed one both end in a green run. This watches the socket instead.
+    """
+
+    def test_building_a_payload_opens_no_outbound_socket(self):
+        import socket
+
+        import server.server as server_module
+
+        opened = []
+        real_connect = socket.socket.connect
+
+        def guarded(sock, address, *args, **kwargs):
+            host = address[0] if isinstance(address, tuple) else address
+            if host not in ("127.0.0.1", "::1", "localhost"):
+                opened.append(host)
+                raise AssertionError(f"outbound connect to {host}")
+            return real_connect(sock, address, *args, **kwargs)
+
+        for module in history_providers():
+            self.addCleanup(setattr, module, "load_history", module.load_history)
+            module.load_history = lambda *a, **k: {}
+        for name in ("providers_brapi", "providers_awesomeapi", "providers_binance",
+                     "providers_openmeteo"):
+            module = getattr(server_module, name)
+            self.addCleanup(setattr, module, "load", module.load)
+            module.load = lambda *a, **k: []
+
+        socket.socket.connect = guarded
+        self.addCleanup(setattr, socket.socket, "connect", real_connect)
+
+        app = App(dict(CONFIG), clock=FakeClock())
+        app.quotes()
+        self.assertEqual(opened, [], "a unit test reached an upstream")
+
+    def test_every_history_provider_is_discovered(self):
+        # The guard above is only as good as what it enumerates, so the
+        # enumeration itself is asserted: a provider that grows a load_history
+        # must show up here without anybody editing a list.
+        names = {module.__name__.rsplit(".", 1)[-1] for module in history_providers()}
+        self.assertIn("providers_brapi", names)
+        self.assertIn("providers_awesomeapi", names)
+        self.assertIn("providers_binance", names)
+
+
 class FakeClock:
     def __init__(self):
         self.now = 0.0
@@ -198,10 +267,7 @@ class AppPayloadTests(unittest.TestCase):
         still pass, and the only symptom is the suite getting slower. It is
         also what `unshare -n` would turn into a failure nobody could read.
         """
-        import server.server as server_module
-
-        for name in ("providers_awesomeapi", "providers_binance"):
-            module = getattr(server_module, name)
+        for module in history_providers():
             self.addCleanup(setattr, module, "load_history", module.load_history)
             module.load_history = lambda *args, **kwargs: {}
 
