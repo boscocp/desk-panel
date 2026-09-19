@@ -10,9 +10,9 @@ package dev.bosco.deskpanel;
  * argument, so a test can jump forward without sleeping.
  *
  * <p>It decides <em>that</em> a transition happened; it does not log it.
- * Emitting the {@code state=online} / {@code state=offline} markers the E2E
- * suite asserts on stays on the Android side of the boundary, which is the only
- * side that has {@code Log}.
+ * Emitting the state markers the E2E suite asserts on stays on the Android side
+ * of the boundary, which is the only side that has {@code Log}. Their exact
+ * spelling lives in {@link Markers}, once, and nowhere else (TT.6).
  */
 public final class PcState {
 
