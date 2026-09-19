@@ -41,18 +41,28 @@ the APK are the files in the repo — there is no copy step and no sync step. Ed
 
 ## Local configuration: `.env`
 
-Two values are machine-specific and have to be *inside* the APK: the PC's LAN address, which
-the app is allowed to reach over cleartext, and the release signing key. Both live in a
+Three things are machine-specific and have to be *inside* the APK: the PC's LAN address, which
+the app is allowed to reach over cleartext; the release signing key; and which way up the panel
+sits, which is a property of the stand rather than a preference. All live in a
 gitignored `.env` at the repository root, read by Gradle at build time.
 `.env.example` is committed beside it — copy it and fill it in.
 
 ```sh
 PC_IP=192.168.15.3
+PANEL_ORIENTATION=reverseLandscape
 KEYSTORE_FILE=../desk-panel.keystore
 KEYSTORE_PASSWORD=…
 KEY_ALIAS=desk-panel
 KEY_PASSWORD=…
 ```
+
+`PANEL_ORIENTATION` takes `sensorLandscape` (the default), `landscape` or `reverseLandscape`;
+anything else fails the build by name rather than surfacing later as an aapt2 complaint about a
+manifest attribute. Leave it empty and the accelerometer decides, which is fine until the screen
+sleeps for real — the wake relaunches the activity, the phone is lying nearly flat in its stand,
+and the panel can come back upside down. Read the current one off the device with
+`adb shell dumpsys window | grep -o "mRotation=ROTATION_[0-9]*"`; on the Redmi Note 10,
+`reverseLandscape` is `ROTATION_270`.
 
 **Never put an API token in `.env`.** The phone never talks to a data provider — it talks to
 the PC, and the PC talks to the provider ([ADR 0004](adr/0004-server-is-login-signal-and-proxy.md)).

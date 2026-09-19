@@ -1,13 +1,36 @@
 # 0005 — Let the screen really sleep; dim-to-black is the fallback
 
-Status: accepted, primary mechanism **unvalidated** · 2026-09-13
+Status: accepted, primary mechanism **validated on the device** · 2026-09-13, validated
+2026-09-19
 Supersedes an earlier draft of this project that specified dim-to-black as the primary approach.
+Amended by [ADR 0014](0014-poll-loop-outlives-the-screen.md), which decides who stays awake to
+enforce this policy once the Activity is allowed to stop.
 
-Whether MIUI actually honours `setTurnScreenOn(true)` from a background Activity is not known
-yet. T4.4 decides it and must write the outcome here before it closes: either this ADR keeps
-its primary design, or it falls back to `screenBrightness = 0f` and this line changes to say
-so. `docs/DEVICE-CARE.md` already asserts the behaviour as fact — that sentence is downstream
-of this one and gets corrected with it.
+## Outcome (T4.4, 2026-09-19)
+
+**MIUI honours it. The primary design stands and the fallback is not needed.** On the Redmi
+Note 10, MIUI 14 / Android 12, four consecutive offline-online cycles took the display from
+`mWakefulness=Dozing` to `Awake` with nobody touching the phone, and `screen=sleep` /
+`screen=wake` were logged once each per transition. `screenBrightness` was left at `-1f`
+throughout; nothing in the app dims anything any more. `docs/DEVICE-CARE.md` may keep asserting
+the behaviour as fact.
+
+Two conditions, both outside the code, and the panel fails silently without either:
+
+- **MIUI's "Show on Lock screen" permission must be granted.** Denied — which is the default —
+  the Activity is raised, `state=online` and `screen=wake` are both logged, and the screen
+  stays dark, because the window is never allowed over the keyguard. MIUI says so in logcat and
+  nowhere else: `MIUILOG- Show when locked PermissionDenied pkg : dev.bosco.deskpanel`. It is
+  an app-op, and `adb install -r` resets it.
+- **Developer options → "Stay awake" must be off.** On, the screen never sleeps at all while
+  charging, and the phone on this desk is always charging.
+
+Both are now steps in `docs/INSTALL-PHONE.md`. The device PIN turned out not to matter: the
+keyguard was up (`isKeyguardLocked=true`) in every successful cycle, and the permission — not
+the lock — is what decides it.
+
+The fallback below is kept as documentation of a road not taken. Nothing in the code implements
+it any more, so reinstating it means writing it, not flipping a flag.
 
 ## Context
 

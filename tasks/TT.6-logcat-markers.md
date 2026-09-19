@@ -53,17 +53,24 @@ versions without notice. So the app reports its own state
 
 ## Acceptance
 
-Kill the server on the PC, wait, then:
+**Clear the buffer first, then kill the server** — never the other way round. The app notices
+within one poll interval, which is 2s while online, so killing first and clearing second is a
+race the clear usually wins: it wipes the very marker the next line greps for, and the failure
+looks exactly like an app that never logged. Measured, 2026-09-19. This is the same trap the
+`am start` ordering hit (see "Traps" in `STATUS.md`), which is why the command below does the
+kill itself.
 
 ```bash
-adb logcat -c && sleep 20 && adb logcat -d -s DeskPanel > /tmp/desk-panel-markers.log
+adb logcat -c && <kill the server on the PC> && sleep 20 \
+  && adb logcat -d -s DeskPanel > /tmp/desk-panel-markers.log
 grep -q 'state=offline' /tmp/desk-panel-markers.log
 grep -q 'screen=sleep'  /tmp/desk-panel-markers.log
 test "$(grep -c 'state=offline' /tmp/desk-panel-markers.log)" -eq 1
 ```
 
-Start it again, wait, then the same three with `state=online` and `screen=wake`. The count is
-the point: each marker appears once per transition, not on every poll.
+Then the same four lines with the server being started instead of killed, and `state=online`
+and `screen=wake` in place of the offline pair. The count is the point: each marker appears
+once per transition, not on every poll.
 
 ```bash
 ! grep -rn 'state=\|screen=' android/app/src/main/java --include=*.java | grep -v 'Markers.java'
