@@ -106,7 +106,8 @@ them:
   measured from the moment the PC goes away holds seven, a settled offline minute holds four.
   Give the ladder twenty seconds to finish climbing before asserting a count (T5.3).
 - `dormant=on` is the log saying its own silence is deliberate (T5.6). Offline and on battery
-  the app hands its schedule to `AlarmManager` and goes quiet for fifteen minutes at a time, so
+  the app hands its schedule to `AlarmManager` and goes quiet for fifteen to twenty-six minutes
+  at a time — the alarm is inexact and the platform widens it — so
   **an assertion that counts `ping=` over a window has to know which power state it is in** —
   the same window is four lines on mains and zero on battery. `dumpsys battery unplug` and
   `reset` put the device in either state on demand, and fire the real power broadcasts.

@@ -49,10 +49,20 @@ public final class PcState {
      * <p>15 minutes rather than something responsive, and the number is the
      * platform's, not a preference. Doze clamps an allow-while-idle alarm to
      * roughly nine minutes, so anything tighter is a promise that would not be
-     * kept. It can afford to be this sparse because it is a <em>backstop</em>:
-     * with the USB dying with the PC, power returning is the real signal and
-     * arrives as {@code ACTION_POWER_CONNECTED} the instant the PC comes back
-     * (ADR 0014).
+     * kept.
+     *
+     * <p><b>This is the request, not the worst case.</b> {@code
+     * setAndAllowWhileIdle} is inexact, and the platform adds a delivery window
+     * of its own: measured on this device, 15 minutes was scheduled as "between
+     * +14m41s and +25m56s" — an 11-minute window on top. Anything reasoning
+     * about how long recovery can take has to read {@code maxWhenElapsed} in
+     * {@code dumpsys alarm}, never this constant.
+     *
+     * <p>It can afford to be this sparse only because it is a <em>backstop</em>.
+     * Where the phone's power dies with the PC, {@code ACTION_POWER_CONNECTED}
+     * arrives the instant the PC comes back and this never runs. Where it does
+     * not — a wall charger, a board that keeps USB live — this is the only
+     * mechanism, and half an hour is what recovery costs (ADR 0014).
      */
     public static final long DORMANT_ALARM_MS = 15 * 60 * 1000L;
 

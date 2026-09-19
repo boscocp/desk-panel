@@ -21,6 +21,54 @@ send you a notification. This is settled and recorded in
 | Layout shifts a few pixels every few minutes | Burn-in mitigation. Neon on black already helps, since most pixels are simply off |
 | Battery level and temperature shown, with a warning above 40 degrees | Heat is what kills lithium cells. Better to watch the number than discover the problem as a bulge |
 
+## The measurement that reframes all of this (2026-09-19)
+
+Before choosing any of the options below, read the number this desk actually reports:
+
+```
+Max charging current: 100000      # 100 mA
+level 22 at 12:44  ->  level 20 at 13:11
+```
+
+**The port negotiates 100 mA.** The panel with its screen on draws several times that, so the
+phone loses about 4.4% an hour *while the framework reports `status: 2`, charging*. It is not
+cycling; it is a slow one-way discharge whenever anybody is looking at the panel.
+
+Nothing in software fixes that, and the options below do not either — they are about *cycling*,
+which is a different problem. **A port or charger that will negotiate more than 100 mA is the
+single change that turns the sign of the equation.** Check it after changing anything:
+`adb shell dumpsys battery | grep 'Max charging current'`.
+
+Note what this does *not* cost: the panel's data path is Wi-Fi to the PC's LAN address, not the
+USB cable. The cable carries power and adb, nothing else — so the phone can move to a wall
+charger without changing a line of code or a byte of config. What it gives up is adb over the
+cable, which T7.2 (wireless adb) exists for, and the `ACTION_POWER_CONNECTED` fast path in
+T5.6, which stops mattering because a properly charged phone never goes dormant.
+
+## Radios that are switched off on this desk
+
+Measured and turned off 2026-09-19. None of them is large, and together they are worth perhaps
+15–20 mA against a deficit of about 220 mA — hygiene, not a fix. Recorded because a factory
+reset or a new phone starts with all of them back on:
+
+| Setting | Value | Why |
+|---|---|---|
+| `bluetooth_on` | 0 | Nothing in the panel uses Bluetooth |
+| `location_mode` | 0 | The weather city is server config; the device never needs a fix |
+| `wifi_scan_always_enabled` | 0 | Scans for location even with location off |
+| `ble_scan_always_enabled` | 0 | Same, over BLE |
+
+**Wi-Fi itself must stay on.** It is the panel's only transport — `/ping` every 2s is the login
+signal (invariant 2). Turning it off does not save power, it ends the product.
+
+**Battery saver does not stay on, and that is the platform's choice, not a setting.** It can be
+enabled (`adb shell cmd power set-mode 1`) and it holds while the phone reports discharging —
+but Android disables it the moment the phone reports charging, which on this desk is almost
+always. Measured: enabled at 14:04, `low_power=1`; `dumpsys battery reset` at 14:05 and
+`low_power=0` without anybody touching it. Worth knowing that it does *not* defer T5.6's alarm
+(`battery_saver=-4s` on the policy line) once the app is battery-optimisation exempt — the
+concern there was misplaced. It simply will not stay on.
+
 ## What actually solves the charging problem
 
 ### 1. Disable ErP Ready in the BIOS — recommended

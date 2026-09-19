@@ -198,9 +198,12 @@ not to write something.**
   `docs/INSTALL-PHONE.md` step 6 is the one that does. This makes a per-device toggle
   load-bearing for a code path, which is uncomfortable and is the honest position: the
   alternative is a wake lock held all night, which is what this branch exists to stop.
-- **Offline on battery, recovery without a power event takes up to fifteen minutes** (T5.6).
-  That is the cost of letting the device suspend, and it is bounded by
-  `PcState.DORMANT_ALARM_MS` rather than by `BACKOFF_CAP_MS`. It is only ever paid in the
+- **Offline on battery, recovery without a power event takes up to about half an hour** (T5.6).
+  `PcState.DORMANT_ALARM_MS` asks for fifteen minutes, and that is the request rather than the
+  bound: `setAndAllowWhileIdle` is inexact and the platform adds a window of its own — measured
+  here as `whenElapsed=+14m41s maxWhenElapsed=+25m56s`, eleven minutes on top. A check that
+  waited eighteen minutes found the alarm still legitimately pending. Read `maxWhenElapsed`, not
+  the constant. It is only ever paid in the
   configuration where the phone is on its own charger while the PC is off: with the USB dying
   with the PC, `ACTION_POWER_CONNECTED` arrives the moment the PC returns and the alarm never
   matters.
