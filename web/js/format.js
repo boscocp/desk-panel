@@ -76,6 +76,60 @@ function formatPair(pair, quote) {
     return counter === quote ? base : pair;
 }
 
+// values: array of numbers, oldest first. width/height: the SVG viewBox.
+//
+// Returns the `d` of a polyline through the series, scaled to fill the box,
+// or '' when there is nothing to draw. Pure, and it is the whole of the
+// sparkline: app.js only wraps the string in an <svg>, which is what keeps
+// the drawing testable without a DOM.
+//
+// Two decisions worth naming, because both are about not lying with a
+// picture. The series is scaled to its own min and max rather than to zero,
+// so the line uses the full height and shows the shape of the movement -- a
+// currency that moved 0.4% would otherwise be a flat line, which is true of
+// the magnitude and useless about the trend. And a series with no range at
+// all is drawn as a centred flat line rather than divided by zero.
+function sparklinePath(values, width, height) {
+    if (!Array.isArray(values)) {
+        return '';
+    }
+    const points = values.filter((v) => typeof v === 'number' && Number.isFinite(v));
+    if (points.length === 0) {
+        return '';
+    }
+
+    // Half the stroke would be clipped at the extremes without an inset, so
+    // the line is drawn into a slightly shorter box than the one it sits in.
+    const inset = 1;
+    const usable = Math.max(0, height - inset * 2);
+
+    const min = Math.min(...points);
+    const max = Math.max(...points);
+    const range = max - min;
+
+    const x = (i) => (points.length === 1 ? width : (i / (points.length - 1)) * width);
+    const y = (value) => (range === 0
+        ? inset + usable / 2
+        // SVG y grows downward, so the higher value gets the smaller y.
+        : inset + (1 - (value - min) / range) * usable);
+
+    if (points.length === 1) {
+        // One point is a value, not a trend: draw it as a flat line across the
+        // box so the row still has the same shape as its neighbours.
+        return `M0,${round2(y(points[0]))} L${width},${round2(y(points[0]))}`;
+    }
+
+    return points
+        .map((value, i) => `${i === 0 ? 'M' : 'L'}${round2(x(i))},${round2(y(value))}`)
+        .join(' ');
+}
+
+// Two decimals is plenty for a 56px box and keeps the path short -- this
+// string is rebuilt for every row on every refresh.
+function round2(n) {
+    return Math.round(n * 100) / 100;
+}
+
 // pct: number (e.g. 1.23 for +1.23%). Sign, one decimal, percent sign.
 // Zero is shown without a sign, matching changeClass's "flat" bucket.
 function formatChange(pct) {
@@ -165,5 +219,6 @@ function isNight(now, start, end) {
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         formatPrice, formatRate, formatPair, formatChange, changeClass, weatherLabel, isNight,
+        sparklinePath,
     };
 }

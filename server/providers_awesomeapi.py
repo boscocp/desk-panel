@@ -32,6 +32,7 @@ number should show the one every other Brazilian quote source shows.
 from server.upstream import UpstreamError, get_json
 
 LAST_URL = "https://economia.awesomeapi.com.br/json/last"
+DAILY_URL = "https://economia.awesomeapi.com.br/json/daily"
 
 
 def to_request_pair(configured):
@@ -61,6 +62,47 @@ def fetch(pairs, get=get_json):
         return {}
     requested = ",".join(to_request_pair(pair) for pair in pairs)
     return get(f"{LAST_URL}/{requested}")
+
+
+def fetch_history(pair, days, get=get_json):
+    """One pair's recent daily closes. The seam TT.2 patches.
+
+    One pair per call, because that is what the endpoint takes -- unlike
+    `fetch`, which accepts a list. With two pairs configured and a cache
+    measured in hours, two requests a day is not worth working around.
+    """
+    return get(f"{DAILY_URL}/{to_request_pair(pair)}/{int(days)}")
+
+
+def normalise_history(raw):
+    """Pure: the daily response -> `[rate, ...]`, oldest first.
+
+    AwesomeAPI returns newest first, which is the opposite of how a line is
+    drawn, so this reverses it. Getting that backwards would produce a chart
+    that is exactly wrong -- a rise drawn as a fall -- and nothing about the
+    picture would say so.
+    """
+    if not isinstance(raw, list):
+        return []
+    rates = [_number(entry.get("bid")) for entry in raw if isinstance(entry, dict)]
+    return [rate for rate in reversed(rates) if rate is not None]
+
+
+def load_history(pairs, days, get=get_json):
+    """`{display pair: [rates oldest-first]}` for every pair that answered.
+
+    A pair whose history fails is simply absent: a missing sparkline costs
+    that row its picture, and taking the whole payload down over a decoration
+    would be the wrong trade.
+    """
+    history = {}
+    for pair in pairs or []:
+        try:
+            history[to_display_pair(pair)] = normalise_history(
+                fetch_history(pair, days, get=get))
+        except UpstreamError:
+            continue
+    return history
 
 
 def normalise(raw, pairs=None):
@@ -114,5 +156,6 @@ def load(pairs, get=get_json):
     return normalise(fetch(pairs, get=get), pairs=pairs)
 
 
-__all__ = ["LAST_URL", "UpstreamError", "fetch", "load", "normalise",
-           "to_display_pair", "to_request_pair"]
+__all__ = ["DAILY_URL", "LAST_URL", "UpstreamError", "fetch", "fetch_history", "load",
+           "load_history", "normalise", "normalise_history", "to_display_pair",
+           "to_request_pair"]

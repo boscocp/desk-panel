@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 
 const {
     formatPrice, formatRate, formatPair, formatChange, changeClass, weatherLabel, isNight,
+    sparklinePath,
 } = require('../js/format.js');
 
 test('formatPrice formats a BRL price with two decimals', () => {
@@ -132,4 +133,44 @@ test('formatPair keeps both halves when the quote differs from the card', () => 
 test('formatPair passes through anything that is not a pair', () => {
     assert.equal(formatPair('USD', 'BRL'), 'USD');
     assert.equal(formatPair(undefined, 'BRL'), '');
+});
+
+// The sparkline is a picture, and a picture can lie in ways a number cannot.
+// These pin the two ways this one could.
+test('sparklinePath scales to the series own range, not to zero', () => {
+    // A currency that moved 0.4% is a flat line against a zero baseline and a
+    // legible shape against its own min and max. The trend is what the row is
+    // for; the magnitude is already in the price beside it.
+    const path = sparklinePath([5.12, 5.13, 5.11, 5.14], 56, 16);
+    assert.match(path, /^M0,/);
+    // The lowest value touches the bottom inset and the highest the top.
+    assert.ok(path.includes('15'), `expected the low to reach the floor: ${path}`);
+    assert.ok(path.includes(',1'), `expected the high to reach the ceiling: ${path}`);
+});
+
+test('sparklinePath spans the full width', () => {
+    const path = sparklinePath([1, 2, 3], 56, 16);
+    assert.ok(path.startsWith('M0,'), path);
+    assert.ok(path.includes('L56,'), path);
+});
+
+test('sparklinePath draws a flat series as a centred line rather than dividing by zero', () => {
+    const path = sparklinePath([5, 5, 5], 56, 16);
+    assert.ok(!path.includes('NaN'), path);
+    assert.equal(path, 'M0,8 L28,8 L56,8');
+});
+
+test('sparklinePath draws a single point as a flat line, so the row keeps its shape', () => {
+    assert.equal(sparklinePath([5], 56, 16), 'M0,8 L56,8');
+});
+
+test('sparklinePath returns nothing to draw for nothing to draw', () => {
+    assert.equal(sparklinePath([], 56, 16), '');
+    assert.equal(sparklinePath(undefined, 56, 16), '');
+    assert.equal(sparklinePath('nope', 56, 16), '');
+});
+
+test('sparklinePath ignores non-numeric entries instead of drawing NaN', () => {
+    const path = sparklinePath([1, null, 3, 'x'], 56, 16);
+    assert.ok(!path.includes('NaN'), path);
 });

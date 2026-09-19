@@ -55,6 +55,11 @@ DEFAULT_CONFIG = {
     "timezone": "America/Sao_Paulo",
     "quotes_interval_s": 300,
     "weather_interval_s": 900,
+    # Daily closes change once a day, so the sparkline's series is fetched on
+    # a clock measured in hours rather than minutes. Six is arbitrary and
+    # generous: it costs four requests a day across two providers.
+    "history_interval_s": 21600,
+    "history_days": 30,
     "night_start": "22:00",
     "night_end": "07:00",
     "actions": {},
@@ -291,6 +296,13 @@ class App:
             "crypto": TimedCache(),
         }
         self.weather_cache = TimedCache()
+        # Its own clock, and a much slower one: the series is daily closes,
+        # which do not move between refreshes of the prices beside them.
+        self.history_caches = {
+            "quotes": TimedCache(),
+            "fx": TimedCache(),
+            "crypto": TimedCache(),
+        }
         # Coordinates never change, so the geocode is cached for the life of
         # the process rather than on a TTL (T3.4 step 1).
         self.coords = None
@@ -315,14 +327,51 @@ class App:
             "crypto": lambda: providers_binance.load(config.get("crypto", [])),
         }
 
+        history = self._history(now)
+
         payload = {}
         stale = False
         for market, produce in producers.items():
             rows, market_stale = self.market_caches[market].get(now, ttl, produce)
-            payload[market] = rows if rows is not None else []
+            rows = rows if rows is not None else []
+            key = "pair" if market == "fx" else "symbol"
+            # Attached rather than merged into the cache, so a history that
+            # failed or has not been fetched yet costs the row its picture and
+            # nothing else. An absent series is an absent key: the page draws
+            # no line rather than a line through no data.
+            payload[market] = [
+                dict(row, history=history.get(market, {}).get(row.get(key), []))
+                for row in rows
+            ]
             stale = stale or market_stale
         payload["stale"] = stale
         return payload
+
+    def _history(self, now):
+        """`{market: {symbol: [values]}}`, on its own slow cache.
+
+        Never marks the payload stale. A sparkline is a decoration on a row
+        that already carries the number it decorates, so failing to draw one
+        is not a reason to tell the panel its prices are old.
+        """
+        config = self.config
+        ttl = config.get("history_interval_s", 21600)
+        days = config.get("history_days", 30)
+
+        producers = {
+            # brapi's historical range needs a token, like its crypto and
+            # currency endpoints -- so B3 rows carry no series until one is
+            # configured, and the rest of the card is unaffected.
+            "quotes": lambda: {},
+            "fx": lambda: providers_awesomeapi.load_history(config.get("fx", []), days),
+            "crypto": lambda: providers_binance.load_history(config.get("crypto", []), days),
+        }
+
+        history = {}
+        for market, produce in producers.items():
+            series, _ = self.history_caches[market].get(now, ttl, produce)
+            history[market] = series or {}
+        return history
 
     def weather(self):
         """`{tempC, minC, maxC, code, city, stale}` for the configured city."""

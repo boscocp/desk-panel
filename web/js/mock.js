@@ -8,6 +8,8 @@
 //
 // The payload shape is a contract between three places: this file, the
 // server's /quotes and /weather responses, and the Android DataPoller.
+// Each quote/fx/crypto row also carries `history`, an array of recent values
+// oldest first, which the panel draws as a sparkline.
 // Changing a key here means changing it in both other places too. See
 // tasks/T1.2-mock-fixtures.md for the full shape.
 
@@ -38,6 +40,32 @@
 
     let tick = 0;
 
+    // A plausible series for the sparkline, built once per base value rather
+    // than jittered per tick: a chart that redrew its whole history every
+    // three seconds would flicker, and real daily closes do not move.
+    function series(base, drift, points) {
+        const out = [];
+        let value = base * (1 - drift);
+        for (let i = 0; i < points; i += 1) {
+            value += (base * drift * 2) / points + (Math.random() * 2 - 1) * base * 0.004;
+            out.push(Number(value.toFixed(8)));
+        }
+        return out;
+    }
+
+    const HISTORY = new Map();
+    function historyFor(key, base) {
+        if (!HISTORY.has(key)) {
+            // A deliberate mix of directions, so the up, down and flat colour
+            // paths are all on screen at once in a browser.
+            const drift = { PETR4: 0.06, VALE3: -0.04, ITUB4: 0.0,
+                            'USD/BRL': -0.02, 'EUR/BRL': 0.03,
+                            BTC: 0.09 }[key] ?? 0.05;
+            HISTORY.set(key, series(base, drift, 30));
+        }
+        return HISTORY.get(key);
+    }
+
     // Absolute jitter for small, roughly-fixed-range values (changePct).
     function jitter(value, spread) {
         return value + (Math.random() * 2 - 1) * spread;
@@ -58,18 +86,19 @@
         return Number(value.toFixed(decimals));
     }
 
-    function jitterEntries(list, pricePct, priceKey) {
+    function jitterEntries(list, pricePct, priceKey, labelKey) {
         return list.map((item) => ({
             ...item,
             [priceKey]: round(jitterPct(item[priceKey], pricePct)),
             changePct: Number(jitter(item.changePct, 0.4).toFixed(1)),
+            history: historyFor(item[labelKey], item[priceKey]),
         }));
     }
 
     function buildPayload() {
         tick += 1;
 
-        const quotes = jitterEntries(BASE_QUOTES, 0.01, 'price');
+        const quotes = jitterEntries(BASE_QUOTES, 0.01, 'price', 'symbol');
         // Every third tick: a flat quote, so the zero-change path renders too.
         if (tick % 3 === 0) {
             quotes[2].changePct = 0;
@@ -77,8 +106,8 @@
 
         return {
             quotes,
-            fx: jitterEntries(BASE_FX, 0.005, 'rate'),
-            crypto: jitterEntries(BASE_CRYPTO, 0.02, 'price'),
+            fx: jitterEntries(BASE_FX, 0.005, 'rate', 'pair'),
+            crypto: jitterEntries(BASE_CRYPTO, 0.02, 'price', 'symbol'),
             weather: {
                 ...BASE_WEATHER,
                 tempC: Math.round(jitter(BASE_WEATHER.tempC, 2)),
