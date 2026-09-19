@@ -110,6 +110,48 @@ val generateNetsecRes = tasks.register<Sync>("generateNetsecRes") {
 }
 
 // ---------------------------------------------------------------------------
+// Panel orientation
+//
+// Which way up the panel sits is a property of the stand, not of the software:
+// it is decided once, when the phone is put on the desk, by which side the cable
+// leaves from. That is the same class of value as PC_IP — local, physical,
+// decided once — so it lives in .env for the same reason (ADR 0013).
+//
+// It became build-time config because it had to become *something*. The manifest
+// said sensorLandscape, which accepts both landscape directions and picks by
+// accelerometer, and that was harmless only while nothing ever relaunched the
+// Activity. Real screen sleep (T4.4) relaunches it on every wake, and the phone
+// is then lying nearly flat in a stand, where the sensor reading is ambiguous —
+// so the panel came back upside down. Observed on the device, 2026-09-19.
+//
+// sensorLandscape stays the default, because a fresh clone with no .env should
+// still behave the way it always did rather than guess at somebody's desk.
+// ---------------------------------------------------------------------------
+val orientationDefault = "sensorLandscape"
+val allowedOrientations = setOf("sensorLandscape", "landscape", "reverseLandscape")
+val panelOrientation = dotenvValue("PANEL_ORIENTATION") ?: orientationDefault
+// Range-checked, not just non-empty, and for the same reason as PC_IP's octets: a
+// typo here is not a build error by itself. android:screenOrientation would take
+// the unknown string, aapt2 would reject it with a message about a manifest
+// attribute rather than about .env, and the person reading it has no reason to
+// suspect a file Gradle parsed.
+if (panelOrientation !in allowedOrientations) {
+    throw GradleException(
+        "PANEL_ORIENTATION in .env is '$panelOrientation'; expected one of " +
+            allowedOrientations.joinToString(", ") + "."
+    )
+}
+
+logger.lifecycle(
+    if (dotenvValue("PANEL_ORIENTATION") != null) {
+        "desk-panel: panel orientation $panelOrientation (from .env)"
+    } else {
+        "desk-panel: panel orientation $panelOrientation (default — the sensor picks, " +
+            "and may pick differently after a wake)"
+    }
+)
+
+// ---------------------------------------------------------------------------
 // Release signing
 //
 // Absorbed from keystore.properties into .env (ADR 0013): two build-time local
@@ -164,6 +206,12 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+
+        // Substituted into android:screenOrientation in the manifest. A
+        // placeholder rather than the res/ substitution PC_IP rides, because
+        // screenOrientation is a manifest attribute and takes an enum, not a
+        // string resource.
+        manifestPlaceholders["panelOrientation"] = panelOrientation
     }
 
     compileOptions {

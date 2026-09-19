@@ -33,7 +33,7 @@ The obvious fix is a `.env`. The obvious fix is also how a token ends up inside 
 | Ends up | baked into the APK | on the PC only |
 | Changing it needs | a rebuild and a reinstall | a server restart |
 | Committed twin | `.env.example` | `server/config.example.json` |
-| Holds | the PC's LAN address, signing passwords | the brapi token, tickers, city, intervals |
+| Holds | the PC's LAN address, signing passwords, the panel's orientation | the brapi token, tickers, city, intervals |
 
 **API tokens never go in `.env`.** Not the brapi token, not any future one. The phone never talks
 to a data provider — it talks to the PC, and the PC talks to the provider
@@ -48,6 +48,18 @@ has been violated*. So anything the owner might want to change — tickers, city
 night window — is runtime config by definition. `.env` is only for things that cannot be
 anything else: the address the APK must be allowed to reach in cleartext, and the key it is
 signed with.
+
+**`PANEL_ORIENTATION` joined later (2026-09-19, T4.4)** and is worth recording as a test of the
+rule above, because it does not look like an `.env` value at first. Which way up the panel sits
+is not a secret and not an address — but it is decided once, when the phone goes into its stand,
+by which side the cable leaves from, and the owner will never want to change it from a phone
+they are looking at. It reached `.env` by failing the alternative rather than by fitting a
+category: the manifest said `sensorLandscape`, the accelerometer re-decided on every Activity
+creation, and once T4.4 made the wake relaunch the Activity the panel started coming back upside
+down from a phone lying nearly flat. The direction had to stop being sensed. Once it stops being
+sensed it has to be stored, and a property of one desk that is baked into the APK is precisely
+what this ADR calls build-time config. Default `sensorLandscape`, so a fresh clone with no `.env`
+behaves as it always did.
 
 **`.env` absorbs `keystore.properties`.** Two build-time local files is one too many, and the
 signing values fit the definition exactly. The `.env.example` names the keys with empty values;
