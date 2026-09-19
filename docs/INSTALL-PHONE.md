@@ -57,13 +57,45 @@ look like a bug in the code.
    and the panel silently stops updating.
 3. **Lock in recents** — open the app switcher, pull the app card down to lock it. Reduces the
    chance of MIUI reclaiming it under memory pressure.
-4. **Stay awake while charging** — Developer options → **Stay awake**. A useful belt-and-braces
-   measure alongside the app's own screen handling.
-5. **Auto-rotate off**, phone in landscape. The app locks orientation itself, but this avoids
+4. **Show on Lock screen** — same screen, Other permissions → **Show on Lock screen**, and
+   **Display pop-up windows while running in the background** with it.
+   This is what lets the panel come back on its own. When the PC returns, the service raises
+   the Activity so `setTurnScreenOn` can fire (ADR 0014); without this permission MIUI refuses
+   it and says so in logcat —
+   `MIUILOG- Show when locked PermissionDenied pkg : dev.bosco.deskpanel` — while everything
+   else looks perfect: `state=online` and `screen=wake` are both logged, and the screen stays
+   dark. Measured on the device, 2026-09-19.
+5. **Stay awake OFF** — Developer options → **Stay awake** must be **off**.
+   It is on by default on a phone that has been used for development, and it holds the screen
+   on for as long as the phone is charging — which, on this desk, is always. With it on the
+   panel logs `screen=sleep` and the display stays lit, so the single largest longevity win in
+   the project silently does not happen (ADR 0005, ADR 0008). Check it from the host with
+   `adb shell settings get global stay_on_while_plugged_in`; the answer must be `0`.
+   An earlier version of this document recommended turning it **on**. That advice belonged to
+   the abandoned design where the screen never slept and offline was faked with
+   `screenBrightness = 0f`, and it is wrong now.
+6. **Auto-rotate off**, phone in landscape. The app locks orientation itself, but this avoids
    fighting the system during setup.
 
 Verify with a reboot: the panel should return to the foreground on its own within about two
 minutes, untouched.
+
+### These settings do not survive a reinstall
+
+The two permissions in step 4 are MIUI app-ops, and `adb install -r` resets them to denied.
+That is worth knowing because nothing announces it: the panel keeps logging `screen=wake`
+perfectly and simply stops turning the screen on. After every install, either set them again in
+the UI or from the host:
+
+```bash
+adb shell appops set dev.bosco.deskpanel 10020 allow   # Show on Lock screen
+adb shell appops set dev.bosco.deskpanel 10008 allow   # background pop-up
+adb shell appops get dev.bosco.deskpanel | grep MIUIOP
+```
+
+The numeric ops are MIUI's own and are not documented by Xiaomi; they were read off this
+device. Setting them in the Settings UI is the durable route, and the one to use on the phone
+that is actually going to live on the desk.
 
 ## Wireless debugging (development only)
 
