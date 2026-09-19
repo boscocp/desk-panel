@@ -61,8 +61,18 @@ public final class PanelService extends Service implements PcPoller.Listener {
      * never holds a reference to anything else of the Activity's.
      */
     public interface Panel {
-        /** Called on the main thread, on transitions only. */
-        void onPcState(boolean online);
+        /**
+         * Called on the main thread.
+         *
+         * @param online        the PC state to apply to the window and the page
+         * @param logTransition whether this is a state <em>change</em> the panel
+         *                      should log, as opposed to a replay handed to a
+         *                      window that was not around when the change
+         *                      happened. A replay must not log: the marker
+         *                      contract is one line per transition, and an
+         *                      Activity relaunch is not a transition.
+         */
+        void onPcState(boolean online, boolean logTransition);
     }
 
     private static final String CHANNEL_ID = "panel";
@@ -79,6 +89,38 @@ public final class PanelService extends Service implements PcPoller.Listener {
      * class never caches it in a local field.
      */
     private static volatile Panel panel;
+
+    /**
+     * The last state the poller reported, or null before the first probe.
+     *
+     * <p>{@link PcPoller} delivers edges and nothing else, which is what keeps
+     * the log honest — and it means a window that appears <em>between</em> two
+     * transitions would otherwise never be told anything at all. Two ways that
+     * happens, both real on this device: MIUI relaunches the Activity on the way
+     * back from a doze, and {@code START_STICKY} can restart the service into a
+     * process with no Activity in it. Without a replay the newcomer would sit in
+     * whatever state {@code onCreate} guessed — holding {@code
+     * FLAG_KEEP_SCREEN_ON} through an offline night, which is the invariant this
+     * whole wave exists to enforce.
+     */
+    private static volatile Boolean lastOnline;
+
+    /**
+     * Set when a transition was reported with no panel registered, so the replay
+     * that follows logs the screen marker instead of swallowing it.
+     *
+     * <p>This is the {@code START_STICKY} path. The service comes back without
+     * an Activity, the first probe is a genuine transition, and the window that
+     * finally registers is the one that acts on it — so that window's marker is
+     * the transition's, just late.
+     */
+    private static volatile boolean screenMarkerPending;
+
+    /**
+     * The running service, for the static entry points that have to reach an
+     * instance field. Null between destroy and create.
+     */
+    private static volatile PanelService instance;
 
     private PcPoller poller;
 
@@ -97,9 +139,19 @@ public final class PanelService extends Service implements PcPoller.Listener {
      */
     private PowerManager.WakeLock offlineWakeLock;
 
-    /** Registers the Activity that owns the window. */
+    /**
+     * Registers the Activity that owns the window, and immediately replays the
+     * current PC state to it if one is known. See {@link #lastOnline} for why a
+     * replay is not optional.
+     */
     public static void setPanel(Panel newPanel) {
         panel = newPanel;
+        Boolean state = lastOnline;
+        if (newPanel != null && state != null) {
+            boolean logIt = screenMarkerPending;
+            screenMarkerPending = false;
+            newPanel.onPcState(state, logIt);
+        }
     }
 
     /**
@@ -123,6 +175,7 @@ public final class PanelService extends Service implements PcPoller.Listener {
     @Override
     public void onCreate() {
         super.onCreate();
+        instance = this;
         createNotificationChannel();
 
         PowerManager power = getSystemService(PowerManager.class);
@@ -160,10 +213,15 @@ public final class PanelService extends Service implements PcPoller.Listener {
     @Override
     public void onDestroy() {
         poller.stop();
+        releaseOfflineWakeLock();
+        instance = null;
+        super.onDestroy();
+    }
+
+    private void releaseOfflineWakeLock() {
         if (offlineWakeLock.isHeld()) {
             offlineWakeLock.release();
         }
-        super.onDestroy();
     }
 
     /** Started, never bound — see the note on {@link #panel}. */
@@ -178,13 +236,14 @@ public final class PanelService extends Service implements PcPoller.Listener {
      * <p>Order matters, and it is: marker, then wake lock, then the window,
      * then the front. The wake lock is taken <em>before</em> the screen is
      * allowed to go out, so there is no window in which the device may suspend
-     * with nothing holding it; and released <em>after</em> the Activity has
-     * been asked forward, so the wake itself cannot be cut short by the CPU
-     * going down between the two calls.
+     * with nothing holding it. It is <em>not</em> dropped here on the way back
+     * up — that waits for proof the window is actually visible, in
+     * {@link #panelVisible()}.
      */
     @Override
     public void onPcState(boolean online) {
         Log.i(Markers.TAG, Markers.state(online));
+        lastOnline = online;
 
         if (!online && !offlineWakeLock.isHeld()) {
             offlineWakeLock.acquire();
@@ -192,14 +251,15 @@ public final class PanelService extends Service implements PcPoller.Listener {
 
         Panel target = panel;
         if (target != null) {
-            target.onPcState(online);
+            target.onPcState(online, true);
+        } else {
+            // No window to act on it. Whoever registers next owns this
+            // transition, marker included.
+            screenMarkerPending = true;
         }
 
         if (online) {
             bringPanelToFront();
-            if (offlineWakeLock.isHeld()) {
-                offlineWakeLock.release();
-            }
         }
     }
 
@@ -240,11 +300,18 @@ public final class PanelService extends Service implements PcPoller.Listener {
     }
 
     private Notification buildNotification() {
+        // NEW_TASK as well as REORDER_TO_FRONT: a PendingIntent starts its
+        // activity from outside any activity context, and with no task left to
+        // reorder — the app was killed, or the card was swiped away while the
+        // service kept running — REORDER_TO_FRONT alone has nothing to act on.
+        // This notification is the one way a human can reach a panel whose
+        // screen is dark, so it has to work in exactly that case.
         PendingIntent open = PendingIntent.getActivity(
                 this,
                 0,
                 new Intent(this, MainActivity.class)
-                        .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                                | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
                 PendingIntent.FLAG_IMMUTABLE);
 
         return new Notification.Builder(this, CHANNEL_ID)
@@ -261,8 +328,41 @@ public final class PanelService extends Service implements PcPoller.Listener {
         context.startForegroundService(new Intent(context, PanelService.class));
     }
 
-    /** Stops it, when the panel is genuinely going away rather than pausing. */
-    public static void stop(Context context) {
-        context.stopService(new Intent(context, PanelService.class));
+    /**
+     * Stops the service when the panel is genuinely going away — but only if no
+     * other window has claimed it in the meantime.
+     *
+     * <p>The same argument as {@link #clearPanel}, and it needs the same care. A
+     * departing Activity's {@code onDestroy} can run after its replacement's
+     * {@code onCreate} has already called {@link #start}; an unguarded {@code
+     * stopService} there would tear down the service the live window just
+     * started, and nothing would restart it. The panel would then never notice
+     * the PC again — no marker, no crash, just a page that stopped changing.
+     */
+    public static void stopIfUnclaimed(Context context) {
+        if (panel == null) {
+            context.stopService(new Intent(context, PanelService.class));
+        }
+    }
+
+    /**
+     * Called when the panel's window actually has focus, which is the first
+     * moment anything can be sure the display is on.
+     *
+     * <p>This is where the offline wake lock is dropped, rather than at the
+     * {@code startActivity} that asked for the wake. {@code startActivity} only
+     * hands the request to the ActivityManager and returns — the resume, and
+     * with it {@code setTurnScreenOn}, happen afterwards — so releasing there
+     * would drop the app's only claim on the CPU while the wake was still in
+     * flight. It also matters in the failure MIUI actually produces: if "Show on
+     * Lock screen" is denied the window never comes up, and holding the lock is
+     * what keeps the poll loop alive to try again rather than letting the device
+     * suspend with the PC plainly on.
+     */
+    public static void panelVisible() {
+        PanelService service = instance;
+        if (service != null && Boolean.TRUE.equals(lastOnline)) {
+            service.releaseOfflineWakeLock();
+        }
     }
 }
