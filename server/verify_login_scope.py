@@ -165,6 +165,14 @@ def parse_schtasks_xml(text):
             _text(root, "Settings/StopIfGoingOnBatteries")
         ),
         "enabled": _xml_bool(_text(root, "Settings/Enabled")),
+        # The raw text alongside the bool, because absent and unparsable are
+        # different answers and _xml_bool flattens both to None.
+        "enabled_raw": _text(root, "Settings/Enabled"),
+        # A trigger carries its own Enabled, independent of Settings/Enabled.
+        # Turning just the trigger off in the Task Scheduler UI leaves the task
+        # "enabled" and stops it ever firing at logon.
+        "trigger_enabled": _xml_bool(_text(root, "Triggers/LogonTrigger/Enabled")),
+        "trigger_enabled_raw": _text(root, "Triggers/LogonTrigger/Enabled"),
         "command": _text(root, "Actions/Exec/Command"),
     }
 
@@ -233,14 +241,40 @@ def check_windows_task(task):
     # on Windows 11, disabled and re-enabled, where the element appeared and
     # vanished accordingly. Reporting absent as UNKNOWN made every correctly
     # enabled task come back as exit 2.
-    enabled = task.get("enabled")
-    checks.append(Check(
-        "windows.task.enabled",
-        FAIL if enabled is False else PASS,
-        "Settings/Enabled=(absent, which the Task Scheduler writes for enabled)"
-        if enabled is None else f"Settings/Enabled={enabled}",
+    #
+    # Text that is present and not a boolean is neither of those: it is this
+    # parser not understanding the task, which is what UNKNOWN is for.
+    checks.append(_enabled_check(
+        "windows.task.enabled", task.get("enabled"), task.get("enabled_raw"),
+        absent="Settings/Enabled=(absent, which the Task Scheduler writes for enabled)",
+        label="Settings/Enabled",
+        why="",
+    ))
+
+    # The trigger's own switch. Settings/Enabled says nothing about it, so a
+    # task can be enabled, correct in every other field, and still never fire.
+    checks.append(_enabled_check(
+        "windows.task.trigger-enabled",
+        task.get("trigger_enabled"), task.get("trigger_enabled_raw"),
+        absent="the LogonTrigger has no Enabled element, which is the enabled default",
+        label="LogonTrigger/Enabled",
+        why=" -- a disabled trigger never fires at logon, however healthy the rest is",
     ))
     return checks
+
+
+def _enabled_check(name, value, raw, absent, label, why):
+    """Pure: the three-way answer an Enabled element can give.
+
+    Absent means the Task Scheduler's default, which is on. Present and
+    boolean means what it says. Present and anything else means this parser
+    does not understand the task, and saying so is the whole point of UNKNOWN.
+    """
+    if raw is None:
+        return Check(name, PASS, absent)
+    if value is None:
+        return Check(name, UNKNOWN, f"{label}={raw!r} is not a boolean")
+    return Check(name, PASS if value else FAIL, f"{label}={value}{'' if value else why}")
 
 
 # --------------------------------------------------------------------------
@@ -841,7 +875,10 @@ def read_registry_autologin():
     try:
         import winreg
     except ImportError:
-        return missing("winreg is unavailable off Windows")
+        # unreadable, not missing: MISSING now means "the value is definitely
+        # not set", and that passes. Having no way to look at all is the
+        # opposite of knowing, and this file fails closed.
+        return unreadable("winreg is unavailable, so the registry cannot be read")
     try:
         with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _WINLOGON_KEY) as key:
             value, _ = winreg.QueryValueEx(key, "AutoAdminLogon")
@@ -1117,14 +1154,33 @@ def self_test_cases():
         "windows.task.batteries": FAIL,
         "windows.task.stop-on-battery": FAIL,
         "windows.task.enabled": PASS,
+        # The bad fixture's trigger is a BootTrigger, so there is no
+        # LogonTrigger/Enabled to read -- absent, which is the default and a
+        # pass. The BootTrigger itself is what logon-trigger already fails on.
+        "windows.task.trigger-enabled": PASS,
     }))
 
     cases.append(("schtasks enabled absent is a pass",
-                  statuses(check_windows_task(dict(good, enabled=None)))["windows.task.enabled"],
-                  PASS))
+                  statuses(check_windows_task(dict(good, enabled=None, enabled_raw=None)))
+                  ["windows.task.enabled"], PASS))
     cases.append(("schtasks enabled false fails",
                   statuses(check_windows_task(dict(good, enabled=False)))["windows.task.enabled"],
                   FAIL))
+    cases.append(("schtasks enabled garbage is unknown, not a pass",
+                  statuses(check_windows_task(dict(good, enabled=None, enabled_raw="yes")))
+                  ["windows.task.enabled"], UNKNOWN))
+    # A task can be enabled and still never fire: the trigger has its own
+    # switch, and the Task Scheduler UI can turn off just that one.
+    cases.append(("schtasks good: trigger is enabled",
+                  statuses(check_windows_task(good))["windows.task.trigger-enabled"], PASS))
+    cases.append(("schtasks disabled trigger fails",
+                  statuses(check_windows_task(
+                      dict(good, trigger_enabled=False, trigger_enabled_raw="false")))
+                  ["windows.task.trigger-enabled"], FAIL))
+    cases.append(("schtasks absent trigger switch is a pass",
+                  statuses(check_windows_task(
+                      dict(good, trigger_enabled=None, trigger_enabled_raw=None)))
+                  ["windows.task.trigger-enabled"], PASS))
 
     absent = parse_schtasks_xml(fixture("windows_schtasks_absent.txt"))
     cases.append(("schtasks absent: found", absent["found"], False))

@@ -32,6 +32,7 @@ param(
     [string] $Config,
     [string] $LogFile,
     [switch] $Firewall,
+    [switch] $FirewallOnly,
     [switch] $NoStart,
     [switch] $Uninstall
 )
@@ -60,6 +61,55 @@ function Stop-WithError {
     Write-Host ''
     Write-Host "install_task.ps1: $Message" -ForegroundColor Red
     exit $Code
+}
+
+function Resolve-AbsolutePath {
+    <#
+        A relative path is resolved against the *shell's* current directory,
+        which is where the caller typed it, and then stored absolute.
+
+        Both halves matter. Stored relative, the pre-flight would check the
+        path against the shell's cwd while the task resolved it against
+        WorkingDirectory = the repo root, so every check could pass and the
+        server still fail at the next login -- under pythonw, with no console,
+        and for -LogFile before stdout is even redirected, so not even a log
+        to explain it. server.py's config_search_paths states the contract
+        this keeps: every launcher passes an absolute --config, so cwd never
+        matters. It also stops Split-Path -Parent returning the empty string
+        for a bare filename, which is a terminating error here.
+    #>
+    param([string] $Path)
+    $base = (Get-Location -PSProvider FileSystem).ProviderPath
+    return [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($base, $Path))
+}
+
+function Get-ConfiguredPort {
+    param([string] $Path)
+    $port = 8777
+    try {
+        $parsed = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($parsed.PSObject.Properties.Name -contains 'port') { $port = [int] $parsed.port }
+    } catch {
+        Write-Warning "could not read the port out of $Path; assuming $port."
+    }
+    return $port
+}
+
+function New-DeskPanelFirewallRule {
+    param([int] $Port)
+    if (-not (Test-Elevated)) {
+        Stop-WithError (
+            'creating the firewall rule needs an elevated shell. The task itself ' +
+            'needs no admin, so do not re-run the whole installer elevated -- that ' +
+            'would re-register it for whichever account elevated. From an elevated ' +
+            'PowerShell run only: server\install_task.ps1 -FirewallOnly')
+    }
+    if ($null -ne (Get-NetFirewallRule -DisplayName $FirewallRuleName -ErrorAction SilentlyContinue)) {
+        Remove-NetFirewallRule -DisplayName $FirewallRuleName
+    }
+    New-NetFirewallRule -DisplayName $FirewallRuleName -Direction Inbound -Action Allow `
+        -Protocol TCP -LocalPort $Port -Profile Private | Out-Null
+    Write-Note "created the inbound rule for TCP $Port on the Private profile."
 }
 
 function Test-Elevated {
@@ -386,6 +436,22 @@ if ($Uninstall) {
     exit 0
 }
 
+# The firewall rule is the one step that needs admin, and it must be reachable
+# without re-running the registration. Elevating the whole installer re-runs
+# Register-ScheduledTask as whoever elevated: where the desk user is standard
+# and UAC asks for a separate administrator, that silently replaces a correct
+# task with one triggered by the admin's logon, so the panel lights for the
+# wrong person and never for the right one.
+if ($FirewallOnly) {
+    Write-Step 'Firewall rule only -- not touching the Scheduled Task'
+    if ([string]::IsNullOrWhiteSpace($Config)) {
+        $Config = Join-Path (Join-Path $RepoRoot 'server') 'config.json'
+    }
+    $Config = Resolve-AbsolutePath $Config
+    New-DeskPanelFirewallRule -Port (Get-ConfiguredPort -Path $Config)
+    exit 0
+}
+
 # -- refuse anything of system scope ---------------------------------------
 Write-Step 'Checking the scope this will run in'
 
@@ -424,6 +490,7 @@ Write-Step 'Validating the configuration'
 if ([string]::IsNullOrWhiteSpace($Config)) {
     $Config = Join-Path (Join-Path $RepoRoot 'server') 'config.json'
 }
+$Config = Resolve-AbsolutePath $Config
 if (-not (Test-Path -LiteralPath $Config -PathType Leaf)) {
     Stop-WithError (
         "there is no $Config. Create it first:`n" +
@@ -440,18 +507,29 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Note ($configOutput | Out-String).Trim()
 
-$port = 8777
-try {
-    $parsedConfig = Get-Content -LiteralPath $Config -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ($parsedConfig.PSObject.Properties.Name -contains 'port') { $port = [int] $parsedConfig.port }
-} catch {
-    Write-Warning "could not read the port out of $Config; assuming $port."
+$port = Get-ConfiguredPort -Path $Config
+
+# -- stop the previous instance --------------------------------------------
+# Before the log is rotated and before anything is registered. Left running,
+# it holds the log open so the rotation orphans the old process onto
+# server.log.1, and it keeps answering on the port -- which makes the
+# "already answers" guard below read our own stale instance as a
+# hand-started server, skip the restart, and report success while the
+# previous configuration goes on serving.
+$existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+if ($null -ne $existing -and $existing.State -eq 'Running') {
+    if ($PSCmdlet.ShouldProcess($TaskName, 'Stop-ScheduledTask')) {
+        Write-Note 'stopping the previously installed task before replacing it.'
+        Stop-ScheduledTask -TaskName $TaskName
+        Start-Sleep -Seconds 2
+    }
 }
 
 # -- log file --------------------------------------------------------------
 if ([string]::IsNullOrWhiteSpace($LogFile)) {
     $LogFile = Join-Path (Join-Path $env:LOCALAPPDATA 'desk-panel') 'server.log'
 }
+$LogFile = Resolve-AbsolutePath $LogFile
 $logDirectory = Split-Path -Parent $LogFile
 if (-not (Test-Path -LiteralPath $logDirectory)) {
     New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
@@ -507,8 +585,14 @@ if (-not $NoStart) {
     Write-Step 'Starting it now'
     & $interpreter.Python $ProbePy --host 127.0.0.1 --port $port --expect up | Out-Null
     if ($LASTEXITCODE -eq 0) {
-        Write-Note "something already answers on port $port -- leaving it alone."
-        Write-Note 'A hand-started server would make the task die with EADDRINUSE.'
+        # Our own previous instance was stopped above, so whatever is still
+        # holding the port is somebody else's -- a hand-started server, most
+        # likely. Starting the task on top of it would just make it die with
+        # EADDRINUSE, since allow_reuse_address is off on Windows.
+        Write-Warning "something else already answers on port $port -- not starting the task."
+        Write-Note 'Stop it and run Start-ScheduledTask desk-panel, or the task will'
+        Write-Note "die with EADDRINUSE at the next login. Nothing you see on $port"
+        Write-Note 'right now is being served by the task this script just registered.'
     } else {
         Start-ScheduledTask -TaskName $TaskName
         Start-Sleep -Seconds 3
@@ -526,18 +610,15 @@ Write-Step 'Firewall'
 
 $rule = Get-NetFirewallRule -DisplayName $FirewallRuleName -ErrorAction SilentlyContinue
 if ($Firewall) {
-    if (-not (Test-Elevated)) {
-        Stop-WithError (
-            'creating the firewall rule needs an elevated shell. The task itself ' +
-            'is already installed and needs no admin: re-run an elevated ' +
-            'PowerShell with -Firewall -NoStart.')
-    }
-    if ($null -ne $rule) { Remove-NetFirewallRule -DisplayName $FirewallRuleName }
-    New-NetFirewallRule -DisplayName $FirewallRuleName -Direction Inbound -Action Allow `
-        -Protocol TCP -LocalPort $port -Profile Private | Out-Null
-    Write-Note "created the inbound rule for TCP $port on the Private profile."
+    New-DeskPanelFirewallRule -Port $port
 } elseif ($null -eq $rule) {
-    Write-Note "no firewall rule named '$FirewallRuleName'. From an elevated PowerShell:"
+    Write-Note "no firewall rule named '$FirewallRuleName'. From an elevated PowerShell,"
+    Write-Note 'run only this -- not the whole installer, which would re-register the'
+    Write-Note 'task for whichever account elevated:'
+    Write-Host ""
+    Write-Host "    server\install_task.ps1 -FirewallOnly"
+    Write-Host ""
+    Write-Note 'or, by hand:'
     Write-Host ""
     Write-Host "    New-NetFirewallRule -DisplayName `"$FirewallRuleName`" -Direction Inbound -Action Allow ``"
     Write-Host "      -Protocol TCP -LocalPort $port -Profile Private"

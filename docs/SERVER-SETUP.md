@@ -75,9 +75,18 @@ task pointing there works until that unrelated project is deleted, then fails at
 with no console to say so. A Microsoft Store alias is rejected outright, for the same class of
 reason: it opens the Store instead of starting the server. The script prints which source won.
 
-Other switches: `-Python <path>` to pin the interpreter, `-Firewall` to also create the rule
-(needs elevation), `-NoStart` to register without starting it, `-WhatIf` to see what it would
-do, and `-Uninstall` to remove the task — which leaves `config.json` and the logs alone.
+Other switches: `-Python <path>` to pin the interpreter, `-NoStart` to register without
+starting it, `-WhatIf` to see what it would do, and `-Uninstall` to remove the task — which
+leaves `config.json` and the logs alone. Relative `-Config` and `-LogFile` are resolved
+against your current directory and stored absolute, because the task itself runs with the
+repository root as its working directory.
+
+**Do not run the whole installer elevated to get the firewall rule.** It would re-register
+the task for whichever account elevated: where the desk user is a standard user and UAC asks
+for a separate administrator, the panel would then light when the admin logs in and never
+when you do. Use `-FirewallOnly` from an elevated shell, which creates the rule and does not
+touch the task at all. (`-Firewall` does both, and is only right when your own account is
+the administrator.)
 
 `pythonw` has no console, so the server's output goes to
 `%LOCALAPPDATA%\desk-panel\server.log`. Read that first when the panel says offline and the task
@@ -105,8 +114,8 @@ Set-NetConnectionProfile -InterfaceAlias "Ethernet" -NetworkCategory Private
 ```
 
 Do not widen the rule to the Public profile instead. LAN-only is the assumption the missing
-authentication rests on. `install_task.ps1` reports both of these and creates neither unless you
-pass `-Firewall` from an elevated shell.
+authentication rests on. `install_task.ps1` reports both of these and creates neither on its
+own; `-FirewallOnly`, from an elevated shell, creates the rule and nothing else.
 
 ## Static IP
 
