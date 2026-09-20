@@ -80,3 +80,41 @@ body {
 :root[data-panel="dark"] body *::after {
     animation-play-state: paused !important;
 }
+
+/* --- The burn-in shift, and it is not the theme's to remember ------------- *
+ *
+ * The panel is one unchanging layout on an AMOLED for every hour the PC is on,
+ * which is the case ADR 0008 names: an OLED pixel ages by how long it has been
+ * lit, so the clock's glyph edges, the card borders and the card titles are
+ * the things at risk. The ground is #000000 and those pixels are physically
+ * off, so what is left to protect is the ink -- and the cheap way to protect
+ * it is to keep moving it.
+ *
+ * js/format.js decides how far and how often (offsetFor, a pure function of
+ * the clock, tested); js/host.js writes the answer into these two properties
+ * once a second; this is the one rule that spends them.
+ *
+ * Core rather than per-theme, and for the same reason the blackout above it
+ * is: it is the page's half of a promise about hardware, and a theme that
+ * forgot it would look perfectly fine and quietly etch the display.
+ *
+ * `body > *` rather than `body`, and the difference is load-bearing. `body` is
+ * exactly the viewport, so translating it would move its own edges off the
+ * screen; its children sit inside the theme's padding and have room. It also
+ * keeps the shift out of the theme's way -- every element the theme built
+ * moves together, so nothing inside a card changes its position relative to
+ * anything else and no measurement in e2e/layout means something different
+ * because of it.
+ *
+ * The offsets are never positive, which format.js explains and this rule
+ * depends on: content pushed past the bottom or right edge becomes the
+ * document's scrollable overflow, and a panel that can scroll is a panel with
+ * somewhere to hide a row.
+ *
+ * No `will-change`. It would ask for a compositor layer and hold it for the
+ * life of the panel, for a property that changes once every four minutes --
+ * which is the bargain T6.6 already refused for the scroll's own transform.
+ */
+body > * {
+    transform: translate(var(--burn-in-x, 0px), var(--burn-in-y, 0px));
+}

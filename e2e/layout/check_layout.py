@@ -137,8 +137,105 @@ def connect():
     return None
 
 
+# Stop the page's own timers before measuring.
+#
+# mock.js pushes a payload every 3s on a file: page and js/app.js repaints the
+# clock every second, and the burn-in sweep below cannot outrun either: it sets
+# the clock to a chosen minute and then takes two more round trips to measure,
+# by which time app.js has put the real time -- and the real offset -- back.
+# Clearing every interval id is blunt and is the only handle available; both
+# other browser checks in this directory do the same thing for the same reason.
+#
+# It happens after the prelude, so the payload under measurement is already on
+# screen, and the sweep re-delivers it at every offset anyway.
+FREEZE = "for (let i = 1; i < 10000; i += 1) { clearInterval(i); }"
+
+# The instant the page's clock is pinned to before anything is measured.
+#
+# Monday 23 February 2026, 12:00 local. The date is not arbitrary: it is the
+# longest `toLocaleDateString('pt-BR', {weekday, year, month, day})` in 2026 --
+# "segunda-feira, 23 de fevereiro de 2026", 38 characters -- and that string is
+# what the stress pass draws into #date, because pt-BR is what the phone
+# actually renders. Until this, that pass measured *today's* date, so the
+# widest case was measured on the days it happened to be the widest case and
+# the harness was a little different every morning.
+#
+# Midday, so the whole burn-in sweep below stays inside one day and #date does
+# not change length underneath the measurements.
+PINNED = (2026, 2, 23, 12, 0, 0)
+
+# Pin it. Everything on this page that asks the time asks `new Date()`:
+# js/app.js's clock, the burn-in shift through it, stress.js's pt-BR date. One
+# of them -- the clock js/app.js repaints when a payload arrives -- runs inside
+# the prelude, which is why setting the offset and then delivering a payload
+# put the panel straight back where the wall clock said it should be, and why
+# the first cut of this sweep measured seven positions and reported one.
+#
+# `Fixed.prototype = Real.prototype` matters: the pinned constructor has to
+# produce real Dates, or `instanceof Date` and every method on them stops
+# working for the page. The original is kept on window so a second call
+# re-pins rather than wrapping the wrapper.
+PIN_CLOCK = """
+if (!window.__realDate) { window.__realDate = window.Date; }
+const Real = window.__realDate;
+const at = %d;
+const Fixed = function (...args) { return args.length ? new Real(...args) : new Real(at); };
+Fixed.now = function () { return at; };
+Fixed.parse = Real.parse;
+Fixed.UTC = Real.UTC;
+Fixed.prototype = Real.prototype;
+window.Date = Fixed;
+return at;
+"""
+
+# Where the panel actually is, and what core asked for.
+#
+# `body.firstElementChild` is the theme's own outermost element, which is what
+# css/style.css translates -- every theme has one and none of them is named
+# here, the same rule the rest of this harness follows.
+# `new window.Date()` and not `new Date()`: this script runs in Marionette's own
+# sandbox, which has its own globals, so a bare `new Date()` here is built from
+# the *harness's* Date and reads the wall clock however carefully the page's one
+# has been pinned. That cost a debugging session -- seven positions measured,
+# one offset reported, and the page perfectly correct throughout. It is the same
+# cross-realm trap that made `instanceof Date` the wrong guard in offsetFor.
+BURN_IN_AT = ("window.DeskPanel.tick(new window.Date());"
+              "const s = document.documentElement.style;"
+              "const r = document.body.firstElementChild.getBoundingClientRect();"
+              "return [parseFloat(s.getPropertyValue('--burn-in-x')) || 0,"
+              "        parseFloat(s.getPropertyValue('--burn-in-y')) || 0,"
+              "        r.left, r.top];")
+
+
+def pinned_ms(m, step_minutes, index):
+    """The pinned instant advanced by `index` burn-in steps, as epoch ms.
+
+    Computed in the page rather than in Python: offsetFor counts steps from the
+    epoch, so the number that selects a position is a UTC instant, and the page
+    is the only thing here that knows what local time the panel is running in.
+    """
+    year, month, day, hour, minute, second = PINNED
+    return m.script("return new (window.__realDate || Date)(%d, %d, %d, %d, %d, %d)"
+                    ".getTime() + %d;"
+                    % (year, month - 1, day, hour, minute, second,
+                       index * step_minutes * 60 * 1000))
+
+
 def run(url, passes, viewport, extra_css, shot_dir, shot_tag=""):
     """One browser, every pass. Returns {pass name: measurement}.
+
+    Each pass is measured once per position in the burn-in cycle (T6.2), not
+    once. The panel shifts a few pixels every four minutes so that one
+    unchanging layout does not etch itself into an AMOLED, which means a
+    harness that measured whatever the wall clock happened to be showing would
+    check the worst position one run in seven -- and a card that only escapes
+    the viewport at (-4,-3) would be a check that fails on a Tuesday. The sweep
+    makes it a certainty instead.
+
+    The first measurement of each pass is the one reported and screenshotted,
+    and it is taken at a pinned clock rather than at the real one: the stress
+    pass forces #clock to 23:59:59 precisely so its PNG is comparable between
+    runs, and a shift that moved with the minute would have taken that away.
 
     `shot_tag` goes in the screenshot filename. Without it a --theme run
     overwrites the default run's PNGs in the same directory, which is exactly
@@ -170,15 +267,40 @@ def run(url, passes, viewport, extra_css, shot_dir, shot_tag=""):
             time.sleep(SETTLE_SECONDS)
             if prelude:
                 m.script(read_js(prelude))
-            result = m.script(measure)
-            result["_outer_window"] = list(outer)
-            results[name] = result
-            if shot_dir:
-                png = m.cmd("WebDriver:TakeScreenshot", {"full": False, "hash": False})["value"]
-                path = os.path.join(shot_dir, "layout-%s%s.png" % (shot_tag, name))
-                with open(path, "wb") as f:
-                    f.write(base64.b64decode(png))
-                result["_screenshot"] = path
+
+            m.script(FREEZE)
+            schedule = m.script("return window.burnInSchedule();")
+            shifted = []
+            for i in range(len(schedule["offsets"])):
+                m.script(PIN_CLOCK % pinned_ms(m, schedule["stepMinutes"], i))
+                x, y, left, top = m.script(BURN_IN_AT)
+                # The prelude again, because the tick above repaints the clock
+                # and the date -- and the stress pass exists partly to measure
+                # the widest possible clock and a pt-BR date, which it writes
+                # into the DOM itself. Without this the sweep would quietly
+                # measure a narrower panel than the pass is named for. It is
+                # safe to re-run only because the clock is pinned: the payload
+                # it delivers repaints the clock, which is what used to put the
+                # panel back at the wall clock's offset.
+                if prelude:
+                    m.script(read_js(prelude))
+                result = m.script(measure)
+                result["_outer_window"] = list(outer)
+                result["_offset"] = [x, y]
+                result["_anchor"] = [left, top]
+                if i == 0:
+                    results[name] = result
+                    if shot_dir:
+                        png = m.cmd("WebDriver:TakeScreenshot",
+                                    {"full": False, "hash": False})["value"]
+                        path = os.path.join(shot_dir,
+                                            "layout-%s%s.png" % (shot_tag, name))
+                        with open(path, "wb") as f:
+                            f.write(base64.b64decode(png))
+                        result["_screenshot"] = path
+                else:
+                    shifted.append(result)
+            results[name]["_shifted"] = shifted
     finally:
         proc.terminate()
         try:
@@ -254,11 +376,70 @@ def failures(result, viewport, expect_scroll=False):
     return bad
 
 
+def burn_in(result, viewport, already):
+    """The burn-in sweep's findings, which the single measurement cannot have.
+
+    Two questions, and the first is the one that keeps the second honest:
+
+      1. does core's offset actually reach the glass? The panel is moved by two
+         custom properties on <html> and one rule in css/style.css, and if
+         either goes the sweep below still runs, still measures seven times,
+         and still reports a pass -- having measured one position seven times.
+         So every position is checked against where the panel actually went.
+      2. does the panel still fit at every position? This is the reason the
+         sweep exists. A card 3px clear of the bottom edge at (0,0) is off it
+         at (0,-4)... in the other direction, and a card 3px clear of the top
+         is the one to worry about -- either way, measuring one position out of
+         seven turns a layout bug into a check that fails on a Tuesday.
+
+    `already` is what the reported position failed on, so a fault present at
+    every offset -- a card that does not fit at all -- is said once rather than
+    seven times.
+    """
+    bad = []
+    shifted = result.get("_shifted", [])
+    if not shifted:
+        return ["the burn-in cycle has one position in it, so this pass measured the "
+                "panel where it always is and said nothing about where it goes "
+                "(web/js/format.js, BURN_IN_OFFSETS)"]
+
+    base_offset = result["_offset"]
+    base_anchor = result["_anchor"]
+    moves = False
+    for other in shifted:
+        asked = [other["_offset"][i] - base_offset[i] for i in (0, 1)]
+        went = [other["_anchor"][i] - base_anchor[i] for i in (0, 1)]
+        if asked != [0, 0]:
+            moves = True
+        if any(abs(a - w) > 0.5 for a, w in zip(asked, went)):
+            bad.append(
+                "the burn-in shift is not reaching the panel: core moved from %s to %s, "
+                "which is (%+d,%+d), and the panel moved (%+.1f,%+.1f). The rule that "
+                "spends --burn-in-x/--burn-in-y is in web/css/style.css"
+                % (tuple(base_offset), tuple(other["_offset"]),
+                   asked[0], asked[1], went[0], went[1]))
+        for line in failures(other, viewport):
+            if line not in already and line not in bad:
+                bad.append("at burn-in offset (%d,%d): %s"
+                           % (other["_offset"][0], other["_offset"][1], line))
+
+    if not moves:
+        bad.append(
+            "every position in the burn-in cycle is the same offset, so the panel "
+            "never moves and nothing is protecting the display (web/js/format.js, "
+            "offsetFor)")
+    return bad
+
+
 def report(name, result, bad):
     print("  pass %r  viewport %dx%d (outer window %dx%d)"
           % (name, result["viewport"][0], result["viewport"][1],
              result["_outer_window"][0], result["_outer_window"][1]))
     print("    document %dx%d" % tuple(result["doc"]))
+    swept = [result] + result.get("_shifted", [])
+    print("    burn-in  measured at %d of the cycle's positions: %s"
+          % (len(swept),
+             " ".join("(%d,%d)" % tuple(r["_offset"]) for r in swept)))
     for section, box in sorted(result["sections"].items()):
         print("    %-9s x %4d-%-4d y %4d-%-4d  %s"
               % (section, box["left"], box["right"], box["top"], box["bottom"],
@@ -325,6 +506,7 @@ def main():
     broken = False
     for name, _, expect_scroll in passes:
         bad = failures(results[name], (width, height), expect_scroll)
+        bad += burn_in(results[name], (width, height), bad)
         report(name, results[name], bad)
         broken = broken or bool(bad)
 

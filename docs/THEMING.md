@@ -209,6 +209,65 @@ anything you animate stops on its own while the panel is dark and resumes where
 it left off — you owe that rule only the courtesy of not overriding
 `animation-play-state` on something inside a dark panel.
 
+## The burn-in shift is not yours either
+
+The panel moves. Every four minutes `js/host.js` writes a new offset into two custom
+properties on `<html>`, and `css/style.css` translates every direct child of `body` by it:
+
+```css
+body > * { transform: translate(var(--burn-in-x, 0px), var(--burn-in-y, 0px)); }
+```
+
+This device is an AMOLED showing one unchanging layout for every hour the PC is on, and an OLED
+pixel ages by how long it has been lit (ADR 0008). The ground is `#000000` and those pixels are
+physically off, so what is at risk is the ink — the clock's glyph edges, your card borders,
+your titles — and the cheap way to protect it is to keep moving it.
+
+It is core rather than yours for the same reason the blackout is: a theme that forgot it would
+look perfectly fine and quietly etch the display. You owe it three things, and they are all
+things not to do:
+
+- **Do not translate `body` or a direct child of it yourself.** `transform` does not compose by
+  accumulating — the last declaration wins — so a theme that sets one on `body > *` replaces
+  the shift with nothing. Animate something further in, as both themes' scrollers do.
+- **Leave your padding room.** The offsets reach 4px up and left, and both themes have 10–12px
+  of body padding for it to move into. A theme flush to the viewport edge would lose 4px of its
+  own margin at some positions.
+- **Do not expect it in a measurement.** Everything moves together, so nothing inside a card
+  changes position relative to anything else, and `getBoundingClientRect` is 0–4px different
+  from one minute to the next.
+
+The amplitude and the cycle are `offsetFor` in `js/format.js`, which is a pure function of the
+clock and tested as one. It is not in the list of formatters above because there is nothing for
+a theme to call: core applies it to whatever you put in the body.
+
+`check_layout.py` measures every pass at every position in the cycle, so a card that only
+escapes the viewport at one of them is a certain failure rather than a check that fails on a
+Tuesday.
+
+## Saying which value just changed, if you want to
+
+Optional, and `neon` does it: a value whose rendered text is not what it was a minute ago lifts
+toward a brighter accent for 280ms and comes back. `plain` does nothing, which is a legitimate
+answer — it has no accent to lift toward.
+
+If you do it, the rule is the one thing worth stating, because it is easy to get backwards and
+invisible when you do. **Key it on the value, never on the refresh.** `window.onData` replaces
+every row in every card about once a minute whether or not a single number moved, so a theme
+that flashed on arrival would look perfect in a browser — where `mock.js` jitters every price
+every three seconds — and would flash the entire panel once a minute on the desk with the
+upstream down, while `STALE` sat in the corner saying nothing had moved.
+
+`neon` compares against the text the row is showing, read out of the markup a moment before it
+is replaced, rather than keeping a table of its own: a symbol dropped from the PC's config
+leaves nothing behind, and a theme switch — which empties the root — starts with no history
+instead of pulsing the whole panel at once.
+
+`check_pulse.py` asserts all three of those (nothing on a fresh mount, only the changed value
+on a refresh, nothing at all on an identical payload) and that the pass is over inside ~300ms.
+Run it for a theme that pulses; a theme that does not will fail its second question, which is
+the only way that file can still fail when the feature is deleted.
+
 **Neither of your functions is called while the panel is dark.** `tick` stops,
 and a payload that arrives meanwhile is held rather than rendered — the data
 poller keeps running under the thermal cutoff, because the Activity stays in the
@@ -228,6 +287,7 @@ node --test "web/test/**/*.test.js"          # format.js, which you did not chan
 python e2e/layout/check_layout.py --theme <name>
 python e2e/layout/check_blackout.py --theme <name>
 python e2e/layout/check_scroll.py --theme <name>
+python e2e/layout/check_pulse.py --theme <name>    # only if your theme pulses
 ```
 
 The layout check drives a real browser at 872x392 — the phone's actual

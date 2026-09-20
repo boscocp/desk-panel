@@ -161,13 +161,56 @@
     // directions. See formatRate in format.js.
     function renderList(list, items, labelField, valueField, currency,
                         format = formatPrice, formatLabel = (label) => label) {
+        const before = shownPrices(list.scroller);
         list.scroller.textContent = '';
         for (const item of items) {
-            list.scroller.appendChild(
-                renderRow(formatLabel(item[labelField], currency), item[valueField],
-                          currency, item.changePct, format, item.history));
+            const row = renderRow(formatLabel(item[labelField], currency), item[valueField],
+                                  currency, item.changePct, format, item.history);
+            // The row's own identity, and the only reason it is in the DOM: the
+            // rows are thrown away and rebuilt on every payload, so the copy
+            // that knows what PETR4 last cost is the one about to be deleted.
+            // Reading it back out of the markup rather than keeping a Map here
+            // means the record prunes itself -- a ticker removed from the PC's
+            // config leaves nothing behind -- and means a theme swap, which
+            // empties the root, starts with no history rather than with a
+            // minute-old one that would pulse the whole panel at once.
+            row.dataset.key = String(item[labelField]);
+            pulseIfChanged(row.querySelector('.price'), before.get(row.dataset.key));
+            list.scroller.appendChild(row);
         }
         applyScroll(list, items.length);
+    }
+
+    // What each row in this list is showing at the moment, keyed by symbol or
+    // pair. Called immediately before the rows are replaced.
+    function shownPrices(scroller) {
+        const seen = new Map();
+        for (const row of scroller.children) {
+            const price = row.querySelector('.price');
+            if (row.dataset.key && price) {
+                seen.set(row.dataset.key, price.textContent);
+            }
+        }
+        return seen;
+    }
+
+    // T6.2 step 2: a value that changed lifts toward --accent-hi for 280ms.
+    //
+    // The comparison is against the *rendered string*, not against the number
+    // behind it, and that is deliberate on a panel: a price that moved by less
+    // than the two decimals it is drawn with has not changed anything anybody
+    // can see, and flashing it would be the panel claiming news it is not
+    // showing.
+    //
+    // `undefined` means there was no row under this key a moment ago -- a first
+    // render, a new ticker, a theme that has just been switched in. A new row
+    // does not pulse: the whole panel arriving is not news about any one value,
+    // and a panel that flashed every number on every wake from the blackout
+    // would flash every number every morning.
+    function pulseIfChanged(node, previous) {
+        if (node && previous !== undefined && previous !== node.textContent) {
+            node.classList.add('pulse');
+        }
     }
 
     // The theme's half of T6.6: measure, ask format.js whether that is an
@@ -303,6 +346,11 @@
     // whatever room is left under the title. Four children would each take an
     // auto margin and the group would come apart down the card.
     function renderWeather(weather) {
+        // Read before the card is emptied, for the same reason the lists read
+        // theirs: the only record of what the panel was showing is the markup
+        // that is about to be thrown away.
+        const shownTemp = els.weather.querySelector('.w-temp');
+        const before = shownTemp ? shownTemp.textContent : undefined;
         els.weather.textContent = '';
         if (!weather) {
             return;
@@ -314,6 +362,11 @@
 
         const temp = el('div', null, 'w-temp');
         temp.textContent = `${formatTemp(weather.tempC)}°C`;
+        // The only value outside the lists worth a pulse. It is the second
+        // largest number on the panel and the server refreshes it on its own
+        // clock, so it can change on a cycle where nothing else did -- which is
+        // exactly the case a reader would otherwise miss.
+        pulseIfChanged(temp, before);
         const main = el('div', null, 'w-main');
         const glyph = renderGlyph(weatherGlyph(weather.code));
         main.append(...(glyph ? [glyph] : []), temp);

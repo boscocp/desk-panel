@@ -137,11 +137,80 @@ judging it, so a row waiting its turn below the fold is not reported as a card e
 screen — scoped to `[data-scroll]` deliberately, because clipping every rect against every
 `overflow: hidden` ancestor would quietly gut the "outside the viewport" question.
 
+## Every pass is measured seven times, once per burn-in position
+
+T6.2 made the panel move. It shifts a few pixels every four minutes so that one unchanging
+layout does not etch itself into an AMOLED, which means "where is this card" now has seven
+answers and a harness that took one of them would be checking the worst case one run in
+seven. A card that only escapes the viewport at `(-4,-3)` would have been a check that failed
+on a Tuesday.
+
+So each pass runs `measure.js` once per position in the cycle, and the report lists them:
+
+```
+burn-in  measured at 7 of the cycle's positions: (-4,0) (0,0) (-3,-1) (-1,-4) ...
+```
+
+Two things are asserted that a single measurement cannot be:
+
+- **the offset reaches the glass.** The shift is two custom properties on `<html>` and one
+  rule in `web/css/style.css`; if either goes, the sweep still runs, still measures seven
+  times, and would still report a pass — having measured one position seven times. Every
+  position is therefore checked against where the panel actually went.
+- **the panel moves at all.** If every position in the cycle is the same offset, nothing is
+  protecting the display, and that is a failure rather than a very stable panel.
+
+Findings already reported at the first position are not repeated for the other six: a card
+that does not fit anywhere is said once.
+
+### The clock is pinned first, and that fixed two things
+
+The sweep sets the panel's clock to a chosen minute, and a payload arriving a moment later
+repaints the clock from `new Date()` — which put the panel straight back where the wall clock
+said it should be. So the harness replaces the page's `Date` with one pinned to a fixed
+instant before it measures anything.
+
+Two consequences beyond the sweep working at all:
+
+- the `stress` pass's pt-BR date used to be **today's**, so "the widest case the panel can be
+  asked to show" was only the widest case on the days it happened to be. It is pinned to
+  Monday 23 February 2026 — `segunda-feira, 23 de fevereiro de 2026`, the longest such date
+  of the year at 38 characters.
+- the screenshots are comparable between runs again, which is what `--screenshots` is for.
+
+One trap, and it cost a debugging session: **`new Date()` inside an injected script is not the
+page's `Date`.** Marionette executes in its own sandbox with its own globals, so a bare
+`new Date()` there reads the wall clock however carefully the page's one has been pinned.
+`check_layout.py` and `stress.js` both say `new window.Date()`. It is the same cross-realm
+trap that made `instanceof Date` the wrong guard inside `offsetFor` — that one answered the
+origin for every clock the sweep handed it, and seven positions measured as one.
+
+## The other three checks in this directory
+
+`check_layout.py` measures one frame. Three siblings answer what a frame cannot, all of them
+driving the same Marionette plumbing so this is four checks and one harness:
+
+| | asks |
+|---|---|
+| `check_blackout.py` | does the panel go dark on both causes, hold what arrives, and draw it on the way back (T6.7) |
+| `check_scroll.py` | does an overflowing card keep moving across a refresh (T6.6) |
+| `check_pulse.py` | does a value pulse **only** when it changed (T6.2) |
+
+`check_pulse.py` is the one that is about a theme rather than about the panel: `neon` lifts a
+changed value toward a brighter accent for 280ms, `plain` deliberately does nothing. Run it
+for the themes that pulse. What it is really guarding is invisible here and obvious on the
+desk — `window.onData` replaces every row every minute whether or not a number moved, so a
+theme that pulsed on "a payload arrived" would look perfect in a browser whose fixture
+jitters every price, and would flash the whole panel once a minute with the upstream down and
+STALE in the corner saying nothing had moved.
+
 ## Who should use this
 
 - **T6.7** (a theme boundary) moved markup around, which is exactly what the overlap check is
   for; **T6.6** (slow scroll on overflow) is where the `overflow` pass came from.
-- **T6.2** (glow, burn-in shift) — a shift that moves pixels can move them off screen.
+- **T6.2** (glow, burn-in shift) — a shift that moves pixels can move them off screen, which
+  is why every pass is now measured at every position in the cycle. `check_pulse.py` came from
+  the same task.
 - **T6.3** (device legibility) — it raises type sizes, and its acceptance forbids any font
   under 20px. `--extra-css` will tell you whether a size still fits before you commit to it.
 - **T6.4** (night profile) — if the night profile changes any metric, re-measure.
