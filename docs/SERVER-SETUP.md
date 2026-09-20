@@ -39,12 +39,31 @@ shipped with Python since 3.11.
 ### If you already have a `config.json`
 
 Nothing to do. It is still read, exactly as before, and the server prints one line at startup
-naming the replacement. The format is chosen by the suffix, and `config.toml` wins where both
-files exist — so the migration is: copy the example, move your values across, delete the old
-file. Do it when convenient, or not at all.
+naming the replacement. Migrate when convenient, or not at all — but **how you migrate depends
+on how the server is started**, because an explicit `--config` is never second-guessed. It names
+its own file and its own format; only the fallback beside `server.py` chooses between the two
+names.
 
-An explicit `--config` or `DESK_PANEL_CONFIG` is never second-guessed: it names its own file
-and its own format. Only the fallback beside `server.py` chooses between the two names.
+**Started by hand, with no `--config`.** Copy the example, move your values across, delete the
+old file. `config.toml` wins where both exist, so the switch happens the moment the new file is
+there and deleting the old one is optional tidying.
+
+**Started by the Scheduled Task** — which is every Windows install, since `install_task.ps1`
+bakes an absolute `--config …\server\config.json` into the task action. Dropping a
+`config.toml` next to it changes nothing, and *deleting* the `config.json` breaks the panel: the
+server exits 1 at every logon, under `pythonw`, with no console to say why, and the phone
+reports offline forever — indistinguishable from the DHCP-drift failure. So:
+
+```powershell
+copy server\config.example.toml server\config.toml   # then move your values across
+powershell -ExecutionPolicy Bypass -File server\install_task.ps1
+```
+
+Re-running the installer re-registers the task against the config it now finds, `.toml` first.
+Delete the old `config.json` only after that, and only once the panel has come back.
+
+The same rule will apply to the systemd user unit and the LaunchAgent (T3.9, T3.10): whoever
+passes the path is who has to change it.
 
 ## Run it once by hand
 
@@ -98,7 +117,7 @@ reason: it opens the Store instead of starting the server. The script prints whi
 
 Other switches: `-Python <path>` to pin the interpreter, `-NoStart` to register without
 starting it, `-WhatIf` to see what it would do, and `-Uninstall` to remove the task — which
-leaves `config.json` and the logs alone. Relative `-Config` and `-LogFile` are resolved
+leaves the config file and the logs alone. Relative `-Config` and `-LogFile` are resolved
 against your current directory and stored absolute, because the task itself runs with the
 repository root as its working directory.
 

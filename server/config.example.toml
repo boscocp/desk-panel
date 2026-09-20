@@ -152,10 +152,15 @@ history_days = 30
 night_start = "22:00"
 night_end = "07:00"
 
-# Which theme renders the panel. Every theme is packaged in the APK, so
-# switching one is a restart of this server and not a reinstall of the app.
-# "neon" is the cyberpunk skin the project ships; an unknown name falls back
-# to it and says so once in the log.
+# Which theme renders the panel. **Reserved — nothing reads this yet.** T6.7
+# is the task that splits rendering into web/themes/<name>/ and makes this key
+# select between them; until it lands, changing this value does nothing at all,
+# and does not raise either. It is here now so the key, its default and its
+# meaning are settled before anything depends on them.
+#
+# Once T6.7 ships: every theme is packaged in the APK, so switching one is a
+# restart of this server and not a reinstall of the app. "neon" is the
+# cyberpunk skin the project ships.
 theme = "neon"
 
 

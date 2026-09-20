@@ -188,7 +188,7 @@ def _fallback_config_path(script_dir, exists=None):
     return candidates[0]
 
 
-def legacy_format_notice(path, example_path=None):
+def legacy_format_notice(path, explicit=False, example_path=None):
     """Pure: one line pointing a JSON config at its TOML replacement, else
     None.
 
@@ -198,6 +198,17 @@ def legacy_format_notice(path, example_path=None):
     without a token or how an FX pair is spelled. That catalogue is the
     actual deliverable of this change, and an owner who is never told the
     file exists never gets it.
+
+    **`explicit` changes the advice, and getting it wrong would be worse
+    than saying nothing.** A path that came from `--config` or
+    `DESK_PANEL_CONFIG` is never upgraded to a neighbouring `.toml` -- see
+    config_search_paths, which is deliberate -- and every installed
+    launcher passes one: `install_task.ps1` bakes an absolute
+    `--config ...\\config.json` into the Scheduled Task. So the fallback's
+    advice, "copy the example to config.toml", is a silent no-op there. The
+    owner would move their tickers and their token into a file nothing
+    reads, restart, and see the old panel with nothing to explain it.
+    Whoever passes the path has to change the path.
 
     Silent for the committed example. `config.example.json` is what T3.11's
     acceptance loads on every run, and a line nagging about a file nobody
@@ -210,12 +221,19 @@ def legacy_format_notice(path, example_path=None):
     if path.name.startswith("config.example"):
         return None
     example = EXAMPLE_CONFIG_PATH if example_path is None else example_path
-    return (
+    head = (
         f"notice: {path} is the older JSON config; it still works. The TOML "
         f"replacement is commented -- it names every key, its default, and "
-        f"which tickers, pairs and coins actually answer. Copy {example} to "
-        f"{path.with_name('config.toml')} when convenient."
+        f"which tickers, pairs and coins actually answer."
     )
+    if explicit:
+        return (
+            f"{head} Moving to it means changing the --config this server was "
+            f"started with, not just adding a file: copy {example} beside the "
+            f"old one, then re-run your launcher's installer "
+            f"(server/install_task.ps1 on Windows) so it points at the new path."
+        )
+    return f"{head} Copy {example} to {path.with_name('config.toml')} when convenient."
 
 
 def config_permission_warning(mode, platform, path=None, token=""):
@@ -791,9 +809,15 @@ def main(argv=None):
             except (AttributeError, ValueError):
                 pass
 
-    config_path = config_search_paths(
+    config_candidates = config_search_paths(
         raw_argv, os.environ, SCRIPT_DIR, exists=os.path.exists
-    )[0]
+    )
+    config_path = config_candidates[0]
+    # The script_dir fallback is always appended last and is the only entry
+    # present unconditionally, so more than one candidate means --config or
+    # DESK_PANEL_CONFIG won -- and a path someone passed can only be changed
+    # by whoever passes it. legacy_format_notice says why that matters.
+    config_is_explicit = len(config_candidates) > 1
 
     # A server that starts with silently-empty config looks healthy and
     # shows an empty panel -- worse than one that refuses to start with a
@@ -816,7 +840,7 @@ def main(argv=None):
             if warning:
                 print(warning, file=sys.stderr)
 
-    notice = legacy_format_notice(config_path)
+    notice = legacy_format_notice(config_path, explicit=config_is_explicit)
     if notice:
         print(notice, file=sys.stderr)
 

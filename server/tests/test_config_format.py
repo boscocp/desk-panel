@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 
 from server.config_format import JSON, TOML, ConfigError, format_for_path, merge, parse
-from server.server import legacy_format_notice
+from server.server import EXAMPLE_CONFIG_PATH as EXAMPLE, legacy_format_notice
 
 
 class FormatForPathTests(unittest.TestCase):
@@ -115,6 +115,26 @@ class LegacyFormatNoticeTests(unittest.TestCase):
     def test_the_notice_names_the_destination_beside_the_file_it_found(self):
         notice = legacy_format_notice(Path("/etc/desk-panel/config.json"))
         self.assertIn(str(Path("/etc/desk-panel/config.toml")), notice)
+
+    def test_an_explicit_path_is_told_that_dropping_a_file_in_is_not_enough(self):
+        # The advice for the fallback is a silent no-op for a launcher-passed
+        # path: config_search_paths never upgrades one, and install_task.ps1
+        # bakes an absolute --config into the Scheduled Task. An owner who
+        # followed it would move their tickers and their token into a file
+        # nothing reads and see the old panel with nothing to explain it.
+        notice = legacy_format_notice(Path("/etc/desk-panel/config.json"), explicit=True)
+        self.assertIn("--config", notice)
+        self.assertIn("install_task.ps1", notice)
+        # And it must not repeat the fallback's instruction, which is the
+        # part that would not work.
+        self.assertNotIn(
+            f"Copy {EXAMPLE} to {Path('/etc/desk-panel/config.toml')}", notice
+        )
+
+    def test_an_explicit_toml_path_still_gets_no_notice(self):
+        self.assertIsNone(
+            legacy_format_notice(Path("/etc/desk-panel/config.toml"), explicit=True)
+        )
 
     def test_a_toml_config_gets_no_notice(self):
         self.assertIsNone(legacy_format_notice(Path("/etc/desk-panel/config.toml")))

@@ -138,11 +138,21 @@ class ExampleFileTests(unittest.TestCase):
     def test_the_two_examples_agree_key_for_key_and_value_for_value(self):
         self.assertEqual(load_config(EXAMPLE_TOML), load_config(EXAMPLE_JSON))
 
-    def test_the_toml_example_carries_every_default_key_and_no_others(self):
+    def test_each_example_carries_every_default_key_and_no_others(self):
+        # Read raw, not through load_config. The merge fills anything missing
+        # from DEFAULT_CONFIG, so a key absent from an example is invisible to
+        # any assertion made after it -- which is how `theme` could have been
+        # deleted from config.example.json with all 137 tests still green,
+        # while server/CLAUDE.md claimed the twin was kept in step.
         import tomllib
 
-        keys = set(tomllib.loads(EXAMPLE_TOML.read_text(encoding="utf-8")))
-        self.assertEqual(keys, set(DEFAULT_CONFIG))
+        for example, load in (
+            (EXAMPLE_TOML, lambda t: tomllib.loads(t)),
+            (EXAMPLE_JSON, json.loads),
+        ):
+            with self.subTest(example=example.name):
+                keys = set(load(example.read_text(encoding="utf-8")))
+                self.assertEqual(keys, set(DEFAULT_CONFIG))
 
     def test_the_example_does_not_ship_an_interval_that_exhausts_the_free_plan(self):
         # It did. The example shipped 300 while the default was 600, and the
