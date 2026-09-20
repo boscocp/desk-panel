@@ -120,12 +120,12 @@ something wider, so its text widths are a conservative estimate rather than the 
 |---|---|---|---|
 | T6.1 | Landscape layout, neon palette | done | 2026-09-16. All six acceptance commands exit 0 (`node --test` still 16/16; the task file's colour literals were updated with the palette). **Palette re-cut twice at the user's request**: cyan on violet-black -> pink/red -> the settled `#000000` ground with a `#D53FA7` accent. Pure black is load-bearing, not taste: this is an AMOLED showing one frame for hours, so `#000000` pixels are off - no power, nothing to burn in (ADR 0008, T6.2). Card fills were dropped for the same reason. `--accent-dim` `#BB81AA` is the accent *desaturated, not darkened*: it carries the smallest text on the panel, so it measures 6.8:1 on black against the accent's 5.1:1 - de-emphasis comes from chroma, never luminance. Up/down are separated three ways so they can never be two shades of one hue: hue (`--up` `#3FD56C` is the accent's exact complement, 138 deg vs 318 deg), brightness (10.9:1 vs 6.1:1), and the sign `format.js` already writes - any one surviving is enough, which also covers a red/green colour-blind reader. **The T2.3 clipping is gone, measured not guessed**: Firefox driven over Marionette with the layout viewport calibrated to exactly 872 x 392 (`SetWindowRect` sizes the *outer* window, so it iterates until `innerWidth/innerHeight` match - the first pass silently gave 306px and would have made every number meaningless), `documentElement.scrollHeight` is 392 against 620 before, and a sweep of every element under `body` returns nothing outside the viewport and no section whose `scrollHeight` exceeds its `clientHeight`. Verified on `mock.js` as served and on a stress payload (`Sao Jose dos Campos`, `Thunderstorm, heavy hail`, -10 to 42 degrees, a zero change, `SHIBAINU-VERYLONGNAME`, `STALE` forced visible, pt-BR date); also clean at 839x392 and 1024x500. Three traps paid for. `#panel`'s rows are `minmax(0, Nfr)`, never `auto`: with `auto` an extra ticker from server config walks the battery card off the bottom again, and tickers are config, not a rebuild. The clock is 60px, not the 64px first cut - off-device the stack falls through to a non-condensed fallback where `HH:MM:SS` is ~4.5em against Roboto Condensed's ~4.0em, leaving 4px of slack inside a `#sidebar` that clips; at 60px it measures 266px in a 296px box. And card titles are `::before` content because `app.js` clears each section with `textContent = ''`, so no `app.js` change was needed at all. **Two things to look at on the device, not settled here**: the user's "the four cards are in a good position" was said about the *old* build, where the cards were empty outlines in a 2x2 that only fits because they hold nothing - this layout is a 2-wide, 3-tall card block beside the clock, which is the only arrangement where all five fit populated, and he has not seen it yet; and `#D53FA7` is mid-luminance, so the 11px card titles at 6.8:1 are the thing most likely to be too dim across a desk (T6.3 owns that call - the fix is a lighter `--accent-dim`, never a brighter accent). **Traceability caveat, and it expires at the merge**: the first half of this work is not in a T6.1 commit. `web/index.html`, `web/css/style.css` and an earlier version of this row were picked up by two `git add -A` runs from other agents sharing the worktree, so on `wave/5-phone` they sit inside two commits titled `docs(android): ...`. Content was byte-for-byte what had been measured; only the history was wrong. Deliberately not split: the branch reaches `main` through `gh pr merge --squash`, which collapses it to one commit, so the misattribution never arrives there and rebasing a worktree three agents were writing to would have risked real work to fix a property the merge erases. **If you are reading this on `main`, the two short SHAs that used to be quoted here no longer resolve** - that is the squash, not a lost commit; `git log -S 'id="sidebar"' -- web/` finds the change in whichever history you are in. The parallel-agent hazard behind it is in the PR body |
 | T6.2 | Glow, micro-animations, burn-in shift | todo | |
-| T6.6 | **Slow scroll when a card overflows** | todo | After T6.7. `style.css` clips a card's overflow today, so the sixth ticker is invisible rather than truncated — a cost that gets paid far more often once T3.12 makes adding tickers easy. The difficulty is not the animation: `onData` rebuilds each list wholesale every 60s, so any CSS animation resets before it reaches the rows it exists to reveal |
+| T6.6 | **Slow scroll when a card overflows** | done | 2026-09-20, wave 14. `overflowsBy` and `scrollPlan` in `format.js`; the rows moved into a `.scroller` inside a `.card-body` window in **both** themes, and the animation sits on an element `mount()` builds once, so the 60s rebuild never touches it — the task's step 4 asked for rows updated in place or an offset carried across, and neither is needed once the animated element is the one thing that does not get replaced. A card says `data-scroll` while it is hiding a row; `e2e/layout/overflow.js` is a third `check_layout.py` pass that fails in both directions. **The second acceptance line was replaced**: it could not fail, and what it asked for would have broken the feature and contradicted T6.1 — see the task file |
 | T6.7 | **A theme boundary** | done | 2026-09-20. All four acceptance commands exit 0, and the manual check is stronger than it was written to be: **the neon render is byte-identical before and after the move** — `check_layout.py --screenshots` on a worktree at `main` and on this branch produce the same PNG for the stress pass (`md5 41dadf5b…`), because that pass pins the clock, the date locale and every value. "Compare two screencaps" became an md5. **Where the line ended up.** `js/app.js` keeps the bridge, the payload, the clock's timing and the screen state, and contains no element, id or class name — that is the acceptance grep, and it is met by having no DOM in the file at all rather than by hiding it behind a helper. `js/host.js` is the seam: the live stylesheet, the current theme object, the root element, the blackout attribute. `web/themes/<name>/` owns everything else. A theme is an object with two functions, `render(payload, root)` and `tick(now, root)`, and `host.js` is the whole of the machinery — no registry of hooks, no lifecycle, because there is one consumer and it is a page that renders a payload. **Three constraints shaped it, and two of them are not obvious.** *(1) `#clock` has to exist before the page finishes loading*: `MainActivity.onPageFinished` reads it out of the DOM and logs `panel=rendered clock=` (T2.2, ADR 0009), so every script is in `<head>` with `defer` and every packaged theme registers as it parses. A dynamically injected `<script>` — the obvious way to load only the chosen theme — runs after that point, and the marker would have reported an empty clock on a panel that was about to be perfectly fine. `index.html` therefore carries a two-line manifest per theme; adding a theme is a rebuild whatever happens, because its files have to reach `assets/` somehow, and **switching** between packaged themes is what must not be. *(2) Stylesheets switch on `media`, not on the `disabled` property.* `disabled` was dropped from the HTML spec, and a browser that ignored it would apply every theme's rules at once — breaking the default look in order to make a non-default one work. `media="not all"` is not optional and cannot be misread. Both stylesheets are fetched at load, so a swap costs no request and shows no unstyled frame. *(3) The blackout is core's, not the theme's.* `body.pc-offline > *` and `body.too-hot > *` went to `css/style.css` as one rule on `:root[data-panel="dark"]`: it is the page's half of a promise about hardware (invariant 3, ADR 0005; T5.5, ADR 0012), and a theme that forgot it or spelled its class differently would leave a lit panel against a sleeping PC and look like a bug in Java. `docs/THEMING.md` states the one thing a theme owes it — never `visibility: visible`, which un-hides a descendant of a hidden parent. **Selection is the `theme` key T3.12 parked**: it rides `/quotes`, `DataPayload` passes it through untouched, and only the page decides. The server has no idea which themes the installed APK was built with, so an unknown name falls back to `neon` and warns once — a typo costs a line in logcat, never a blank panel. Verified: `--theme definitely-not-a-theme` renders a PNG byte-identical to neon's. An absent or empty key is **dropped** from the payload rather than sent as `""`, so an older server on the PC takes the same path. **The plain theme is the proof, and it is not decoration.** Same payload, different markup: the change sits before the number it describes, headings are real elements instead of `::before` content, the battery is in the flow instead of positioned, the weather is three lines, and the row wraps onto two — because four narrow columns cannot hold a ticker and two numbers on one line, and at one line it rendered `BTC` as `B1`. No core change was needed for any of it, which is the only thing that shows the boundary is real rather than a directory rename. It is held to T6.3's 20px floor, which is why that task's grep is now `-r` over `web/themes/`. **`check_layout.py --theme` earned itself immediately**: it caught the plain clock clipping its own digits by 5px, invisible in a screenshot, and again by 2px after the first fix. `mock.js` and `stress.js` both read `?theme=` so the two passes measure the same theme — without that, the stress pass would have switched a `--theme` run back to the default and measured the wrong panel while printing the right name. **Four earlier acceptance blocks were repaired, and one of them was already broken before this wave** — see the section below. **The review found six things and all six were fixed before the merge.** Five were small and real — a dead `fallbackTheme` field whose comment claimed two readers it did not have; an unknown-theme warning that latched on a *boolean* rather than on the name, so the owner's second typo months later would have been silent while `config.example.toml` still promised a line in logcat; `--screenshots` filenames that ignored `--theme`, which silently overwrote the very PNGs this wave's byte-identical claim compares; a `MainActivity` javadoc still pointing at the `index.html` guard T6.7 deleted; and a `THEMING.md` list that promised layout coverage for `#shortcuts`, which `measure.js` does not measure. **The sixth changed behaviour**: `onData` called `render` and `tick` into a blacked-out panel, contradicting `THEMING.md` and `app.js`'s own argument about not writing to a hidden DOM. It matters under the thermal cutoff specifically, where the poll loop deliberately keeps running so the device can notice itself cooling (T5.5) — so every cycle rebuilt the whole panel into a hidden DOM on a device being blanked *for working too hard*. A payload arriving while dark is now held, and the latest one is drawn the moment the panel returns. **That fix is why `e2e/layout/check_blackout.py` exists.** The blackout used to be two class names in the panel's own stylesheet; it is now an attribute on `<html>`, a rule in core CSS and a hold in `app.js`, none of which shows in a screenshot and none of which had a command. It drives the real page and asserts the round trip on both causes, and it is mutation-tested in both directions — deleting the hold fails it on three lines, `visibility: visible` on two. **Not verified on the device**: nothing here has been run on the phone. The three device-facing claims are that `panel=rendered` still reads a real clock, that the neon theme is unchanged under Roboto Condensed rather than the host's wider fallback, and that the plain theme is legible at 50cm |
 | T6.3 | Legibility on the physical device | done | 2026-09-16. Both acceptance commands exit 0, and T6.1's five re-run green. Driven by the user at the device rather than by a ratio: he called the card titles too small and the date "exactly at the limit of comfortable reading" - the date was 16px, which is why the task's 20px floor is the right number and not a round one. Four declarations violated it: date 16px, battery 17px, card titles 11px, STALE badge 11px. All now 20px; clock stays 60px and weather 24px. **The clock was not cut.** 20px titles nearly double a line that appears five times, and the room came from spacing instead: body padding 12->10px, `#panel` gap 10->8px, and the row split 1.22fr->1.3fr, which is where the three-row B3 card needed it. The task's own note says to resist shrinking things to fit more in, and the clock is what the panel is for. Title tracking went 0.22em->0.14em because wide tracking reads as a label at 11px and as a gap at 20px, and WEATHER stopped fitting its card. Prices are now bold - step 2 of this task's ordering, after size: the titles are the same size as the numbers beside them now, so hierarchy had to come from somewhere that costs no vertical space. **Re-measured, not assumed**: `e2e/layout/check_layout.py` exits 0 on both payloads, document exactly 392px in a 392px viewport, nothing outside it, nothing clipping its own content. Worst-case free space below the content: B3 6.9px, FX and CRYPTO 6.3px, DEVICE 8.5px, WEATHER 29.4px. That headroom is font-independent - every line-height in the file is a unitless multiple, so box heights are the same under the device's Roboto Condensed as under the host's wider fallback; only text *widths* differ, and those only shorten a label that already ellipsises. **Still open and genuinely human**: whether the 20px titles now read as titles rather than as one more data row, since they match the row labels in size and colour and are separated only by tracking and position. Contrast was deliberately not touched - the user reported size, so size is what changed; a lighter `--accent-dim` stays in reserve if dimness turns out to be separate. **Five levers were then measured rather than argued about** (`--extra-css`, stress payload, 872x392), after the user asked whether shrinking the WEATHER card would help: narrowing it to 170px, cutting it to one row, both together, narrowing the sidebar to 230px, widening the row split to 1.6fr, and cutting the clock to 40px. **The middle column is byte-identical in every one of them** - quotes h=140 free=6.9, fx and crypto h=108 free=6.3 - because `#panel`'s rows are `minmax(0, Nfr)`, so heights are fractional and never content-driven, and the two columns are vertically independent. Nothing in the right column can give vertical space to the middle one, and the clock is paying for nothing at all (the sidebar has ~244px unused). The only vertical budget is `392 - 2*body padding - 2*row gap`, both already spent. Three of the levers actively break: WEATHER at one row overflows by 57px under the stress payload **while passing the served one**, WEATHER at 170px clips its own longest word and pushes the battery line to three, and the 230px sidebar clips 36px off the clock - the T2.2 defect returning. Rows cannot wrap by construction (flex row, `nowrap` on all three spans, ellipsis on the label): measured row heights are [31, 32], one line each, in every scenario. The lever with real value is the opposite of the request - WEATHER wants **more** room, not less, and demoting the DEVICE card takes it from 256px to 372px with 87.3px free while nothing else moves. That is recorded in T5.4, whose own step 3 already asks for DEVICE to be small and in a corner. **Second round at the device: all three questions came back clean** - titles comfortable, titles read fine as they are, date better than before. No hierarchy problem, so the 5-6px of free space in FX and CRYPTO stays unspent, which is the right outcome with T3.4 and T5.4 still to put real content in those cards. One process note worth more than the code: a heading-rule change was built and measured against `titulo so uma linha`, which had been relayed as "the title reads as just another row" but actually meant "the titles fit on one line and are fine". Reverted in full (`f97f65c` then its revert; the stylesheet is byte-identical to `0d4e8e2`, which is the state the user approved). The ambiguity had been flagged before the work started, and the cheap move - one clarifying question to the human - was skipped in favour of proceeding on the likelier reading. When a human's verdict is ambiguous, resolve it with the human; do not pick a branch and spend measured headroom on it |
 | T6.5 | **A sparkline beside every value** | done | 2026-09-19. Asked for at the desk, mid-wave. The series is **fetched, not accumulated**: the WebView reloads on every wake (ADR 0014) so a page-side buffer is lost exactly when the screen returns, and a server-side one dies with the login session, so the chart would restart every morning. Real daily closes instead, from the same key-free upstreams that serve the prices — and the two disagree about direction, AwesomeAPI newest-first against Binance oldest-first, which is the trap: drawing one without reversing renders a rise as a fall and nothing about the picture says so. Each has its own `normalise_history` and its own test. Its own cache at 6h, and it never marks the payload `stale` — a decoration on a row that already carries the number it decorates must not be able to call that number old. `sparklinePath` is pure and in `format.js`, scaled to the series' own min and max rather than to zero, because a currency that moved 0.4% is a flat line against a zero baseline: true about the magnitude, useless about the trend. B3 carries an empty series until a brapi token exists. Two layout facts the device taught: the crypto card has the panel's widest prices and no slack, so the sparkline shrinks before the ticker does (it rendered `B…` first), and `vector-effect: non-scaling-stroke` is load-bearing under `preserveAspectRatio="none"` |
 | T6.4 | Night profile | todo | |
-| T6.8 | **The weather card earns its space** | todo | Asked for 2026-09-20, at the desk. Nothing in the backlog covered it: T3.4 built the proxy, T6.1 placed the card, T6.3 measured its 87.3px of slack — more than twice any other card — and T6.5 gave every *other* card a sparkline. The line has not changed since T5.1 rendered it. Three faults, and only the first is taste: no hierarchy (city, temperature, range and condition are all 24px in one colour); a range that is unreadable below zero (`formatTemp` writes a bare number and the card joins two with a hyphen, so the stress payload renders `(-12-42°C)` — a string nobody can parse by eye, on screen today in `stress.js`); and a condition rendered as prose in the narrowest column. Spends the space the panel already has on the data it already has: richer fields — precipitation, sunrise, wind — are a **server** change and are named as out of scope in the task file so they are not smuggled in |
+| T6.8 | **The weather card earns its space** | done | 2026-09-20, wave 14. `formatRange` kills `-12-42`; `weatherGlyph` maps the WMO table onto six drawn conditions plus a named `unknown` that draws nothing. The neon card is city, glyph + 48px temperature, range, condition, measured at 872x392 under the stress payload; the city wraps rather than ellipsising, because it is the one string on the panel a reader cannot reconstruct from a truncation and it is server config. The plain theme takes the same two functions and its own answer |
 
 ## Phase 7 — Packaging
 
@@ -151,6 +151,180 @@ or phase 6.
 |---|---|---|---|
 | T8.1 | **`POST /action/{id}` actually acts** | todo | The first route that changes the machine the server runs on, and the server has no authentication — deliberately, because it is LAN-only and session-bound (ADR 0004). Those two facts were compatible only while the worst a stranger on the Wi-Fi could do was read a stock price, so **ADR 0015 comes first** and states the threat model. The catalogue of what an action runs lives in code; config only names which ones are enabled, and an unknown name fails the load with a console in front of the owner rather than 404ing at the desk. Two toggles to start (`mute-audio`, `mute-mic`), per-platform like T3.11 — `wpctl`/`pactl`, `osascript`, and PowerShell against Core Audio on Windows with no third-party download. `subprocess` argument lists, never `shell=True`, asserted through the AST because `grep` passes against `shell = True`. `shutdown` and `lock` are deliberately absent: the ADR's model is written around actions that are safe to repeat |
 | T8.2 | **Two buttons under the clock** | todo | After T8.1. `#shortcuts` has been in the sidebar since T6.1, empty on purpose so this would be a fill and not a re-layout. The hard part is invariant 1: the page cannot make the request, so a tap has to cross into Java through the app's **first inbound bridge** — everything so far runs Java→page. `invoke(id)` matches the id against a set Java already knows and never concatenates it into a URL, which is T8.1's rule made on the other side of the wire. Dead while the PC is away: a queued action that fired on reconnect would mute the PC minutes after somebody pressed a button they could not see. Which buttons exist rides the payload like `theme` does, so a third one is config and not a rebuild; the buttons are markup, so they belong to a theme (T6.7). 56px targets — a phone at arm's length with no pointer, and a mis-tap mutes the wrong device. And the button shows the last *result*, never a state it cannot know: one that lies about whether the mic is live is worse than no button |
+
+## Resuming after 2026-09-20 (wave 14)
+
+Wave 14 is T6.6 and T6.8, on `wave/14-overflow-and-weather`. Two tasks rather than one because
+after T6.7 they are the same shape of work — both are pure functions in `format.js` plus a
+theme spending them, both run entirely on this machine, and both are measured by the same
+harness. **The cards spend the space they have.**
+
+- **T6.6.** A card that holds more rows than it can show now walks slowly through them, four
+  seconds a row in neon and six in plain, holding at each end. Before it, the sixth ticker was
+  not truncated and not marked — it was absent, and nothing on the panel said so.
+- **T6.8.** The weather card was the tallest on the panel and held one 24px line. It is now a
+  hierarchy, and the range it renders can be read below zero.
+
+**Next: T6.2** (glow, micro-animations, burn-in shift), then T6.4 (night profile). Phase 6 has
+nothing else left. Read T6.2's header before starting it: its `Files:` line still says
+`web/css/style.css` and `web/js/app.js`, and both of those are wrong in the way T6.6's were —
+glow and a layout shift are presentation, so they land in `web/themes/`, and only `offsetFor`
+belongs in `format.js`. **It also has to be reconciled with this wave**: T6.6's note asks that
+the burn-in shift and the scroll not fight, and there are now two independent motions available
+on one card. T6.4 is half-blocked on the phone — the `night=on` logcat marker — but its
+`isNight` predicate has been in `format.js` and under test since T5.x, so the web half is
+smaller than the task file implies.
+
+### Where the difficulty actually was, and it was not the animation
+
+T6.6 named it correctly: `window.onData` rebuilds each list wholesale every 60 seconds, so a
+CSS animation resets before it ever reaches the rows it exists to reveal. The task offered two
+answers — update the rows in place when the symbol set has not changed, or carry the offset
+across the rebuild — and **neither was needed.** A CSS animation belongs to an element, and
+replacing that element's children does not disturb it. So the rows went into a `.scroller` that
+`mount()` builds once and `render()` only refills, and the rebuild became a non-event.
+
+That leaves one way to break it, and it is the reason `scrollPlan` is pure and tested for
+determinism: the theme rewrites `--scroll-seconds` and `--scroll-distance` on every render, and
+an animation whose declaration changes mid-flight jumps. Identical inputs have to produce an
+identical plan — no clock, no accumulating state — or the card would twitch once a minute for
+ever. That is what the test named *"a refresh that changes no rows produces the identical
+plan"* is for; it looks like a tautology and is the only thing standing between the panel and a
+once-a-minute stutter.
+
+### The harness learned to tell a deliberate clip from a silent one
+
+Every check in `e2e/layout` said *nothing escaped*. A card that swallows its extra rows passes
+all of them — that is exactly what the panel did before this wave, and why the sixth ticker was
+invisible rather than broken. So:
+
+- A section hiding a row carries **`data-scroll`**, and `docs/THEMING.md` now states that as
+  part of the theme contract rather than as neon's implementation detail.
+- `measure.js` reports an overflowing `data-scroll` section separately from a silently clipped
+  one, and fails a section that claims the attribute with nothing hidden — motion for its own
+  sake, on a panel in someone's peripheral vision (T6.6 step 2).
+- `check_layout.py` has a third pass, `e2e/layout/overflow.js`, and it is the **only pass in
+  the harness that requires something to happen** rather than requiring that nothing goes
+  wrong. If the scroll regresses it fails; if the fixture stops overflowing because the cards
+  grew, it also fails, rather than quietly measuring nothing.
+- `overflowInside()` looks for the overflow where it now is. A section's own `scrollHeight` was
+  enough until this wave put the rows two boxes down, and a nested `overflow: hidden` clips its
+  descendants' contribution — so a card whose rows do not fit its inner window measures as
+  fitting itself, which is the harness going blind in exactly the place the feature lives. It
+  walks down and asks the question of any element bigger than the parent that clips it, in both
+  axes, without being told a theme's class names.
+- `paintedRect()` intersects a rect with the boxes that clip it, so a row waiting its turn
+  below the fold is not reported as a card escaping the viewport. **Scoped to `[data-scroll]`
+  on purpose.** The first cut clipped every rect against every `overflow: hidden` ancestor,
+  which is more honest in the abstract and guts question 2 — `body` and `#panel` both clip, so
+  a card that escaped the panel would have been intersected back inside it and reported as
+  fine.
+
+All four were mutation-tested when they were written: drop the attribute, set it
+unconditionally, and the pass fails each way.
+
+### A third browser check, because the hard requirement had no command
+
+T6.6 calls one thing "the whole of the task's difficulty": the refresh must not restart the
+scroll. Nothing in the repo could check it. `format.js` is pure and cannot see an animation;
+`check_layout.py` measures a single frame; a screenshot shows a card that looks right either
+way. A card whose animation restarts every 60 seconds walks a little way down, jumps back to
+the top, and never reaches the rows it is moving to reveal — and every check in the repo passes.
+
+`e2e/layout/check_scroll.py` drives it over time, on check_layout's Marionette plumbing so
+there is still one browser harness: deliver an overflowing payload, sample the transform, wait
+past the keyframes' hold, sample again, deliver the **identical** payload, and assert the
+offset did not go back to zero. Plus two cheap ones that make a failure legible — a card that
+declares a scroll and does not move, and a card that keeps a transform after its rows start
+fitting again.
+
+Two numbers in it were tuned against a real failure rather than guessed. It samples at eight
+seconds, not five, because at five the card has moved 7px on a slow run — enough to prove it
+moves, not enough to separate "carried across" from "restarted" by any threshold that also
+tolerates the card still moving between samples. And the comparison is proportional, not
+absolute: the first cut used ±8px, and the rebuild mutation slipped through it. At eight
+seconds the two outcomes are 37px and 0.
+
+It also calibrates the viewport, which `check_blackout.py` does not need to. Every number in
+the file comes out of the card's height, and in whatever window Firefox happens to open, six
+rows fit a card that holds three on the device — the check would have reported the feature
+missing.
+
+### The first animation on this page brought a rule with it
+
+Nothing on the panel moved before this wave, so nothing had ever had to ask what a moving thing
+does while the panel is dark. `visibility: hidden` does not stop a CSS animation — it keeps
+ticking and its layer keeps being recomposited — and the two states the blackout covers are the
+two where that is pure cost: offline the device is asleep on battery (ADR 0014), and too hot it
+is being blanked *because* it is working too hard (ADR 0012).
+
+So `web/css/style.css` pauses every animation under `:root[data-panel="dark"]`, beside the rule
+that hides the body, and for the same reason it is there: it is the page's half of a promise
+about hardware, and a theme that forgot it would look perfectly fine and quietly cost battery
+overnight. `paused` rather than `none`, so the card comes back where it left off.
+
+**This is T6.2's step 4** ("no animation while offline"), arrived at early because T6.6 is what
+made it possible to get wrong. T6.2 keeps the step; it has nothing left to do for it.
+
+`check_blackout.py` asserts it — an overflowing payload, the animation running while lit and
+paused while dark — and it finds the moving element by its computed `animation-name` rather
+than by a class, so it stays a statement about the contract and not about neon's markup. It was
+mutation-tested: delete the declaration and the check fails.
+
+### The review found seven things, and the two that mattered were invisible here
+
+Everything in this wave passes on this machine, which is the problem with both of the real
+findings: neither of them can fail on this machine.
+
+- **A card would have twitched one pixel, for ever, on the phone only.** `clientHeight` and
+  `scrollHeight` are integers and the device lays out at a device pixel ratio of 2.75, so a
+  card whose rows exactly fill it can report 102px of content in a 101px window. That is one
+  hidden row by every count in `format.js`, and a travel of one pixel: `data-scroll` set, a
+  compositor layer held for the life of the panel, and a card moving a pixel back and forth
+  every seventeen seconds in the corner of someone's eye — with **every check in `e2e/layout`
+  passing**, because a pixel of overflow is a real overflow as far as a measurement can tell.
+  `worthScrolling(travelPx)` is the fix, in `format.js` with the rest of the decision and
+  tested there: below four pixels a card does not move however the row arithmetic came out.
+  Reproduced by forcing a card 3px over its window — `data-scroll` before, none after.
+- **A twelve-line comment explained a guard that did nothing**, twice. `flex: 0 0 auto` on the
+  scroller was said to stop it shrinking to the window; a child of a block container is not a
+  flex item, so it had no effect at all. The rewrite claimed making the window a flex column
+  would break it — also false, because a flex item does not shrink below its min-content
+  height either. Mutation testing found the edit that *does* break it: `min-height: 0` on the
+  scroller inside a flex window, which is the kind of rule this file already has four of,
+  added for unrelated reasons. The comment now names that, and says what happens — which is
+  not "it passes every check": the overflow pass fails on all three cards, which is what that
+  pass is for.
+
+Three harness findings, all of which could only ever have produced a false report:
+`check_blackout.py`'s new animation-pause block could be beaten by a `mock.js` tick held
+across the dark window and flushed on the way back, reporting a correct panel as broken (it
+stops the feed now, as `check_scroll.py` does); `check_scroll.py` raised a `TypeError` instead
+of a sentence when the animation vanished between two samples; and its question 4 built a
+`DOMMatrixReadOnly` from the string `'none'`, which Firefox reads as the identity matrix and
+Chromium throws on — silently pinning a check to the wrong browser in a repo whose target is a
+Chromium WebView.
+
+Two cosmetic ones, both taken: `formatRange(null, 27)` rendered `--° / 27°`, a temperature of
+nothing-degrees and the same species of unreadable string the function exists to stop (it is
+`-- / 27°` now, unit on the numbers only); and `paintedRect()`'s one blind spot — an
+absolutely positioned descendant of a scrolling card, whose containing block is outside the
+box that appears to clip it — is now named in the comment. There is no such element today, and
+`#battery` is exactly that shape elsewhere on the panel and is what earned question 4 in T5.4.
+
+### One acceptance criterion was replaced rather than repaired
+
+T6.6's second line was `! grep -n 'overflow: hidden' web/themes/neon/theme.css | grep -q
+'card-list'`. It **could not fail** — the selector and the declaration are on different lines,
+so the inner grep never matched and the `!` always succeeded — and what it asked for was wrong
+anyway: the clip is what makes the scroll work, and removing it contradicts T6.1's acceptance,
+which asserts that the same block clips. The fault was never the clip. It was that a card could
+hide a row and say nothing, and that is what the replacement asserts.
+
+That is the fourth acceptance block this hazard has cost, and the first one that was wrong in
+its *intent* rather than merely pointed at a moved file. `make verify-accepted` — proposed
+below, and still not written — would have found the first three and not this one; only reading
+the line against the code it guards finds this one.
 
 ## Resuming after 2026-09-20 (wave 13)
 
