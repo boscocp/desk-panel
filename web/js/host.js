@@ -96,6 +96,52 @@
         return true;
     }
 
+    // --- The burn-in shift (T6.2) ------------------------------------------
+    //
+    // The panel is moved a few pixels every few minutes so that the clock's
+    // glyph edges, the card borders and the titles are not lit in the same
+    // pixels all day (ADR 0008). `offsetFor` in js/format.js decides how far
+    // and how often; this writes the answer where CSS can see it, and
+    // css/style.css spends it on `body > *`.
+    //
+    // Core, and applied here rather than handed to the theme, for the same
+    // reason the blackout is: it is the page's half of a promise about
+    // hardware, and a theme that forgot it would look perfectly fine and
+    // quietly etch the display. A theme needs to know nothing about it -- the
+    // element that moves is whatever the theme put in the body.
+    //
+    // Two custom properties rather than a transform written straight onto an
+    // element: `transform` is the one property both animations on this panel
+    // already use (the overflow scroll, T6.6), and core writing one onto a
+    // theme's element once a second would be core and the theme taking turns
+    // at the same declaration. A variable composes instead of colliding.
+    //
+    // No transition, and that is a decision rather than an omission. A glide
+    // would be a second motion on a panel that already has one and that T6.6's
+    // notes ask not to fight -- and a transition is not an animation, so
+    // css/style.css's `animation-play-state: paused` would not stop one that
+    // was in flight when the panel went dark. A 4px step every four minutes is
+    // below what the eye catches in peripheral vision; a 4px glide is exactly
+    // what it catches.
+    let applied = null;
+
+    function shift(now) {
+        const offset = offsetFor(now);
+        const next = offset.x + ',' + offset.y;
+        // Called once a second and changes once every four minutes, so 239 of
+        // every 240 calls are a string compare and nothing else. Writing the
+        // same two values into an inline style is cheap but not free: it is
+        // still a style invalidation on the root element, which is the one
+        // element every rule on the page hangs off.
+        if (next === applied) {
+            return;
+        }
+        applied = next;
+        const style = document.documentElement.style;
+        style.setProperty('--burn-in-x', offset.x + 'px');
+        style.setProperty('--burn-in-y', offset.y + 'px');
+    }
+
     // The two calls the boundary is made of. Both are guarded rather than
     // asserted: a theme whose render() throws must not take the clock down
     // with it, because a panel showing a stale card is worth more than a
@@ -112,6 +158,13 @@
     }
 
     function tick(now) {
+        // Before the theme's own tick, and outside the try below: the shift is
+        // core's and must not be skipped because a theme's clock threw. It is
+        // also why it rides tick rather than having a timer of its own --
+        // js/app.js already runs this once a second while the panel is lit and
+        // stops it when the panel is dark, which is exactly the schedule a
+        // burn-in shift wants. A display that is off does not age.
+        shift(now);
         if (!current) {
             return;
         }

@@ -19,7 +19,9 @@
 // reason; the rest cannot be got from a served tick.
 //
 // Also forces the clock to 23:59:59 (the widest time) and the date to pt-BR,
-// which is what the phone actually renders and is far longer than en-US.
+// which is what the phone actually renders and is far longer than en-US. The
+// harness pins the clock first, so that date is the longest one of the year
+// rather than today's (check_layout.py, PINNED).
 
 window.onData({
     quotes: [
@@ -49,8 +51,16 @@ window.onData({
 });
 
 document.getElementById('clock').textContent = '23:59:59';
-document.getElementById('date').textContent = new Date().toLocaleDateString('pt-BR', {
-    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-});
+// `window.Date` and not `Date`: this file is injected by check_layout.py and
+// runs in Marionette's sandbox, which has its own globals. A bare `new Date()`
+// here is the *harness's* clock, so this line rendered whatever today happened
+// to be -- and "the widest case the panel can be asked to show" was only the
+// widest case on the days it happened to be. The harness pins the page's clock
+// to the longest pt-BR date of the year before running this
+// (check_layout.py, PINNED), and this is what reads it.
+document.getElementById('date').textContent =
+    new window.Date().toLocaleDateString('pt-BR', {
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+    });
 
 return true;
