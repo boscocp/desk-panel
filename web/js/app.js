@@ -1,205 +1,119 @@
-const clockEl = document.getElementById('clock');
-const dateEl = document.getElementById('date');
-
-function updateClock() {
-    const now = new Date();
-
-    // Format time: HH:mm:ss
-    const hours = String(now.getHours()).padStart(2, '0');
-    const minutes = String(now.getMinutes()).padStart(2, '0');
-    const seconds = String(now.getSeconds()).padStart(2, '0');
-    clockEl.textContent = `${hours}:${minutes}:${seconds}`;
-
-    // Format date: Day Month Date, Year
-    const options = {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-    };
-    dateEl.textContent = now.toLocaleDateString(undefined, options);
-}
-
-// Initial call
-updateClock();
-// Update every second, while anyone can see it. The handle is kept so the
-// offline state can stop it: see window.onPcState below.
-let clockTimer = setInterval(updateClock, 1000);
-
-// --- PC state --------------------------------------------------------------
-// Called from native Java on every transition and only on transitions
-// (MainActivity.onPcState), never from here: web/ has no network code at all
-// (invariant 1, ADR 0002). In the browser it is simply never called, and the
-// panel stays in its online look, which is the one worth developing against.
-
-// --- Thermal state ---------------------------------------------------------
-// Called from native Java (MainActivity.onThermal) when the device crosses a
-// thermal threshold, and on every page load so a reloaded panel is not left
-// painting into a phone that is still too hot (T5.5, ADR 0012).
+// The panel's core. State, timing, and the three calls native Java makes into
+// the page -- and nothing else.
 //
-// The window's brightness is already at zero by the time this arrives; this is
-// the black render that goes with it, for a display whose floor is a dim
-// backlight rather than none.
-
-window.onThermal = (tooHot) => {
-    document.body.classList.toggle('too-hot', !!tooHot);
-    applyClock();
-};
-
-window.onPcState = (online) => {
-    // One class on <body>; the stylesheet owns what that means. Pure black is
-    // not decoration on an AMOLED - a black pixel is an off pixel - so the
-    // offline look is the cheapest thing the display can show while the
-    // backlight is on its way out (ADR 0005).
-    document.body.classList.toggle('pc-offline', !online);
-    applyClock();
-};
-
-// The page's half of the arbitration, and the only place the timer is touched:
-// the clock runs when the panel is actually visible, which is neither cause of
-// black being in force.
+// There is no element, id or class name anywhere in this file, and that is
+// checked (T6.7's acceptance greps for them). Everything the panel looks like
+// is in web/themes/<name>/; js/host.js is the seam between the two, and
+// docs/THEMING.md is the contract.
 //
-// Nothing is visible under either, so a per-second DOM write is pure cost - and
-// under the thermal one it is cost paid by a device that is being blanked
-// *because* it is working too hard (ADR 0012), which is the worse of the two
-// bargains. Offline it is cost paid in exactly the state the device holds a
-// wake lock to survive (ADR 0014).
-function applyClock() {
-    const visible = !document.body.classList.contains('pc-offline')
-        && !document.body.classList.contains('too-hot');
-    if (visible && clockTimer === null) {
-        updateClock();
-        clockTimer = setInterval(updateClock, 1000);
-    } else if (!visible && clockTimer !== null) {
-        clearInterval(clockTimer);
-        clockTimer = null;
+// Invariant 1: this file never fetches anything. Values arrive from Java
+// through window.onData, and there is no other way in (ADR 0002).
+
+(function () {
+    'use strict';
+
+    const host = window.DeskPanel;
+
+    // Everything the panel knows. `payload` is null until the first word from
+    // the PC, which is a state a theme has to render -- the skeleton and no
+    // values -- because the clock is worth showing before the market is.
+    let payload = null;
+    let online = true;
+    let tooHot = false;
+    let clockTimer = null;
+
+    // --- The clock ---------------------------------------------------------
+    // Core keeps the time and the schedule; the theme decides what a clock
+    // looks like. The Date goes across the boundary rather than a pair of
+    // formatted strings, so a theme can show seconds or not, a 24h clock or
+    // not, and a date in whatever shape it likes.
+
+    function paintClock() {
+        host.tick(new Date());
     }
-}
 
-// --- Data rendering --------------------------------------------------------
-// window.onData(payload) is the one entry point for quotes, fx, crypto,
-// weather and battery — native in production, js/mock.js in the browser.
-// Payload shape: tasks/T1.2-mock-fixtures.md. All formatting is delegated to
-// format.js (loaded before this file); this just places values in the DOM.
-
-const quotesEl = document.getElementById('quotes');
-const fxEl = document.getElementById('fx');
-const cryptoEl = document.getElementById('crypto');
-const weatherEl = document.getElementById('weather');
-const batteryEl = document.getElementById('battery');
-const staleEl = document.getElementById('stale-badge');
-
-// The sparkline's drawing box, in SVG user units. The element is sized in CSS
-// and the viewBox scales to it, so these are a shape rather than a size.
-const SPARK_W = 56;
-const SPARK_H = 16;
-
-// An inline <svg>, built through createElementNS because SVG lives in its own
-// namespace -- createElement('svg') produces an HTML element of that name that
-// renders as nothing at all, silently.
-// Returns null when there is no series, and the caller appends nothing.
-// An empty <svg> still reserves its flex basis, which is how a B3 row with no
-// history -- brapi serves none without a paid range -- rendered TAEE11 as
-// "TAEE…": the label gave up the width, and it gave it to a picture of
-// nothing.
-function renderSparkline(history, changePct) {
-    const d = sparklinePath(history, SPARK_W, SPARK_H);
-    if (!d) {
-        return null;
-    }
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('class', `spark ${changeClass(changePct)}`);
-    svg.setAttribute('viewBox', `0 0 ${SPARK_W} ${SPARK_H}`);
-    svg.setAttribute('preserveAspectRatio', 'none');
-    // Decoration: the row already states the number and the change in text,
-    // so a screen reader gains nothing from the path and is better off
-    // skipping it.
-    svg.setAttribute('aria-hidden', 'true');
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path.setAttribute('d', d);
-    svg.appendChild(path);
-    return svg;
-}
-
-function renderRow(label, value, currency, changePct, format = formatPrice, history = []) {
-    const row = document.createElement('div');
-    row.className = 'row';
-
-    const labelEl = document.createElement('span');
-    labelEl.className = 'label';
-    labelEl.textContent = label;
-
-    const priceEl = document.createElement('span');
-    priceEl.className = 'price';
-    priceEl.textContent = format(value, currency);
-
-    const changeEl = document.createElement('span');
-    changeEl.className = `change ${changeClass(changePct)}`;
-    changeEl.textContent = formatChange(changePct);
-
-    // Between the price and the change, so the eye reads name, number, shape,
-    // direction -- and so the two coloured things sit together. append()
-    // ignores nothing, so a row with no series simply has no gap for one.
-    const spark = renderSparkline(history, changePct);
-    row.append(labelEl, priceEl, ...(spark ? [spark] : []), changeEl);
-    return row;
-}
-
-// `format` is how FX opts out of formatPrice: a rate is not a price, and
-// formatPrice's magnitude-dependent precision is wrong for one in both
-// directions. See formatRate in format.js.
-function renderList(container, items, labelField, valueField, currency,
-                   format = formatPrice, formatLabel = (label) => label) {
-    container.textContent = '';
-    for (const item of items) {
-        container.appendChild(
-            renderRow(formatLabel(item[labelField], currency), item[valueField],
-                      currency, item.changePct, format, item.history));
-    }
-}
-
-function renderWeather(weather) {
-    weatherEl.textContent = '';
-    if (!weather) {
-        return;
-    }
-    const line = document.createElement('div');
-    line.textContent = `${weather.city}: ${formatTemp(weather.tempC)}°C `
-        + `(${formatTemp(weather.minC)}-${formatTemp(weather.maxC)}°C) `
-        + `${weatherLabel(weather.code)}`;
-    weatherEl.appendChild(line);
-}
-
-// The one diagnostic on a panel of content, so it is a corner line rather than
-// a card (T5.4 step 3): no title, no border, and nothing until there is
-// something to say. An empty string leaves the corner genuinely empty, which is
-// what the panel should look like before the first battery broadcast arrives.
-function renderBattery(battery) {
-    batteryEl.textContent = '';
-    const text = formatBattery(battery);
-    if (!text) {
-        return;
-    }
-    const line = document.createElement('div');
-    // The whole line takes the colour, not just the number: at 20px in a
-    // corner, a single re-coloured word is easy to miss and the temperature is
-    // right there to explain it.
+    // The page's half of the arbitration, and the only place the timer is
+    // touched: the clock runs while the panel is actually visible.
     //
-    // 'normal' is set as a class rather than left empty so the three bands read
-    // as three states in the DOM; the stylesheet gives it nothing.
-    line.className = tempClass(battery.tempC);
-    line.textContent = text;
-    batteryEl.appendChild(line);
-}
-
-window.onData = (payload) => {
-    if (!payload) {
-        return;
+    // Nothing is visible under either blackout, so a per-second DOM write is
+    // pure cost -- and under the thermal one it is cost paid by a device that
+    // is being blanked *because* it is working too hard (ADR 0012), which is
+    // the worse of the two bargains. Offline it is cost paid in exactly the
+    // state the device holds a wake lock to survive (ADR 0014).
+    function applyClock() {
+        const visible = online && !tooHot;
+        if (visible && clockTimer === null) {
+            paintClock();
+            clockTimer = setInterval(paintClock, 1000);
+        } else if (!visible && clockTimer !== null) {
+            clearInterval(clockTimer);
+            clockTimer = null;
+        }
     }
-    renderList(quotesEl, payload.quotes || [], 'symbol', 'price', 'BRL');
-    renderList(fxEl, payload.fx || [], 'pair', 'rate', 'BRL', formatRate, formatPair);
-    renderList(cryptoEl, payload.crypto || [], 'symbol', 'price', 'USD');
-    renderWeather(payload.weather);
-    renderBattery(payload.battery);
-    staleEl.hidden = !payload.stale;
-};
+
+    // --- The screen --------------------------------------------------------
+    // Offline and too-hot are two reasons for one outcome: there is nothing
+    // worth lighting a pixel for. host.blackout() puts that on <html> and
+    // css/style.css hides the theme's root, so the rule cannot be lost by a
+    // theme that forgot it (invariant 3, ADR 0005; T5.5, ADR 0012).
+
+    function applyScreen() {
+        host.blackout(!online || tooHot);
+        applyClock();
+    }
+
+    // --- The native bridge -------------------------------------------------
+    // Called from Java, and only from Java. In a browser none of the three is
+    // ever called except by js/mock.js, which is why the panel's development
+    // state is the online one.
+
+    // MainActivity.onPcState, on every transition and only on transitions.
+    window.onPcState = (isOnline) => {
+        online = !!isOnline;
+        applyScreen();
+    };
+
+    // MainActivity.onThermal, when the device crosses a thermal threshold and
+    // on every page load -- so a reloaded panel is not left painting into a
+    // phone that is still too hot (T5.5, ADR 0012). The window's brightness is
+    // already at zero by the time this arrives; the blackout is the render
+    // that goes with it, for a display whose floor is a dim backlight rather
+    // than none.
+    window.onThermal = (isTooHot) => {
+        tooHot = !!isTooHot;
+        applyScreen();
+    };
+
+    // The one entry point for quotes, fx, crypto, weather and battery --
+    // native in production, js/mock.js in the browser. Payload shape:
+    // tasks/T1.2-mock-fixtures.md. A full replacement, never a patch.
+    window.onData = (next) => {
+        if (!next) {
+            return;
+        }
+        payload = next;
+        // Theme selection is runtime config (T3.12): the server's `theme` key
+        // rides the payload, so changing the panel's look is editing a file on
+        // the PC, never a rebuild. Every packaged theme is already loaded, so
+        // a switch costs a re-render and no request.
+        host.useTheme(payload.theme);
+        host.render(payload);
+        // Straight after the render, because a theme that rebuilt its clock
+        // element would otherwise show an empty one for up to a second -- and
+        // on the device the first payload lands within a second of the page
+        // load that MainActivity reads #clock from.
+        paintClock();
+    };
+
+    // --- Start -------------------------------------------------------------
+    // Synchronous, while the deferred scripts are still running and before the
+    // load event: MainActivity.onPageFinished reads #clock out of the DOM and
+    // logs panel=rendered clock=HH:MM:SS, which is the app's own evidence that
+    // the asset pipeline, the https origin, JavaScript and the DOM all worked
+    // (T2.2, ADR 0009). A panel whose first paint waited for a payload would
+    // report an empty clock, and would show nothing at all on a PC whose
+    // server is up but whose upstreams are down.
+    host.useTheme(null);
+    host.render(payload);
+    applyScreen();
+})();

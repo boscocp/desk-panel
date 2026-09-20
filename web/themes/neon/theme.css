@@ -1,0 +1,468 @@
+/* The neon theme -- the panel's default look, and the only one the project
+ * designed. Landscape.
+ *
+ * This file was web/css/style.css until T6.7 moved it here whole. Nothing in
+ * it changed in that move except the two blackout rules at the bottom, which
+ * were an invariant wearing a theme's clothes and went to css/style.css.
+ *
+ * Sized for the real target: the Redmi Note 10's landscape WebView viewport is
+ * 872 x 392 CSS px (2400x1080 physical at 440dpi, once the display cutout is
+ * claimed - see T2.3). The page is exactly one screen: nothing scrolls, and
+ * every card clips its own content, so an extra ticker arriving from server
+ * config can never push a section off the bottom edge.
+ *
+ * Colours are custom properties on purpose. T6.4's night profile only has to
+ * redefine these, not hunt hex literals through the file.
+ *
+ * Everything below is scoped to nothing: only one theme's stylesheet is ever
+ * live at a time (index.html carries them all, host.js switches `media`), so a
+ * theme may style `body` and bare element names freely.
+ */
+
+:root {
+    /* Palette - T6.1, second cut. The first was cyan on a violet-black; the
+     * user asked for purple leaning pink, then settled on these exact values.
+     *
+     * --ground is pure black, and that is not a taste call. This panel is an
+     * AMOLED showing one unchanging layout for hours, which is the burn-in
+     * case ADR 0008 and T6.2 exist for. At #000000 the pixel is off: it draws
+     * no power and there is nothing there to burn in. Do not "improve" it back
+     * to a tinted ground.
+     *
+     * --accent-dim is the accent desaturated, NOT darkened: it is the colour of
+     * the smallest text on the panel (date, row labels, card titles), read from
+     * about 50cm, so it needs more contrast than the clock rather than less. It
+     * measures 6.8:1 on black against the accent's 5.1:1. Secondary here means
+     * less saturated, never dimmer. */
+    --ground: #000000;      /* pure black: pixels physically off */
+    --accent: #D53FA7;      /* primary: clock, prices, weather */
+    --accent-dim: #BB81AA;  /* secondary: date, labels, titles, borders */
+
+    /* Gains and losses have to be told apart instantly from across a desk, on
+     * a panel that is otherwise entirely pink. Two shades of red would not do
+     * it, so up/down are separated three ways at once: hue (--up is the
+     * accent's exact complement, 138 deg against 318 deg), brightness (10.9:1
+     * against 6.1:1 on black), and the sign format.js already writes into the
+     * text. Any one of the three surviving is enough to read the panel. */
+    --up: #3FD56C;          /* gain: the accent's hue complement */
+    --down: #FF3D6E;        /* loss: the accent pushed toward red */
+
+    /* Caution, and only that. The battery line takes this above 40 degrees
+     * (T5.4 step 4), and nothing else on the panel uses it. Amber rather than
+     * --down because --down is the alarm colour -- it is a loss, and it is the
+     * fill behind STALE -- and a warm battery on a charger is a thing to notice
+     * on the way past, not a fault. 11.7:1 on black, so it is legible across
+     * the desk at the smallest size the panel uses. */
+    --warn: #FFB03F;        /* caution: the battery above its temperature floor */
+
+    /* Derived, all from --accent. */
+    --rule: rgba(213, 63, 167, 0.38);
+    --rule-faint: rgba(213, 63, 167, 0.16);
+    --glow: rgba(213, 63, 167, 0.45);
+    --glow-dim: rgba(187, 129, 170, 0.35);
+
+    /* Condensed system stack, no webfont: the WebView has no network by
+     * design (ADR 0002), so anything fetched would simply fail to load.
+     * 'sans-serif-condensed' is Android's own alias for Roboto Condensed; the
+     * rest are the desktop equivalents for the browser check. */
+    --font: 'sans-serif-condensed', 'Roboto Condensed', 'Liberation Sans Narrow',
+            'DejaVu Sans Condensed', 'Arial Narrow', system-ui, sans-serif;
+}
+
+/* html's height, its black ground and the text-size-adjust guard are core
+ * (css/style.css): every theme needs them, and the ground is what shows
+ * through when the panel is blacked out. */
+
+body {
+    /* The theme's root: host.js passes document.body to render() and tick(),
+     * and everything below this line is built by themes/neon/theme.js. */
+    padding: 10px;
+    overflow: hidden;
+
+    background-color: var(--ground);
+    color: var(--accent);
+    font-family: var(--font);
+    /* Without tabular figures every price jitters sideways on each update. */
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1;
+    user-select: none;
+
+    display: grid;
+    grid-template-columns: 296px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    gap: 12px;
+}
+
+/* --- Left column: clock, date, and the reserved strip ---------------------- */
+
+#sidebar {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+#clock-container {
+    min-width: 0;
+}
+
+/* 60px, not larger: the clock must not be clipped by #sidebar even when the
+ * stack falls all the way through to a non-condensed fallback, which is ~4.5em
+ * wide for HH:MM:SS against the ~4.0em of Android's Roboto Condensed. It is
+ * still the first thing the eye lands on - two and a half times the next
+ * largest text on the panel, alone in its own column, and the only thing that
+ * glows. */
+#clock {
+    font-size: 60px;
+    line-height: 1.2;
+    font-weight: 700;
+    letter-spacing: -0.005em;
+    color: var(--accent);
+    text-shadow: 0 0 16px var(--glow);
+    white-space: nowrap;
+}
+
+#date {
+    margin-top: 6px;
+    font-size: 20px;
+    line-height: 1.25;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent-dim);
+}
+
+/* Reserved for the v2 shortcut buttons. Deliberately empty and invisible: it
+ * holds the space now so adding the buttons later is a fill, not a re-layout. */
+#shortcuts {
+    align-self: end;
+    min-height: 56px;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    gap: 8px;
+}
+
+/* --- Right of the clock: the data cards ----------------------------------- */
+
+#panel {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 224px;
+    /* Fractional rows, never auto: the three market cards and the two on the
+     * right always divide exactly the height available, whatever they hold. */
+    grid-template-rows: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+}
+
+#quotes  { grid-area: 1 / 1 / 2 / 2; }
+#fx      { grid-area: 2 / 1 / 3 / 2; }
+#crypto  { grid-area: 3 / 1 / 4 / 2; }
+/* All three rows, not two. DEVICE used to hold the bottom of this column as a
+ * card of equal weight to the content, which contradicted T5.4's own "render
+ * discreetly" and cost WEATHER the height it needs most: WEATHER is the
+ * tightest card on the panel in the worst case, because a city is server
+ * config and "Thunderstorm, heavy hail" is a real label. Free space inside it
+ * goes from 29.4px to 87.3px, measured at 872x392 under the stress payload. */
+#weather { grid-area: 1 / 2 / 4 / 3; }
+
+.card-list,
+.card {
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    box-sizing: border-box;
+    padding: 5px 10px 5px 11px;
+    border: 1px solid var(--rule);
+    border-left: 2px solid var(--accent);
+    border-radius: 3px;
+    /* No fill. Every pixel inside a card that is not a glyph or a rule stays
+     * at --ground, which on this AMOLED means switched off. */
+    background: var(--ground);
+    display: flex;
+    flex-direction: column;
+}
+
+/* Card titles come from CSS, not markup: app.js clears each section with
+ * textContent = '' on every update, which would take a real element with it. */
+.card-list::before,
+.card::before {
+    flex: 0 0 auto;
+    font-size: 20px;
+    line-height: 1.2;
+    /* Wide tracking at 11px read as a label. At 20px it reads as a gap, and
+     * WEATHER stops fitting its card, so it comes back in. */
+    letter-spacing: 0.14em;
+    color: var(--accent-dim);
+    margin-bottom: 3px;
+}
+
+#quotes::before  { content: 'B3'; }
+#fx::before      { content: 'FX'; }
+#crypto::before  { content: 'CRYPTO'; }
+#weather::before { content: 'WEATHER'; }
+/* No DEVICE title: the battery is no longer a card, and formatBattery writes
+ * its own three-character prefix instead. */
+
+.row {
+    display: flex;
+    align-items: baseline;
+    /* 6, not 10: the row gained a fourth child, and three gaps at the old
+     * width was 30px the crypto card does not have. */
+    gap: 6px;
+    padding: 3px 0;
+    font-size: 20px;
+    line-height: 1.24;
+}
+
+.row + .row {
+    border-top: 1px solid var(--rule-faint);
+}
+
+.row .label {
+    /* Natural width, and it shrinks last. Getting this ordering wrong is what
+     * rendered BTC as "B…" and then TAEE11 as "TAEE…": a label set to grow was
+     * also the thing that gave width back, so every chart widened at the cost
+     * of a name. Now the name takes what it needs and the chart takes the
+     * remainder -- which is the right priority, because a truncated ticker is
+     * unreadable and a narrower trend line is merely smaller. */
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    letter-spacing: 0.04em;
+    color: var(--accent-dim);
+}
+
+.row .price,
+.row .change {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.row .price {
+    color: var(--accent);
+    font-weight: 700;
+}
+
+.row .change {
+    /* A floor, and a smaller one than it looks like it should be. The
+     * percentage is right-aligned in a box that always ends at the row's edge,
+     * because the chart beside it absorbs every bit of slack -- so the column
+     * stays aligned however narrow this gets, and the only thing the floor
+     * does is hold empty space the chart could be using. A value wider than
+     * the floor simply grows the box. */
+    min-width: 3.4em;
+    text-align: right;
+}
+
+/* The sparkline. Fixed width so every row's number ends in the same place --
+ * a chart that changed width with its data would make the column ragged and
+ * the prices hard to compare down the card.
+ *
+ * vector-effect keeps the stroke one pixel however the viewBox is scaled;
+ * without it, preserveAspectRatio="none" stretches the line's thickness along
+ * with its geometry and the horizontal runs come out fatter than the vertical
+ * ones. */
+.row .spark {
+    /* Takes the slack: `flex: 1 1 0` makes this the element that grows into
+     * whatever the label, price and change do not want, and the first to give
+     * it back. Up to 72px where the card is roomy (B3, FX), down to 28px in
+     * the crypto card, whose prices are the widest on the panel. */
+    /* `flex: 1 1 0` and no cap, and both halves are load-bearing.
+     *
+     * Basis zero means this element contributes nothing to the row's natural
+     * width, so it can never be the reason a ticker has to shrink. Every
+     * attempt at giving it a real basis -- 56px, 72px, an auto margin to push
+     * it right -- pushed the row over the card's width instead, and the label
+     * was the only thing left that could give, which is how BTC became "B…"
+     * three separate times.
+     *
+     * No max-width means it then grows into *all* the slack, which both makes
+     * it as wide as the card allows and closes the gap that used to sit
+     * between the line and the percentage. That gap was never a margin: it was
+     * leftover space with nothing claiming it. */
+    flex: 1 1 0;
+    min-width: 28px;
+    height: 16px;
+    align-self: center;
+    overflow: visible;
+}
+
+.row .spark path {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
+}
+
+/* The line takes the same colour as the change beside it, so direction is
+ * said twice -- once as a shape and once as a hue -- and neither has to be
+ * read alone. */
+.spark.up {
+    color: var(--up);
+}
+
+.spark.down {
+    color: var(--down);
+}
+
+.spark.flat {
+    color: var(--accent-dim);
+}
+
+/* Pulled in against the percentage it describes. They are one statement --
+ * the shape and the number say the same thing -- and the row's even gaps made
+ * them read as two. */
+.row .spark + .change {
+    margin-left: -4px;
+}
+
+.change.up {
+    color: var(--up);
+}
+
+.change.down {
+    color: var(--down);
+}
+
+.change.flat {
+    color: var(--accent-dim);
+}
+
+/* Weather and battery hold a single line of text from app.js, not .row
+ * elements, so they are styled through the section itself. */
+
+/* The one div app.js appends, centred in whatever room is left under the
+ * title. auto margins only ever share out positive free space, so a long
+ * forecast still starts at the top instead of being pushed out of the card. */
+.card > div {
+    margin-top: auto;
+    margin-bottom: auto;
+}
+
+#weather {
+    font-size: 24px;
+    line-height: 1.32;
+    letter-spacing: 0.01em;
+    color: var(--accent);
+
+    /* The foot the battery line sits in, reserved rather than shared. Deep
+     * enough for the two-line worst case (57px) plus the 1px inset, so the
+     * forecast is centred in what is left and the two can never meet --
+     * including for a longer city, which is server config and not a rebuild.
+     * This is what makes the corner line safe to position absolutely; without
+     * it the arrangement only works while the forecast happens to be short. */
+    padding-bottom: 62px;
+}
+
+/* --- The battery, demoted to a corner line (T5.4) -------------------------- *
+ *
+ * Not a card and not in the grid. It sits in the bottom-right corner of #panel,
+ * in the foot of the WEATHER card -- and #weather reserves that foot with
+ * padding-bottom, so the two cannot share it. Overlap is a real risk and not a
+ * theoretical one: this line is out of the flow, so nothing about the layout
+ * stops it landing on live content, and the first cut of it did exactly that.
+ * `check_layout.py` now measures ink against ink for every pair of sections,
+ * which is the check that catches it (measure.js, question 4).
+ *
+ * Out of the grid on purpose: leaving it as a grid item is what made it a card
+ * of equal weight to the content, and a diagnostic sitting peer to the prices
+ * is what T5.4 step 3 rules out. Taking it out of the flow is also what lets
+ * WEATHER have the whole column.
+ *
+ * 20px is not "small" by accident either -- T6.3's legibility floor applies to
+ * this line as much as to a price, so it is demoted by position, weight and
+ * colour, never by shrinking below what can be read from across the desk.
+ */
+#battery {
+    position: absolute;
+    /* 1px, not 0. The corner it sits in is the WEATHER card's corner, and that
+     * card's border runs through exactly those two pixel rows -- at 0 the black
+     * background below would paint over the border and leave the card looking
+     * broken open at one end. Inside the border, the line reads as a caption in
+     * the card's empty foot, which is what it is. */
+    right: 1px;
+    bottom: 1px;
+    /* Enough of the ground to sit on, so the line stays readable even if the
+     * card behind it ever grows into this corner. On an AMOLED this costs
+     * nothing: --ground is #000000, which is a pixel switched off. */
+    background: var(--ground);
+    padding: 2px 9px 3px 8px;
+    font-size: 20px;
+    line-height: 1.3;
+    letter-spacing: 0.04em;
+    color: var(--accent-dim);
+
+    /* The column, and nothing wider. Both halves of this are load-bearing, and
+     * the first cut of this rule had neither.
+     *
+     * max-width, because the element is positioned against #panel -- which is
+     * 872px wide, the whole right side of the panel -- and not against the
+     * 224px track it appears to live in. Absolute positioning takes it out of
+     * the grid, so the track stops constraining it entirely.
+     *
+     * And wrapping rather than `white-space: nowrap`, because with a cap and no
+     * wrap the overflow just moves: the text would run out of the box to the
+     * left instead of stopping. The widest line the code can build is
+     * `BAT 100% - 42.5C - unplugged`, at 323px, which under the original rule
+     * grew out of the column and painted its opaque ground over the bottom of
+     * the CRYPTO card -- covering a live price's change and its sparkline, 68px
+     * of them, measured. Wrapped, the same string is two lines inside the
+     * column, which is why #weather reserves a foot deep enough for two. */
+    /* border-box, so 222 is the whole line and not 222 plus padding. Without
+     * it the box measured 239px -- 17px of padding outside the cap -- which put
+     * its left edge at x=622 against a CRYPTO card ending at x=630: inside the
+     * card, 3px clear of its rightmost glyph. Passing by 3px is not passing. */
+    box-sizing: border-box;
+    max-width: 222px;
+    text-align: right;
+}
+
+/* Above 40 degrees. Visible from across the room and still not an alarm: the
+ * colour changes, nothing flashes, nothing moves, and the number that earned it
+ * is right there in the same line. */
+#battery .warm {
+    color: var(--warn);
+}
+
+/* The last band before the screen blanks (T5.5, ADR 0012). --down rather than a
+ * fifth colour: it is already the alarm colour on this panel -- a loss, and the
+ * fill behind STALE -- and "at a limit" is what it means both times. Yellow and
+ * red enter the pink-on-black palette on the same argument green did: semantic,
+ * conventional, and used for nothing else. */
+#battery .hot {
+    color: var(--down);
+}
+
+/* STALE is a warning, so it takes --down rather than the accent: it must not
+ * read as just another pink label. */
+#stale-badge {
+    position: absolute;
+    top: 0;
+    right: 0;
+    background: var(--down);
+    color: var(--ground);
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    padding: 0 7px;
+    border-radius: 0 3px 0 3px;
+}
+
+/* --- The blackout is core, not theme ------------------------------------- *
+ *
+ * `body.pc-offline > *` and `body.too-hot > *` used to live here. They are the
+ * page's half of invariant 3 (ADR 0005) and of the thermal cutoff (ADR 0012) --
+ * a promise about hardware, not a look -- so T6.7 moved them to
+ * css/style.css as one rule on `:root[data-panel="dark"]`, where no theme can
+ * forget them or spell them differently.
+ *
+ * The one thing this theme owes that rule: nothing below sets
+ * `visibility: visible`, which would un-hide a descendant of the hidden body.
+ */
