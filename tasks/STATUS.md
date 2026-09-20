@@ -131,7 +131,11 @@ something wider, so its text widths are a conservative estimate rather than the 
 | # | Task | State | Notes |
 |---|---|---|---|
 | T7.2 | Wireless adb from the container | todo | May fall back to host platform-tools |
-| T7.3 | Pre-public review: secrets, README, screenshots | todo | Before flipping the repo public |
+| T7.4 | **Phone setup a stranger can follow, checked against the official docs** | todo | Asked for 2026-09-20, for the end of the project. Splits `INSTALL-PHONE.md` into a device-neutral half citing `developer.android.com` and a MIUI half labelled as one vendor's behaviour. Lands `scripts/check_links.py`, **which T7.3's acceptance already calls and which does not exist** |
+| T7.5 | **Running it locally, for a contributor with no phone and no LLM** | todo | Asked for 2026-09-20. Three tiers by what the reader owns — web only, web plus server, the full rig — plus minimum requirements and the dependency inventory, kept honest against the build files by `scripts/check_requirements.py` |
+| T7.6 | **Contribution guide, commit and PR templates** | todo | Asked for 2026-09-20. The readability argument is the substance: comments carry the why, logic stays out of Android classes, `format.js` stays pure, an invariant change needs an ADR. Conventional commits enforced by a script the hook and CI share |
+| T7.7 | **Opening the repo: contributor strategy and settings** | todo | Asked for 2026-09-20. Scope stated before the repo is public, device reports invited as a first-class contribution, and branch protection, labels, `CODEOWNERS` and `SECURITY.md` applied with `gh` and recorded in `docs/MAINTAINING.md` |
+| T7.3 | Pre-public review: secrets, README, screenshots | todo | Before flipping the repo public. Now runs **after** T7.4–T7.7 and carries the README's final pass; its `Prereqs:` line was updated to say so |
 | TT.8 | `e2e/run_e2e.py`, five scenarios | todo | Needs TT.6 |
 | TT.9 | CI workflow | todo | |
 
