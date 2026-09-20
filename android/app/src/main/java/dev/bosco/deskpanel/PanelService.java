@@ -186,6 +186,22 @@ public final class PanelService extends Service implements PcPoller.Listener {
     private static final ThermalState thermal = new ThermalState();
 
     /**
+     * Whether heat is currently what is keeping the panel dark — the state the
+     * thermal marker reports, and the reason that marker is emitted here rather
+     * than by the window.
+     *
+     * <p>It is the conjunction {@code online && tooHot}, and no single component
+     * knows both halves except this one. The window knows whether it is blanked,
+     * but a window blanked while the PC is away has taken nothing off the
+     * screen: the display is already out under the PC's mechanism, so a marker
+     * there would claim an event nobody could see. This field also survives an
+     * Activity recreation, which a field on the window does not — and MIUI
+     * relaunches the Activity on every wake from doze, so a per-window flag
+     * emits a second {@code screen=thermal} for one thermal event.
+     */
+    private static volatile boolean thermalDark;
+
+    /**
      * The last thermal verdict, or null before the first usable temperature.
      * Replayed to a window that registers late for exactly the reason
      * {@link #lastOnline} is: the verdict is delivered as an edge, and a window
@@ -454,11 +470,43 @@ public final class PanelService extends Service implements PcPoller.Listener {
         if (target != null) {
             target.onThermal(tooHot);
         }
+        updateThermalMarker();
         // No else. A verdict with no window to apply it needs no bookkeeping:
-        // lastTooHot above is the whole record, and setPanel replays it to
-        // whoever registers next, which logs the marker if the blanking
-        // actually changes. The PC path needs its pending flag because its
-        // marker reports a transition; this one reports an effect.
+        // lastTooHot above is the whole record, setPanel replays it to whoever
+        // registers next, and the marker is this class's own business either
+        // way.
+    }
+
+    /**
+     * Emits {@code screen=thermal} and {@code screen=thermal-clear} on the
+     * edges of {@link #thermalDark}.
+     *
+     * <p><b>What the marker claims is "heat is why the panel you are looking at
+     * is dark"</b>, which is the question ADR 0012 says it exists to answer —
+     * not "the verdict changed", which would fire overnight with the PC away
+     * and the display already out, and not "the window's brightness changed",
+     * which would miss the morning login that brings a hot panel up black.
+     *
+     * <p>Both edges are worth a line, and the falling one has two causes that
+     * the log tells apart by what sits next to it: on its own it means the
+     * device cooled, and paired with {@code screen=sleep} it means the PC left
+     * and now owns the dark. Neither is the panel coming back lit.
+     *
+     * <p>Called after the window has been told, so the log reads in the order
+     * things happened: {@code state=online}, {@code screen=wake},
+     * {@code screen=thermal}.
+     */
+    private void updateThermalMarker() {
+        // Boolean.TRUE.equals, not a truthy null: before the first probe there
+        // is no PC verdict, and a marker then would be a claim about a state
+        // nobody has established. The window is entitled to assume online at
+        // startup for the flag it holds; the log is not.
+        boolean dark = Boolean.TRUE.equals(lastOnline) && Boolean.TRUE.equals(lastTooHot);
+        if (dark == thermalDark) {
+            return;
+        }
+        thermalDark = dark;
+        Log.i(Markers.TAG, Markers.thermal(dark));
     }
 
     /**
@@ -749,6 +797,11 @@ public final class PanelService extends Service implements PcPoller.Listener {
             // transition, marker included.
             screenMarkerPending = true;
         }
+
+        // The PC is half of what the thermal marker reports, so a login on a
+        // hot device says so here — that is the morning where the panel comes
+        // up black and the log has to explain why.
+        updateThermalMarker();
 
         if (online) {
             // Started only now, and stopped below: the data poll exists to

@@ -119,13 +119,24 @@ public final class BatteryReading {
 
     /**
      * Whether a temperature could have come from a battery rather than from a
-     * missing extra. Wide on purpose — the job is to reject -1 tenths and a
-     * zeroed struct, not to second-guess a phone in a hot car.
+     * missing extra. Wide on purpose — the job is to reject {@link #ABSENT} and
+     * a value no sensor could produce, not to second-guess a phone in a hot
+     * car.
      *
      * <p>Package-visible rather than private since T5.5: the same question
      * decides whether a reading may be fed to {@link ThermalState}, and that
      * decision must not be a second, subtly different copy of this one. A
      * reading good enough to render is a reading good enough to act on.
+     *
+     * <p><b>It does not reject zero, and an earlier version of this javadoc
+     * claimed it did</b> ("a zeroed struct"). Zero tenths is 0.0 °C, which this
+     * accepts as a reading — it is a temperature a battery can genuinely be at,
+     * and rejecting it would put "--" on the panel of a phone left in a car in
+     * winter. The consequence now that {@link ThermalState} consumes this: a
+     * spurious zero on a device at 46 °C clears the blanking verdict in one
+     * sample and relights the panel. That is the same single-sample exposure
+     * {@code ThermalState.record} documents and declines to solve with a dwell
+     * rule, and it is recorded in both places rather than in neither.
      */
     static boolean plausible(int tenthsC) {
         return tenthsC > -500 && tenthsC < 1500;

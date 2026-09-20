@@ -213,12 +213,12 @@ public class MainActivity extends Activity implements PanelService.Panel {
      * One thermal verdict, on the main thread, from {@link PanelService}
      * (T5.5, ADR 0012).
      *
-     * <p>Nothing is logged here, unlike {@link #onPcState}. The marker belongs
-     * to the moment the panel actually goes dark, and that is
-     * {@link #setBlanked}: a verdict that crosses 45 degrees while the PC is
-     * already away blanks nothing — the display is out under the PC's mechanism
-     * — and a marker there would claim an event that did not happen, while the
-     * black panel the owner eventually sees would have gone unreported.
+     * <p>Nothing is logged here, unlike {@link #onPcState}, and nothing is
+     * logged anywhere in this class for heat. The thermal marker reports "heat
+     * is why the panel is dark", which is a conjunction of this verdict and the
+     * PC's — and this window holds only one of the two. {@code PanelService}
+     * holds both and emits it there, which also survives the Activity
+     * recreation that every wake from doze causes.
      */
     @Override
     public void onThermal(boolean hot) {
@@ -248,16 +248,9 @@ public class MainActivity extends Activity implements PanelService.Panel {
      * would mean nothing was left running to notice the cooling.
      */
     private void applyScreenState() {
-        // Before the service has said anything, the PC half reads as online:
-        // the panel has just been launched, so somebody is looking at it, which
-        // is the same stance onCreate takes when it holds the flag
-        // unconditionally. Heat can still veto that, and should — a phone that
-        // is at 46 degrees when the panel starts must not start by painting.
-        boolean online = lastOnline == null || lastOnline;
-
         // The arbitration, and the invariant the two calls below add up to:
         //
-        //     lit == online && !tooHot
+        //     the panel is lit  ==  the PC is online && the device is not hot
         //
         // It is enforced as two vetoes rather than as one assignment because a
         // veto is all either authority can express in its own mechanism, and
@@ -338,15 +331,19 @@ public class MainActivity extends Activity implements PanelService.Panel {
     }
 
     /**
-     * The one place that touches {@code screenBrightness}, and the one place
-     * the thermal marker is emitted: zero while blanked, and back to
-     * {@code BRIGHTNESS_OVERRIDE_NONE} — the window default, which is -1f and
-     * means "whatever the system says" — when not.
+     * The one place that touches {@code screenBrightness}: zero while blanked,
+     * and back to {@code BRIGHTNESS_OVERRIDE_NONE} — the window default, which
+     * is -1f and means "whatever the system says" — when not.
      *
      * <p>A no-op unless the state actually changes. Every {@code setAttributes}
-     * is a round trip to the window manager and a relayout, and keeping the
-     * marker on the same guard is what makes it one line per event rather than
-     * one per battery broadcast.
+     * is a round trip to the window manager and a relayout, and this is reached
+     * from a broadcast-driven path.
+     *
+     * <p>It does not log. Whether the panel <em>looked</em> different is not a
+     * question this method can answer — blanking a window whose display is
+     * already out changes nothing anybody can see — and the marker that claims
+     * it lives in {@code PanelService.updateThermalMarker}, which holds both
+     * halves of the answer.
      */
     private void setBlanked(boolean blank) {
         if (blank == blanked) {
@@ -357,13 +354,6 @@ public class MainActivity extends Activity implements PanelService.Panel {
         WindowManager.LayoutParams params = getWindow().getAttributes();
         params.screenBrightness = blank ? 0f : WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
         getWindow().setAttributes(params);
-
-        // Logged here rather than at the verdict, because here is where the
-        // panel's appearance actually changes and that is what the marker
-        // claims. The E2E suite and any future diagnosis read this line as "the
-        // panel went dark because the device is hot", as distinct from
-        // screen=sleep's "the PC went away" (ADR 0012, ADR 0009).
-        Log.i(Markers.TAG, Markers.thermal(blank));
     }
 
     @Override

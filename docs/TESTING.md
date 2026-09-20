@@ -118,6 +118,12 @@ them:
   matches the line that says the panel came *back*. Every assertion about blanking anchors the
   end of the line — `grep -qE 'screen=thermal$'` — and `MarkersTest` asserts the collision
   exists so nobody rediscovers it from a test that passed for the wrong reason (T5.5).
+- **`screen=thermal` reports why the panel *you are looking at* is dark**, not what the
+  temperature did. It is the conjunction of the thermal verdict and the PC's: crossing 45
+  degrees with the PC already away emits nothing, because the display is out and heat took
+  nothing off it, and the marker then fires at the *login* that brings the panel up black. Its
+  falling edge has two causes and the line beside it says which: alone it means the device
+  cooled, paired with `screen=sleep` it means the PC left and now owns the dark.
 - `screen=thermal` is **not** `screen=sleep` with a different name. Sleep releases
   `FLAG_KEEP_SCREEN_ON` and hands the display to Android, to be woken from outside; thermal
   keeps the Activity foreground at `screenBrightness = 0f` precisely so it is still running to

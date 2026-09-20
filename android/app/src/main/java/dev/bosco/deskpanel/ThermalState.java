@@ -50,10 +50,17 @@ public final class ThermalState {
     /**
      * Come back at or below this.
      *
-     * <p>Two degrees under the 40 at which the panel's temperature reading
-     * already turns amber, so the warning colour is still showing when the
-     * screen returns. The order matters: the owner sees the panel come back
-     * warm rather than come back looking fine and blank again.
+     * <p>Seven degrees under {@link #BLANK_AT_C}, and that gap is the whole
+     * constant: the screen is the heat source, so it has to buy enough cooling
+     * that painting again does not immediately undo it.
+     *
+     * <p>It is also two degrees under the 40 at which the panel's reading turns
+     * amber, which means the panel comes back in its normal colour rather than
+     * already warning. That is deliberate and it is the opposite of what an
+     * earlier version of this comment claimed: a panel that came back already
+     * amber would be telling the owner to act at the exact moment the device
+     * has just demonstrated it can cool itself. The warning belongs on the way
+     * up, where it is a prediction, not on the way down, where it is noise.
      */
     public static final double CLEAR_AT_C = 38.0;
 
