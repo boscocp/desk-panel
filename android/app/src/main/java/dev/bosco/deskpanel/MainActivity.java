@@ -52,6 +52,24 @@ public class MainActivity extends Activity implements PanelService.Panel {
     private Boolean lastOnline;
 
     /**
+     * The thermal verdict this window has been told about (T5.5). Not a
+     * {@code Boolean} like {@link #lastOnline}: "no reading yet" and "not too
+     * hot" call for the same behaviour here — paint — whereas the PC's two
+     * states call for opposite ones, which is why that field has to be able to
+     * say "nothing heard yet" and this one does not.
+     */
+    private boolean tooHot;
+
+    /**
+     * Whether the window is currently held at brightness zero. Kept rather than
+     * read back off the layout params: this is what makes the marker fire once
+     * per change, and the two are not the same question — the window manager
+     * may round or clamp a brightness, and a comparison against what it stored
+     * would eventually disagree with what was asked for.
+     */
+    private boolean blanked;
+
+    /**
      * The last payload handed to the page, for the same reason
      * {@link #lastOnline} is kept: the WebView reloads on a wake, and a
      * reloaded page knows nothing until the next refresh a minute later.
@@ -96,6 +114,7 @@ public class MainActivity extends Activity implements PanelService.Panel {
                 // again. Pushing it here closes that window, and covers the
                 // reload the wake causes.
                 pushPcStateToPage();
+                pushThermalToPage();
                 pushDataToPage();
             }
         });
@@ -165,10 +184,11 @@ public class MainActivity extends Activity implements PanelService.Panel {
      * old {@code FLAG_TURN_SCREEN_ON} and the {@code ACQUIRE_CAUSES_WAKEUP}
      * wake locks are, and are not used here (ADR 0005).
      *
-     * <p>{@code screenBrightness} is deliberately left alone, at the window
-     * default of {@code -1f}. Dimming to zero was the original design and is
-     * now the documented fallback, to be reinstated only if MIUI proves it will
-     * not wake the screen (T4.4, ADR 0005).
+     * <p>{@code screenBrightness} stays at the window default for this
+     * transition. T4.4 proved MIUI honours {@code setTurnScreenOn}, so the PC's
+     * authority keeps real sleep as its mechanism; brightness zero is the
+     * thermal authority's, and it is applied in {@link #applyScreenState()}
+     * (T5.5, ADR 0012).
      */
     @Override
     public void onPcState(boolean online, boolean logTransition) {
@@ -182,21 +202,93 @@ public class MainActivity extends Activity implements PanelService.Panel {
             lastPayload = null;
         }
         pushPcStateToPage();
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            // Paired with the state rather than latched on. Both are sticky
-            // window properties, so leaving them true after going offline would
-            // mean that any later resume of this Activity with the PC off — the
-            // MIUI relaunch, a notification tap — turned the screen on and
-            // showed the panel over the keyguard, with nobody logged in.
-            setShowWhenLocked(online);
-            setTurnScreenOn(online);
-        }
-        setKeepScreenOn(online);
+        applyScreenState();
 
         if (logTransition) {
             Log.i(Markers.TAG, Markers.screen(online));
         }
+    }
+
+    /**
+     * One thermal verdict, on the main thread, from {@link PanelService}
+     * (T5.5, ADR 0012).
+     *
+     * <p>Nothing is logged here, unlike {@link #onPcState}, and nothing is
+     * logged anywhere in this class for heat. The thermal marker reports "heat
+     * is why the panel is dark", which is a conjunction of this verdict and the
+     * PC's — and this window holds only one of the two. {@code PanelService}
+     * holds both and emits it there, which also survives the Activity
+     * recreation that every wake from doze causes.
+     */
+    @Override
+    public void onThermal(boolean hot) {
+        tooHot = hot;
+        pushThermalToPage();
+        applyScreenState();
+    }
+
+    /**
+     * <b>The arbitration.</b> The one place the two authorities meet, and the
+     * one expression that decides whether the panel is lit (ADR 0012): the PC
+     * is online <em>and</em> the device is not too hot. Either alone puts it
+     * out; both must hold to keep it on.
+     *
+     * <p>It is one method because two conditionals in two callbacks that happen
+     * to agree is how a screen ends up lit in a state nobody wrote down. Both
+     * callbacks record their own input and call this; neither touches the
+     * window itself.
+     *
+     * <p><b>The mechanisms are not shared, and that is deliberate.</b> The PC's
+     * authority is exercised by releasing {@code FLAG_KEEP_SCREEN_ON} and
+     * letting Android take the display — real sleep, woken from outside by the
+     * service raising this Activity. Heat's authority is exercised by zeroing
+     * the window's brightness with the Activity still foreground, so it keeps
+     * receiving the battery broadcast and can bring the panel back <em>by
+     * itself</em> when the device cools. Swapping heat onto the sleep mechanism
+     * would mean nothing was left running to notice the cooling.
+     */
+    private void applyScreenState() {
+        // The arbitration, and the invariant the two calls below add up to:
+        //
+        //     the panel is lit  ==  the PC is online && the device is not hot
+        //
+        // It is enforced as two vetoes rather than as one assignment because a
+        // veto is all either authority can express in its own mechanism, and
+        // the mechanisms are not interchangeable (see this method's javadoc).
+        // Written as a comment rather than as a variable because a variable
+        // that nothing reads is not the decision being in one place, it is dead
+        // code sitting next to the decision.
+
+        // The PC's veto, and only once the PC has actually been heard from. A
+        // thermal reading can arrive first — ACTION_BATTERY_CHANGED is sticky
+        // and lands within milliseconds, while the first probe takes up to the
+        // connect timeout — and it must not be what latches the keyguard flags
+        // on for a state nobody has reported yet.
+        if (lastOnline != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                // Paired with the state rather than latched on. Both are sticky
+                // window properties, so leaving them true after going offline
+                // would mean that any later resume of this Activity with the PC
+                // off — the MIUI relaunch, a notification tap — turned the
+                // screen on and showed the panel over the keyguard, with nobody
+                // logged in.
+                setShowWhenLocked(lastOnline);
+                setTurnScreenOn(lastOnline);
+            }
+            setKeepScreenOn(lastOnline);
+        }
+
+        // Heat's veto, and it does not consult the PC. ADR 0012 says either
+        // condition alone puts the panel out and both must hold to keep it on,
+        // so a device that crossed 45 while the PC was away must still be
+        // blanked when the PC comes back — the login turns the display on, and
+        // it has to come up dark. Making this one conditional on `online` was
+        // the first cut, and it handed exactly that morning a lit panel on a
+        // phone at 46 degrees. Nothing is stranded by the stricter version: the
+        // receiver is service-scoped, so the verdict keeps updating with the
+        // Activity destroyed and the screen out, and cooling clears the
+        // override on its own.
+        setBlanked(tooHot);
     }
 
     @Override
@@ -228,6 +320,42 @@ public class MainActivity extends Activity implements PanelService.Panel {
         }
     }
 
+    /**
+     * Hands the thermal verdict to the page, which blacks itself out the way it
+     * already does when the PC goes away. Brightness zero is not always zero
+     * light — the panel's own black render is what makes the difference on a
+     * device whose floor is a dim backlight rather than none (ADR 0005).
+     */
+    private void pushThermalToPage() {
+        webView.evaluateJavascript("window.onThermal(" + tooHot + ")", null);
+    }
+
+    /**
+     * The one place that touches {@code screenBrightness}: zero while blanked,
+     * and back to {@code BRIGHTNESS_OVERRIDE_NONE} — the window default, which
+     * is -1f and means "whatever the system says" — when not.
+     *
+     * <p>A no-op unless the state actually changes. Every {@code setAttributes}
+     * is a round trip to the window manager and a relayout, and this is reached
+     * from a broadcast-driven path.
+     *
+     * <p>It does not log. Whether the panel <em>looked</em> different is not a
+     * question this method can answer — blanking a window whose display is
+     * already out changes nothing anybody can see — and the marker that claims
+     * it lives in {@code PanelService.updateThermalMarker}, which holds both
+     * halves of the answer.
+     */
+    private void setBlanked(boolean blank) {
+        if (blank == blanked) {
+            return;
+        }
+        blanked = blank;
+
+        WindowManager.LayoutParams params = getWindow().getAttributes();
+        params.screenBrightness = blank ? 0f : WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+        getWindow().setAttributes(params);
+    }
+
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
@@ -243,7 +371,8 @@ public class MainActivity extends Activity implements PanelService.Panel {
     }
 
     /**
-     * The one place that touches {@code FLAG_KEEP_SCREEN_ON}. Online, the panel
+     * The one place that touches {@code FLAG_KEEP_SCREEN_ON}, called only from
+     * {@link #applyScreenState()}. Online, the panel
      * holds it and the screen never sleeps; offline it is cleared, and Android's
      * own display timeout — the device's, not one of ours — puts the screen out
      * from there. Screen state follows PC state, never a timer of ours

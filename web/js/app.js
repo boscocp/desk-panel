@@ -32,24 +32,49 @@ let clockTimer = setInterval(updateClock, 1000);
 // (invariant 1, ADR 0002). In the browser it is simply never called, and the
 // panel stays in its online look, which is the one worth developing against.
 
+// --- Thermal state ---------------------------------------------------------
+// Called from native Java (MainActivity.onThermal) when the device crosses a
+// thermal threshold, and on every page load so a reloaded panel is not left
+// painting into a phone that is still too hot (T5.5, ADR 0012).
+//
+// The window's brightness is already at zero by the time this arrives; this is
+// the black render that goes with it, for a display whose floor is a dim
+// backlight rather than none.
+
+window.onThermal = (tooHot) => {
+    document.body.classList.toggle('too-hot', !!tooHot);
+    applyClock();
+};
+
 window.onPcState = (online) => {
     // One class on <body>; the stylesheet owns what that means. Pure black is
     // not decoration on an AMOLED - a black pixel is an off pixel - so the
     // offline look is the cheapest thing the display can show while the
     // backlight is on its way out (ADR 0005).
     document.body.classList.toggle('pc-offline', !online);
+    applyClock();
+};
 
-    // Nothing is visible offline, so a per-second DOM write is pure cost, and
-    // it is cost paid in exactly the state the device holds a wake lock to
-    // survive (ADR 0014). Stopping the timer is worth more here than it looks.
-    if (online && clockTimer === null) {
+// The page's half of the arbitration, and the only place the timer is touched:
+// the clock runs when the panel is actually visible, which is neither cause of
+// black being in force.
+//
+// Nothing is visible under either, so a per-second DOM write is pure cost - and
+// under the thermal one it is cost paid by a device that is being blanked
+// *because* it is working too hard (ADR 0012), which is the worse of the two
+// bargains. Offline it is cost paid in exactly the state the device holds a
+// wake lock to survive (ADR 0014).
+function applyClock() {
+    const visible = !document.body.classList.contains('pc-offline')
+        && !document.body.classList.contains('too-hot');
+    if (visible && clockTimer === null) {
         updateClock();
         clockTimer = setInterval(updateClock, 1000);
-    } else if (!online && clockTimer !== null) {
+    } else if (!visible && clockTimer !== null) {
         clearInterval(clockTimer);
         clockTimer = null;
     }
-};
+}
 
 // --- Data rendering --------------------------------------------------------
 // window.onData(payload) is the one entry point for quotes, fx, crypto,
@@ -159,7 +184,10 @@ function renderBattery(battery) {
     // The whole line takes the colour, not just the number: at 20px in a
     // corner, a single re-coloured word is easy to miss and the temperature is
     // right there to explain it.
-    line.className = batteryWarm(battery.tempC) ? 'warm' : '';
+    //
+    // 'normal' is set as a class rather than left empty so the three bands read
+    // as three states in the DOM; the stylesheet gives it nothing.
+    line.className = tempClass(battery.tempC);
     line.textContent = text;
     batteryEl.appendChild(line);
 }

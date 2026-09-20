@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 
 const {
     formatPrice, formatRate, formatPair, formatChange, changeClass, weatherLabel, isNight,
-    sparklinePath, formatTemp, formatBattery, batteryWarm, BATTERY_WARN_C,
+    sparklinePath, formatTemp, formatBattery, tempClass, BATTERY_WARN_C, BATTERY_HOT_C,
 } = require('../js/format.js');
 
 test('formatPrice formats a BRL price with two decimals', () => {
@@ -235,18 +235,30 @@ test('formatBattery keeps the level a whole percent', () => {
                  'BAT 87% \u00B7 30\u00B0C');
 });
 
-test('batteryWarm fires above forty degrees and not at it', () => {
+test('tempClass warms above forty degrees and not at it', () => {
     assert.equal(BATTERY_WARN_C, 40);
-    assert.equal(batteryWarm(42.5), true);
-    assert.equal(batteryWarm(40.1), true);
-    assert.equal(batteryWarm(40), false);
-    assert.equal(batteryWarm(31.5), false);
+    assert.equal(tempClass(42.5), 'warm');
+    assert.equal(tempClass(40.1), 'warm');
+    assert.equal(tempClass(40), 'normal');
+    assert.equal(tempClass(31.5), 'normal');
 });
 
-test('batteryWarm treats a missing temperature as not warm', () => {
+test('tempClass reddens before the screen blanks, not as it blanks', () => {
+    // The ramp exists to warn, so the red band has to open below the cutoff.
+    // If these two were equal the panel would go from amber straight to black
+    // and the colour would have told the owner nothing (ADR 0012).
+    assert.ok(BATTERY_HOT_C < 45, 'the hot band must open below the 45 cutoff');
+    assert.equal(tempClass(BATTERY_HOT_C), 'hot');
+    assert.equal(tempClass(44.9), 'hot');
+    assert.equal(tempClass(46), 'hot');
+    assert.equal(tempClass(42.9), 'warm');
+});
+
+test('tempClass treats a missing temperature as normal', () => {
     // A warning the panel cannot justify is worse than no warning: there is no
     // number beside it to explain the colour.
-    assert.equal(batteryWarm(undefined), false);
-    assert.equal(batteryWarm(null), false);
-    assert.equal(batteryWarm(NaN), false);
+    assert.equal(tempClass(undefined), 'normal');
+    assert.equal(tempClass(null), 'normal');
+    assert.equal(tempClass(NaN), 'normal');
+    assert.equal(tempClass('43'), 'normal');
 });

@@ -84,6 +84,28 @@ public final class PanelService extends Service implements PcPoller.Listener {
         void onPcState(boolean online, boolean logTransition);
 
         /**
+         * One thermal verdict (T5.5, ADR 0012).
+         *
+         * <p>No {@code logTransition} twin of {@link #onPcState}'s, and the
+         * asymmetry is the point. A PC transition <em>is</em> the screen event,
+         * so the service knows when it is worth a marker. A thermal verdict is
+         * not: the device can cross 45 degrees while the panel is already dark
+         * because the PC is away, where nothing blanks and there is nothing to
+         * report. The window is the only thing that knows whether a verdict
+         * actually took the panel out, so the window logs it — see
+         * {@code MainActivity.setBlanked}.
+         *
+         * <p>Two authorities arrive as two calls rather than as one combined
+         * verdict because each is applied by a different mechanism, and only
+         * the window can apply either. What must not be duplicated is the
+         * <em>decision</em>, and that lives in one place,
+         * {@code MainActivity.applyScreenState}.
+         *
+         * @param tooHot whether the device is too hot to keep painting
+         */
+        void onThermal(boolean tooHot);
+
+        /**
          * A fresh data payload for the page (T5.1).
          *
          * @param json a JSON object literal, already safe to interpolate
@@ -151,6 +173,41 @@ public final class PanelService extends Service implements PcPoller.Listener {
      * whole wave exists to enforce.
      */
     private static volatile Boolean lastOnline;
+
+    /**
+     * The thermal authority (T5.5), fed from the battery broadcast below.
+     *
+     * <p>Static, and therefore outliving a {@code START_STICKY} restart of this
+     * service, because the device does not cool down just because a process
+     * came back. A fresh instance would start at "not too hot" and paint into a
+     * phone that is still at 46 degrees, which is the state this class exists
+     * to leave.
+     */
+    private static final ThermalState thermal = new ThermalState();
+
+    /**
+     * Whether heat is currently what is keeping the panel dark — the state the
+     * thermal marker reports, and the reason that marker is emitted here rather
+     * than by the window.
+     *
+     * <p>It is the conjunction {@code online && tooHot}, and no single component
+     * knows both halves except this one. The window knows whether it is blanked,
+     * but a window blanked while the PC is away has taken nothing off the
+     * screen: the display is already out under the PC's mechanism, so a marker
+     * there would claim an event nobody could see. This field also survives an
+     * Activity recreation, which a field on the window does not — and MIUI
+     * relaunches the Activity on every wake from doze, so a per-window flag
+     * emits a second {@code screen=thermal} for one thermal event.
+     */
+    private static volatile boolean thermalDark;
+
+    /**
+     * The last thermal verdict, or null before the first usable temperature.
+     * Replayed to a window that registers late for exactly the reason
+     * {@link #lastOnline} is: the verdict is delivered as an edge, and a window
+     * that arrives between two edges would otherwise never hear it at all.
+     */
+    private static volatile Boolean lastTooHot;
 
     /**
      * Set when a transition was reported with no panel registered, so the replay
@@ -270,6 +327,10 @@ public final class PanelService extends Service implements PcPoller.Listener {
             screenMarkerPending = false;
             newPanel.onPcState(state, logIt);
         }
+        Boolean hot = lastTooHot;
+        if (newPanel != null && hot != null) {
+            newPanel.onThermal(hot);
+        }
         String payload = lastPayload;
         if (newPanel != null && payload != null) {
             newPanel.onData(payload);
@@ -381,6 +442,74 @@ public final class PanelService extends Service implements PcPoller.Listener {
     }
 
     /**
+     * One temperature reading, from the battery broadcast (T5.5).
+     *
+     * <p>Push, never poll: {@code ACTION_BATTERY_CHANGED} arrives about every
+     * eight seconds on this device while charging, and asking for the
+     * temperature on a schedule of our own would spend exactly the power the
+     * reading exists to protect (T5.4 step 5). Invariant 3's "never by a
+     * timeout" is untouched — a temperature is a measured condition, not
+     * elapsed time.
+     *
+     * <p><b>Edges only</b>, exactly like {@link #onPcState}. Dispatching every
+     * reading was the first cut and it was wrong: this broadcast arrives about
+     * every eight seconds on a charging phone, so it would have driven a window
+     * update seven times a minute for the life of the panel — including through
+     * the offline stretch that T5.6 exists to keep quiet — to re-apply a value
+     * that had not changed. A window that registers late is served by
+     * {@link #setPanel}'s replay instead, which is what that replay is for.
+     */
+    private void onThermalReading(double tempC) {
+        if (!thermal.record(tempC, SystemClock.elapsedRealtime())) {
+            return;
+        }
+        boolean tooHot = thermal.isTooHot();
+        lastTooHot = tooHot;
+
+        Panel target = panel;
+        if (target != null) {
+            target.onThermal(tooHot);
+        }
+        updateThermalMarker();
+        // No else. A verdict with no window to apply it needs no bookkeeping:
+        // lastTooHot above is the whole record, setPanel replays it to whoever
+        // registers next, and the marker is this class's own business either
+        // way.
+    }
+
+    /**
+     * Emits {@code screen=thermal} and {@code screen=thermal-clear} on the
+     * edges of {@link #thermalDark}.
+     *
+     * <p><b>What the marker claims is "heat is why the panel you are looking at
+     * is dark"</b>, which is the question ADR 0012 says it exists to answer —
+     * not "the verdict changed", which would fire overnight with the PC away
+     * and the display already out, and not "the window's brightness changed",
+     * which would miss the morning login that brings a hot panel up black.
+     *
+     * <p>Both edges are worth a line, and the falling one has two causes that
+     * the log tells apart by what sits next to it: on its own it means the
+     * device cooled, and paired with {@code screen=sleep} it means the PC left
+     * and now owns the dark. Neither is the panel coming back lit.
+     *
+     * <p>Called after the window has been told, so the log reads in the order
+     * things happened: {@code state=online}, {@code screen=wake},
+     * {@code screen=thermal}.
+     */
+    private void updateThermalMarker() {
+        // Boolean.TRUE.equals, not a truthy null: before the first probe there
+        // is no PC verdict, and a marker then would be a claim about a state
+        // nobody has established. The window is entitled to assume online at
+        // startup for the flag it holds; the log is not.
+        boolean dark = Boolean.TRUE.equals(lastOnline) && Boolean.TRUE.equals(lastTooHot);
+        if (dark == thermalDark) {
+            return;
+        }
+        thermalDark = dark;
+        Log.i(Markers.TAG, Markers.thermal(dark));
+    }
+
+    /**
      * One {@code ACTION_BATTERY_CHANGED}, which Android sends rather than
      * letting anybody ask (T5.4 step 5: polling this would spend exactly the
      * power the reading exists to protect).
@@ -416,6 +545,15 @@ public final class PanelService extends Service implements PcPoller.Listener {
             // the poll loop may hold the CPU at all (T5.6), and it matters even
             // on a broadcast whose level is unusable and returns below.
             onPowerState(plugged);
+
+            // The temperature, for the same reason and with the same
+            // independence: a broadcast whose level extra is missing still
+            // carries a usable temperature, and a device at 46 degrees must
+            // blank the screen whether or not it can say what percentage it is
+            // at. Fed before the return below, never after it.
+            if (BatteryReading.plausible(tenths)) {
+                onThermalReading(BatteryReading.celsius(tenths));
+            }
 
             String reading = BatteryReading.json(level, scale, tenths, plugged);
             if (reading == null) {
@@ -659,6 +797,11 @@ public final class PanelService extends Service implements PcPoller.Listener {
             // transition, marker included.
             screenMarkerPending = true;
         }
+
+        // The PC is half of what the thermal marker reports, so a login on a
+        // hot device says so here — that is the morning where the panel comes
+        // up black and the log has to explain why.
+        updateThermalMarker();
 
         if (online) {
             // Started only now, and stopped below: the data poll exists to
