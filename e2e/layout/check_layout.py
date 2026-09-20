@@ -194,7 +194,7 @@ def read_js(name):
         return f.read()
 
 
-def failures(result, viewport):
+def failures(result, viewport, expect_scroll=False):
     """Everything wrong with one pass, as a list of human sentences."""
     bad = []
     width, height = viewport
@@ -226,6 +226,31 @@ def failures(result, viewport):
     # which is the bug that earned it.
     for item in result.get("overlaps", []):
         bad.append("drawn on top of something: %s" % item)
+    # T6.6 step 2: a card that scrolls with two rows in it is motion for its own
+    # sake, on a panel that sits in someone's peripheral vision all day. The
+    # clock and the weather card are the ones this is really guarding -- neither
+    # overflows, and neither may acquire movement from a rule meant for a list.
+    for item in result.get("pointlessMotion", []):
+        bad.append("moves for nothing: %s" % item)
+
+    # The inverse assertion: this harness's only statement about what must
+    # happen, as opposed to what must not. (check_scroll.py beside it makes the
+    # stronger one, over time; this is the cheap frame-by-frame half.)
+    #
+    # Every check above says "nothing escaped". A card that swallows its extra
+    # rows passes all of them -- that is exactly what the panel did before
+    # T6.6, and why the sixth ticker was invisible rather than broken. So the
+    # overflow pass, whose fixture holds more rows than any card can show,
+    # requires the opposite: the cards must say they are scrolling. If the
+    # scroll ever regresses to a plain clip, `clippedContent` catches it; if it
+    # regresses to no overflow at all -- a fixture nobody topped up after the
+    # cards grew -- this catches that instead, and the two together are what
+    # stop this pass quietly measuring nothing.
+    if expect_scroll and not result.get("scrolling"):
+        bad.append(
+            "no section is scrolling, so this pass proved nothing: either the "
+            "overflow scroll regressed, or the fixture no longer overflows the "
+            "cards it was written for (e2e/layout/overflow.js)")
     return bad
 
 
@@ -238,6 +263,8 @@ def report(name, result, bad):
         print("    %-9s x %4d-%-4d y %4d-%-4d  %s"
               % (section, box["left"], box["right"], box["top"], box["bottom"],
                  box["text"][:46]))
+    for item in result.get("scrolling", []):
+        print("    scrolls %s" % item)
     if result.get("_screenshot"):
         print("    screenshot %s" % result["_screenshot"])
     if bad:
@@ -274,21 +301,30 @@ def main():
     if args.theme:
         url += "?theme=" + urllib.parse.quote(args.theme)
 
-    # Two passes, and the second is not decoration. A typical tick never breaks
-    # a layout; the widest case does. mock.js already ships the long symbol, the
-    # six-figure price, the sub-1 price and the zero change (that is what those
-    # fixtures are for -- see web/js/mock.js). stress.js adds what it cannot:
-    # the longest city, the longest label in format.js, a negative temperature,
-    # a pt-BR date as the device actually renders it, and the STALE badge shown.
-    passes = [("served", None), ("stress", "stress.js")]
+    # Three passes, and only the first is the ordinary case. A typical tick
+    # never breaks a layout; the widest case does. mock.js already ships the
+    # long symbol, the six-figure price, the sub-1 price and the zero change
+    # (that is what those fixtures are for -- see web/js/mock.js). stress.js
+    # adds what it cannot: the longest city, the longest label in format.js, a
+    # negative temperature, a pt-BR date as the device actually renders it, and
+    # the STALE badge shown.
+    #
+    # overflow.js is the third, and it is the one pass that asserts something
+    # must happen rather than that nothing must: more rows than any card can
+    # show, and the cards have to say they are scrolling through them (T6.6).
+    # The flag is what turns the pass from "nothing escaped" -- which a card
+    # that silently eats rows passes trivially -- into a check of the feature.
+    passes = [("served", None, False), ("stress", "stress.js", False),
+              ("overflow", "overflow.js", True)]
 
     print("desk-panel layout check -- %s" % url)
-    results = run(url, passes, (width, height), extra_css, args.screenshots,
+    results = run(url, [(name, prelude) for name, prelude, _ in passes],
+                  (width, height), extra_css, args.screenshots,
                   shot_tag=("%s-" % args.theme) if args.theme else "")
 
     broken = False
-    for name, _ in passes:
-        bad = failures(results[name], (width, height))
+    for name, _, expect_scroll in passes:
+        bad = failures(results[name], (width, height), expect_scroll)
         report(name, results[name], bad)
         broken = broken or bool(bad)
 

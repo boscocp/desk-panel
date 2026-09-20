@@ -99,7 +99,7 @@ and the width is **872 rather than 839** because `MainActivity` sets
 Measured on the device, not derived on paper. Do not round it off; if the cutout mode ever
 changes, this number changes with it and the layout has to be measured again.
 
-## The two passes
+## The three passes
 
 `served` runs the page as `mock.js` feeds it. `stress` then pushes the widest case the panel
 can legitimately be asked to show — the longest weather label in `format.js`, a long city name,
@@ -107,13 +107,40 @@ a negative temperature, a six-figure and a sub-1 crypto price together, a symbol
 than a ticker, a zero change, the STALE badge, a 23:59:59 clock and a pt-BR date as the phone
 renders it.
 
-Both passes matter. The typical tick is not what breaks a layout, and `stress.js` says beside
-each value why it is there.
+All three matter. The typical tick is not what breaks a layout, and each fixture says beside
+its values why they are there.
+
+### `overflow`, which is the odd one out
+
+`overflow.js` feeds more rows than any card on either theme can show, and it is the only pass
+here that requires something to **happen**. Everything else on this page checks that nothing
+went wrong — and a card that silently swallows its extra rows passes every one of those
+checks. That is precisely what the panel did until T6.6, and why a sixth ticker was invisible
+rather than broken.
+
+So this pass asserts the other direction, and fails both ways round:
+
+- a section whose content does not fit and which does **not** carry `data-scroll` is a card
+  hiding a row in silence,
+- a section that carries `data-scroll` with nothing hidden is motion for its own sake, on a
+  panel that sits in someone's peripheral vision all day,
+- and if no section is scrolling at all, the pass fails rather than passing quietly — either
+  the feature regressed or the fixture stopped overflowing the cards it was written for.
+
+`data-scroll` is part of the theme contract, not neon's private detail: see
+`docs/THEMING.md`. What this pass cannot see is whether the card keeps moving across a refresh
+— it measures one frame, and `window.onData` replaces every row in every card once a minute.
+`check_scroll.py` beside it is the one that drives that over time.
+
+ `measure.js` also intersects a rect with the boxes that clip it before
+judging it, so a row waiting its turn below the fold is not reported as a card escaping the
+screen — scoped to `[data-scroll]` deliberately, because clipping every rect against every
+`overflow: hidden` ancestor would quietly gut the "outside the viewport" question.
 
 ## Who should use this
 
-- **T6.6** (slow scroll on overflow) and **T6.7** (a theme boundary) — both move markup
-  around, which is exactly what the overlap check is for.
+- **T6.7** (a theme boundary) moved markup around, which is exactly what the overlap check is
+  for; **T6.6** (slow scroll on overflow) is where the `overflow` pass came from.
 - **T6.2** (glow, burn-in shift) — a shift that moves pixels can move them off screen.
 - **T6.3** (device legibility) — it raises type sizes, and its acceptance forbids any font
   under 20px. `--extra-css` will tell you whether a size still fits before you commit to it.

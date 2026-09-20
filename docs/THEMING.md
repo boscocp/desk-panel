@@ -102,10 +102,12 @@ the phone's real viewport.
 
 - **`js/format.js`** is loaded before every theme, and its functions are
   globals: `formatPrice`, `formatRate`, `formatPair`, `formatChange`,
-  `changeClass`, `formatTemp`, `weatherLabel`, `formatBattery`, `tempClass`,
-  `sparklinePath`, `isNight`. Use them. A theme that reimplemented
-  `formatPrice` would reintroduce the sub-1 rounding bug the yuan found in
-  T6.5, once per theme.
+  `changeClass`, `formatTemp`, `formatRange`, `weatherLabel`, `weatherGlyph`,
+  `formatBattery`, `tempClass`, `sparklinePath`, `isNight`, `overflowsBy`,
+  `scrollPlan`, `worthScrolling`. Use them. A theme that reimplemented `formatPrice` would
+  reintroduce the sub-1 rounding bug the yuan found in T6.5, once per theme —
+  and one that joined a daily low and high with a hyphen would reintroduce
+  `-12-42`, which is what `formatRange` exists to stop (T6.8).
 - Anything in your own directory.
 
 ## What you may not do
@@ -132,6 +134,53 @@ the phone's real viewport.
   the reserved strip in the sidebar that T8.2's buttons will fill, and it holds
   nothing to measure until they do.
 
+## A card that hides a row has to say so
+
+The panel is exactly one screen. Every card clips, which is what stops a sixth
+ticker arriving from server config pushing a section off the bottom edge — and
+until T6.6 that was the whole story, so the sixth ticker was not truncated and
+not marked, it was simply absent with nothing on the panel saying so.
+
+A theme may answer that however it likes. Both of the ones in the repo walk the
+rows slowly past a window; a theme could shrink them, paginate them, or put a
+count in the corner instead. What is **not** optional is the accounting:
+
+- If a section is showing less than it was given, put **`data-scroll`** on that
+  section for as long as that is true, and take it off when it stops being.
+- If a section carries `data-scroll`, something inside it must actually be
+  hidden. Motion with nothing to reveal is worse than none: this panel sits in
+  someone's peripheral vision all day.
+
+`e2e/layout/measure.js` reads the attribute, and `check_layout.py` fails a pass
+in both directions — a card overflowing without it, and a card claiming it with
+everything on screen. That pair is the only machine-checkable statement of "no
+row is hidden in silence", and it is why the harness has a third fixture
+(`e2e/layout/overflow.js`, more rows than any card can show) alongside the
+served and stress ones.
+
+The arithmetic is not yours to invent either. `overflowsBy(rowCount,
+visibleRows)` says how many rows are hidden, `scrollPlan(rowCount, visibleRows,
+secondsPerRow, movingFraction)` returns `null` or `{hidden, seconds}`, and
+`worthScrolling(travelPx)` says whether the pixels those rows came out to are
+worth moving for at all; you measure, they decide.
+
+That last one is not optional politeness. `clientHeight` and `scrollHeight` are
+integers and the device lays out at a device pixel ratio of 2.75, so a card
+whose rows exactly fill it can measure a pixel over — one hidden row, one pixel
+of travel, and a card twitching in the corner of someone's eye for as long as
+the panel is on, with every check in `e2e/layout` passing because a pixel of
+overflow is a real overflow as far as a measurement can tell. Both are pure and tested, and the two
+numbers you pass in are your own — read them off a custom property so they stay
+in your stylesheet next to the `@keyframes` block they describe, the way both
+themes do.
+
+**Whatever moves must not be rebuilt.** `window.onData` replaces every row in
+every card once a minute. Put the animation on an element your `mount()` builds
+once and your `render()` only refills: a CSS animation belongs to an element,
+and replacing that element's children does not disturb it. Rebuild the animated
+element itself and the card resets to the top every 60 seconds and never
+reaches the rows it is moving to reveal.
+
 ## The blackout is not yours
 
 The panel is lit only while the PC is on and logged in (invariant 3, ADR 0005)
@@ -152,6 +201,14 @@ The one thing you owe it: **never set `visibility: visible`**, on anything. That
 un-hides a descendant of a hidden parent, and it is the only way a stylesheet
 can defeat the rule.
 
+`css/style.css` also pauses every animation inside a dark panel, and that is
+core for the same reason. A hidden element's animation keeps running and keeps
+being recomposited; offline the device is on battery with the screen asleep, and
+under the thermal cutoff it is being blanked precisely for working too hard. So
+anything you animate stops on its own while the panel is dark and resumes where
+it left off — you owe that rule only the courtesy of not overriding
+`animation-play-state` on something inside a dark panel.
+
 **Neither of your functions is called while the panel is dark.** `tick` stops,
 and a payload that arrives meanwhile is held rather than rendered — the data
 poller keeps running under the thermal cutoff, because the Activity stays in the
@@ -170,15 +227,28 @@ Nothing in either theme needs to.
 node --test "web/test/**/*.test.js"          # format.js, which you did not change
 python e2e/layout/check_layout.py --theme <name>
 python e2e/layout/check_blackout.py --theme <name>
+python e2e/layout/check_scroll.py --theme <name>
 ```
 
 The layout check drives a real browser at 872x392 — the phone's actual
-viewport — and runs two payloads: the served one from `mock.js`, and the
-widest case the panel can legitimately be asked to show
-(`e2e/layout/stress.js`: the longest city, the longest weather label, a
-negative temperature, a six-figure price beside a sub-1 one, a ticker far
-longer than five characters, and the STALE badge shown). The second one is the
-one that fails.
+viewport — and runs three payloads: the served one from `mock.js`; the widest
+case the panel can legitimately be asked to show (`e2e/layout/stress.js`: the
+longest city, the longest weather label, a negative temperature, a six-figure
+price beside a sub-1 one, a ticker far longer than five characters, and the
+STALE badge shown); and more rows than any card can fit
+(`e2e/layout/overflow.js`). The second is the one that fails on sizes. The
+third is the only pass that requires something to *happen* rather than
+requiring that nothing goes wrong — see the section above on saying so when a
+row is hidden.
+
+`check_scroll.py` is the one that takes time rather than a measurement: it delivers more rows
+than a card can show, watches the card move, delivers the identical rows again, and fails if
+the movement went back to the top. That is the rule above about not rebuilding whatever moves,
+and there is no other way to check it — a pure function cannot see an animation and a layout
+measurement is a single frame. It also fails a card that declares a scroll and does not move,
+and one that keeps a transform after the rows start fitting again. If your theme answers
+overflow with something other than motion, it will fail the first of those; say so in your
+theme's own notes and skip it.
 
 `check_blackout.py` is the other half, and it is the one your theme can fail without looking
 wrong: it drives the page dark on both causes and asserts that nothing is drawn while it is,
