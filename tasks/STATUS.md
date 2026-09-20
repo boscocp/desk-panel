@@ -163,6 +163,122 @@ and the first line of each file says so.
 | T9.1 | **The next meeting, under the clock** | todo | Google Calendar and Microsoft Outlook merged, the soonest event under the clock in the `#shortcuts` strip, between T8.2's two buttons. Blocked behind T8.2 for a layout reason and behind **ADR 0016** for a bigger one: this is the first feature that puts *personal data* on a panel whose server has no authentication, and the refresh tokens it needs are credentials sitting on a desktop PC. OAuth stays on the PC and never reaches the APK — two acceptance lines exist for exactly that. The merge is where the design is: the two providers disagree about all-day events, about time zones and about the word for "declined" |
 | T9.2 | **Spike: can the panel talk to an assistant for nothing?** | todo | A button to ask something out loud and hear an answer, with the whole pipeline on the PC — invariant 1 means the page cannot call anything. Time-boxed, produces `docs/spikes/2026-voice-assistant.md` and a throwaway prototype under `spikes/`, and is allowed to conclude *do not build this*. The unknown is whether offline STT, a small local model and offline TTS fit inside a latency a person will stand at a panel for; Claude and DeepSeek are the paid comparison, not the plan. Also has to answer the awkward ones: `RECORD_AUDIO` would be the app's first dangerous permission, and an unauthenticated LAN endpoint that runs a model and speaks in someone's room is not in ADR 0015's family |
 
+## Resuming after 2026-09-20 (wave 15)
+
+Wave 15 is T6.2 alone, on `wave/15-glow-and-burn-in`. **The panel moves.** Every four minutes it
+sits a few pixels somewhere else, so that one unchanging layout on an AMOLED does not etch
+itself into the glass — and four things glow where nothing but the clock did, and a value that
+changed says so for 280ms.
+
+**Next: T6.4** (night profile), and it is the last of phase 6. Its web half is smaller than its
+task file implies — `isNight` has been in `format.js` and under test since T5.x — and its
+`night: {start, end}` is already in the payload and in `mock.js`. What it still needs is the
+native half (`screenBrightness`, the `night=on` marker) and a phone, which makes it the first
+task since T5.5 to need the device.
+
+### The one decision, and it contradicts the task file
+
+**The burn-in shift is core.** T6.2's `Files:` line said a theme, on the reasoning that a layout
+shift is presentation. The competing rule is newer and won: T6.7 put the blackout in
+`css/style.css` because it is the page's half of a promise about *hardware*, and wave 14 put the
+animation pause beside it for the same reason. A theme that forgot to move would look perfectly
+fine and quietly etch the display, which is that failure in that shape.
+
+So `offsetFor(now)` decides in `format.js` (pure, tested), `js/host.js` writes it into
+`--burn-in-x/--burn-in-y` on every tick, and one rule translates `body > *`. A theme owes it
+three things and all three are "do not"s (`docs/THEMING.md`). The task file carries the
+amendment and the reasoning.
+
+### Two constraints on the cycle that nobody asked for and both are load-bearing
+
+- **Every offset is up and left, never down or right.** A transform past the bottom or right
+  edge becomes the *document's* scrollable overflow. The panel is exactly one screen and
+  `check_layout.py`'s first question is "does the page scroll" — and a page that can scroll is a
+  page with somewhere to hide a row, which is the fault T6.6 exists to fix, arriving by the back
+  door.
+- **The step counts from the epoch, not from midnight.** Counting from midnight was the first
+  cut, it passed every other test, and it fails the task file's own closing note in one
+  sentence: the PC is on for roughly the same hours every day, so every offset would land under
+  the same glyphs at the same hour for ever. That is a rota, not a mitigation. From the epoch a
+  day is 360 steps against a cycle of seven, 360 mod 7 is 3, and the phase advances three
+  positions a night. **The test named for it is what caught it**, which is the first time in this
+  project a test has failed on a property nobody had implemented yet.
+
+### The harness was about to become time-dependent, which is worse than untested
+
+A panel that moves has seven positions, and `check_layout.py` measured whatever the wall clock
+had put on screen. A card that escapes the viewport only at `(-4,-3)` would have been a check
+that fails on a Tuesday — the most expensive kind of failure this repo has, because the next run
+passes.
+
+It now walks the whole cycle and measures at each position, and asserts two things one
+measurement cannot: that core's offset **reaches the glass** (delete the rule in
+`css/style.css` and the sweep still runs seven times, still passes, and has measured one
+position seven times), and that the panel **moves at all**. Both were mutation-tested.
+
+Making the sweep work needed the page's clock pinned, and that fixed something older by
+accident: the stress pass rendered **today's** pt-BR date, so "the widest case the panel can be
+asked to show" was only the widest case on the days it happened to be. It is pinned to
+`segunda-feira, 23 de fevereiro de 2026` now — the longest such date of the year, at 38
+characters, and it still fits the sidebar in two lines. Screenshots are comparable between runs
+again as well.
+
+`check_pulse.py` is the fourth browser check and it is the only one that is about a *theme*
+rather than about the panel. It exists for one failure that is invisible on this desk: `onData`
+replaces every row every minute whether or not a number moved, so a pulse keyed on the payload
+arriving looks perfect in a browser — `mock.js` jitters every price every three seconds — and
+on the device, with an upstream down and the server serving last-good values, it flashes the
+whole panel once a minute while STALE sits in the corner saying nothing has moved.
+
+### Two cross-realm traps, one in the page and one in the harness
+
+Both cost time and both are the same mistake in two places, so they are worth naming together:
+**`Date` is not one type, it is one type per realm.**
+
+- `offsetFor` guarded its argument with `instanceof Date`. A Date built anywhere else — an
+  iframe, a harness driving the page from outside — is not an instance of *this* realm's Date,
+  so the guard answered the origin for every clock the sweep handed it: seven positions, all
+  `(0,0)`, and a burn-in feature that reported as working perfectly while doing nothing. It is
+  duck-typed now. In production the Date comes from `js/app.js` and the bug could never fire;
+  the point is that it failed **silently**, and the sweep's own "the panel never moves"
+  assertion is the only thing that caught it.
+- Marionette executes in its own sandbox with its own globals, so `new Date()` inside an
+  injected script is the *harness's* clock however carefully the page's one has been pinned.
+  `check_layout.py` and `stress.js` both say `new window.Date()` now.
+
+### The review found four, all invisible on screen
+
+- **The shift ran outside any try**, one line above the theme's guarded tick, and it calls a
+  global out of `format.js`. That made the panel's *clock* — the one thing it owes
+  MainActivity (ADR 0009) — depend on that file having loaded. It has its own try now, which
+  keeps both halves of what the placement was for.
+- `check_layout.py` read the pinned instant out of the page once per position rather than once
+  per pass: twenty-one round trips to compute an addition.
+- `document.body.firstElementChild.getBoundingClientRect()` throws on a theme that rendered
+  nothing, so the harness would have **crashed where it should have reported**. "The harness
+  crashed" and "the panel is empty" are not the same finding, and an empty page is the failure
+  this directory already has three guards against.
+- `check_scroll.py` picks the first animating element in a card, and until this wave there was
+  only ever one. A pulsing value is a second. `[0]` is still right — the box that moves a card's
+  rows contains them, and an ancestor precedes its descendants — but that is now a fact worth
+  writing down rather than a coincidence the next person re-derives.
+
+`docs/TESTING.md` also gained the browser harness, which it had never mentioned: four checks
+since T6.1 and no entry in the file that says how this project is tested.
+
+### What is still only true on this desk
+
+- **Nothing in this wave has been seen on the phone.** It is web-only, like wave 14, and it was
+  verified the way wave 14 was: the four browser checks, both themes. What that cannot answer is
+  whether a 10px halo reads as light or as a smudge at 50cm on a real AMOLED with Roboto
+  Condensed — the host falls back to a wider face, and the harness measures geometry. The
+  task file's manual check says so and it is outstanding.
+- **The server on this desk is still up** and still started by hand (T3.9 is still `todo`). Stop
+  it **by PID**, found through `ss -ltnp 'sport = :8777'`, never `pkill -f "server/server.py"`.
+- **The pulse fires every three seconds in a browser** and once a minute on the device. That is
+  `mock.js` jittering every price, not the feature being loud — and it is exactly why the
+  browser is the wrong place to judge whether 280ms is right.
+
 ## Resuming after 2026-09-20 (wave 14)
 
 Wave 14 is T6.6 and T6.8, on `wave/14-overflow-and-weather`. Two tasks rather than one because
