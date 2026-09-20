@@ -43,6 +43,16 @@ PAYLOAD_B = ("window.onData({quotes:[{symbol:'BBB',price:2,changePct:2}],fx:[],c
              "weather:{tempC:9,minC:8,maxC:9,code:0,city:'B'},"
              "battery:{level:50,tempC:30,charging:false},stale:false,theme:'plain'});")
 
+# More B3 rows than any card on any theme can show, so the panel is actually
+# animating when the last check below blacks it out. Twelve rather than "a few
+# more than fit" for the reason e2e/layout/overflow.js gives: one payload has to
+# overflow neon's tall cards and plain's short columns both.
+PAYLOAD_OVERFLOW = (
+    "window.onData({quotes:Array.from({length:12},(_,i)=>"
+    "({symbol:'Q'+i,price:10+i,changePct:i%3-1})),fx:[],crypto:[],"
+    "weather:{tempC:1,minC:0,maxC:2,code:0,city:'A'},"
+    "battery:{level:50,tempC:30,charging:false},stale:false});")
+
 
 def check(m, fails):
     def js(src):
@@ -123,6 +133,57 @@ def check(m, fails):
     if js("return document.getElementById('clock').textContent;") == stopped:
         fails.append("the clock did not restart when the panel came back")
 
+    # And nothing keeps moving behind the blackout.
+    #
+    # `visibility: hidden` stops the panel being drawn and does not stop a CSS
+    # animation: it keeps ticking and its layer keeps being recomposited, on a
+    # device that is either asleep on battery or being blanked for running hot.
+    # T6.6 put the first animation on this page, so css/style.css pauses them --
+    # and a rule about something invisible, in a state nobody looks at, is
+    # exactly the kind that rots without a command.
+    #
+    # mock.js pushes a three-row payload every 3s on a file: page, and this block
+    # cannot outrun it: a tick landing inside the dark window is *held* by
+    # app.js and flushed on the way back, so it is the three-row payload that
+    # gets drawn, data-scroll goes away, and a correct panel is reported as
+    # having failed to resume its scroll. The checks above are written to
+    # tolerate that (the payload under test is re-delivered each time); this one
+    # cannot be, so the feed is stopped instead.
+    #
+    # Clearing every interval id is blunt and is the only handle available --
+    # mock.js keeps its id to itself, deliberately, because nothing in
+    # production has any business stopping the feed. It stops app.js's clock
+    # too, which is why it happens here and not earlier: the clock checks above
+    # are the only ones that need the timer, and they are done.
+    js("for (let i = 1; i < 10000; i += 1) { clearInterval(i); }")
+
+    js(PAYLOAD_OVERFLOW)
+    if not js("return !!document.querySelector('#quotes[data-scroll]');"):
+        fails.append("a card holding twelve rows did not declare data-scroll, so the "
+                     "animation pause below would have been checked against nothing")
+    else:
+        # Found by what it does, not by what it is called: any element in the
+        # card whose computed animation-name is not 'none'. A theme is free to
+        # answer the overflow however it likes and to name its moving box
+        # whatever it likes (docs/THEMING.md), so a class name here would be
+        # this file knowing one theme's markup.
+        moving = ("return (Array.from(document.querySelectorAll('#quotes *'))"
+                  ".map((el) => getComputedStyle(el))"
+                  ".filter((s) => s.animationName !== 'none')[0] || {})"
+                  ".animationPlayState || 'none';")
+
+        lit = js(moving)
+        if lit != "running":
+            fails.append("an overflowing card is not animating while the panel is lit: %r"
+                         % lit)
+        js("window.onThermal(true);")
+        dark_state = js(moving)
+        if dark_state != "paused":
+            fails.append("the scroll kept running behind the blackout: %r" % dark_state)
+        js("window.onThermal(false);")
+        if js(moving) != "running":
+            fails.append("the scroll did not resume when the panel came back")
+
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -149,6 +210,13 @@ def main():
         m.read()  # server handshake
         m.cmd("WebDriver:NewSession", {"capabilities": {}})
         m.cmd("WebDriver:Navigate", {"url": url})
+        # Nothing here reads a size, with one exception: the last check needs a
+        # card to be actually overflowing, and how many rows overflow a card
+        # depends on how tall the card is. In whatever window Firefox opened
+        # with, twelve rows may well fit. The guard below catches that and says
+        # so rather than passing quietly, but it is cheaper to measure the
+        # viewport the panel is built for.
+        cl.calibrate(m, *cl.VIEWPORT)
         time.sleep(cl.SETTLE_SECONDS)
         check(m, fails)
     finally:

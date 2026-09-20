@@ -151,6 +151,86 @@ function round2(n) {
     return Math.round(n * 100) / 100;
 }
 
+// --- The slow scroll, when a card holds more rows than it can show (T6.6) ---
+//
+// The panel is exactly one screen and every card clips its own content, which
+// is what stops a sixth ticker arriving from server config pushing a section
+// off the bottom edge. The cost was that the sixth ticker was *invisible* --
+// not truncated, not marked, simply absent, with nothing on the panel saying
+// so. These two decide when a card is allowed to move instead.
+//
+// Both are pure and both count rows rather than pixels: the measuring is the
+// theme's job, because only the theme knows what a row looks like, and the
+// decision is here, because a decision is the thing worth testing.
+
+// rowCount: how many rows the card was given. visibleRows: how many of them
+// fit inside it. Returns how many are hidden -- zero when they all fit, which
+// is the answer that means "do not move".
+//
+// Anything unusable counts as no overflow rather than as some. A card that
+// started scrolling because a measurement came back NaN would be motion in
+// the corner of someone's eye all day, with no way to tell what it was for.
+function overflowsBy(rowCount, visibleRows) {
+    if (!Number.isFinite(rowCount) || !Number.isFinite(visibleRows)) {
+        return 0;
+    }
+    return Math.max(0, Math.ceil(rowCount) - Math.floor(visibleRows));
+}
+
+// How long one pass takes, given the seconds a theme wants to spend per hidden
+// row and the fraction of the cycle its @keyframes block spends moving.
+//
+// The fraction is a parameter rather than a constant because it is a property
+// of CSS this file cannot see: the keyframes hold at each end so the top and
+// the bottom of the card can actually be read, and how long they hold is the
+// theme's taste. Passing it in keeps the two numbers in one file -- the
+// theme's stylesheet -- instead of splitting one decision across two languages
+// the way BATTERY_HOT_C and BLANK_AT_C are split.
+const SCROLL_SECONDS_PER_ROW = 4;
+const SCROLL_MOVING_FRACTION = 0.7;
+
+// Below this, a card does not move however the row arithmetic came out.
+//
+// The review of T6.6 found the case this exists for, and it only happens on the
+// phone. `clientHeight` and `scrollHeight` are integers; the device lays out at
+// a device pixel ratio of 2.75, so a card whose rows exactly fill it can report
+// 102px of content in a 101px window. That is one hidden row by every count
+// above, and a travel of one pixel: the card would declare a scroll, hold a
+// compositor layer, and twitch a pixel back and forth every seventeen seconds
+// for as long as the panel is on. Nothing in e2e/layout would fail -- 1px is a
+// real overflow as far as the harness can tell -- so it would have shipped and
+// been visible only from the chair.
+//
+// Four pixels, which is comfortably above the two a pair of integer roundings
+// can invent and far below the twenty-odd a genuinely hidden row is worth.
+const SCROLL_MIN_TRAVEL_PX = 4;
+
+// travelPx: how far the card would actually move, which only the theme can
+// measure. Pure and separate from scrollPlan because it is a different
+// question -- scrollPlan counts rows, this one asks whether the pixels those
+// rows came out to are worth moving for.
+function worthScrolling(travelPx) {
+    return Number.isFinite(travelPx) && travelPx >= SCROLL_MIN_TRAVEL_PX;
+}
+
+// Returns null when nothing should move, or {hidden, seconds} when it should.
+// null rather than {hidden: 0}: "do not scroll" is a different answer from
+// "scroll by nothing", and a caller that has to check a field to tell them
+// apart eventually forgets to.
+function scrollPlan(rowCount, visibleRows, secondsPerRow, movingFraction) {
+    const hidden = overflowsBy(rowCount, visibleRows);
+    if (hidden === 0) {
+        return null;
+    }
+    const perRow = Number.isFinite(secondsPerRow) && secondsPerRow > 0
+        ? secondsPerRow : SCROLL_SECONDS_PER_ROW;
+    const moving = Number.isFinite(movingFraction) && movingFraction > 0 && movingFraction <= 1
+        ? movingFraction : SCROLL_MOVING_FRACTION;
+    // The travel itself is hidden * perRow; the cycle is longer than the
+    // travel by whatever the keyframes hold at the two ends.
+    return { hidden: hidden, seconds: Math.round((hidden * perRow / moving) * 100) / 100 };
+}
+
 // pct: number (e.g. 1.23 for +1.23%). Sign, one decimal, percent sign.
 // Zero is shown without a sign, matching changeClass's "flat" bucket.
 function formatChange(pct) {
@@ -200,6 +280,54 @@ const WEATHER_LABELS = {
 
 function weatherLabel(code) {
     return WEATHER_LABELS[code] || 'Unknown';
+}
+
+// minC/maxC: the day's low and high, or null when the upstream had none.
+//
+// This exists because joining two temperatures with a hyphen is ambiguous the
+// moment one of them is negative: the stress payload rendered `(-12-42°C)`,
+// which is not a styling problem but a string nobody can parse by eye. A
+// separator that cannot be read as a sign fixes it, and there is no separator
+// made of `-` that can be trusted to do that -- so the join is ` / `.
+//
+// The degree signs are here rather than in the theme because the card no
+// longer writes a sentence around this: each line is its own statement now,
+// and `18 / 27` with the unit somewhere else is a worse thing to read.
+function formatRange(minC, maxC) {
+    const low = formatTemp(minC);
+    const high = formatTemp(maxC);
+    if (low === '--' && high === '--') {
+        return '--';
+    }
+    // The unit goes on the numbers and not on the dashes. `--°` is a
+    // temperature of nothing-degrees, which is the same kind of string this
+    // function exists to stop -- and a partial upstream failure is exactly when
+    // the panel most needs to be read at a glance rather than puzzled over.
+    const unit = (t) => (t === '--' ? t : `${t}°`);
+    return `${unit(low)} / ${unit(high)}`;
+}
+
+// The WMO codes above, collapsed to the small closed set a picture can
+// actually distinguish at 40px. Returns a name, never markup: the theme owns
+// what a cloud looks like, and this file owns no DOM.
+//
+// 'unknown' is a real member of the set and not an error. A code outside the
+// table is a code open-meteo added after this was written, and the label
+// beside the glyph still says what it is -- so the honest picture is no
+// picture, which is what the theme draws for this name.
+const WEATHER_GLYPHS = {
+    0: 'clear', 1: 'clear',
+    2: 'cloudy', 3: 'cloudy',
+    45: 'fog', 48: 'fog',
+    51: 'rain', 53: 'rain', 55: 'rain',
+    61: 'rain', 63: 'rain', 65: 'rain',
+    80: 'rain', 81: 'rain', 82: 'rain',
+    71: 'snow', 73: 'snow', 75: 'snow',
+    95: 'storm', 96: 'storm', 99: 'storm',
+};
+
+function weatherGlyph(code) {
+    return WEATHER_GLYPHS[code] || 'unknown';
 }
 
 // Above this, the panel says so. Lithium ageing is dominated by heat, and the
@@ -323,7 +451,10 @@ function isNight(now, start, end) {
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         formatPrice, formatRate, formatPair, formatTemp, formatChange, changeClass,
-        weatherLabel, isNight,
+        weatherLabel, weatherGlyph, formatRange, WEATHER_LABELS,
+        isNight,
+        overflowsBy, scrollPlan, worthScrolling,
+        SCROLL_SECONDS_PER_ROW, SCROLL_MOVING_FRACTION, SCROLL_MIN_TRAVEL_PX,
         sparklinePath,
         formatBattery, tempClass, BATTERY_WARN_C, BATTERY_HOT_C,
     };

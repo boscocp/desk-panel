@@ -28,7 +28,79 @@ const out = {
     clippedContent: [],
     emptySections: [],
     overlaps: [],
+    scrolling: [],
+    pointlessMotion: [],
 };
+
+// What is actually on the glass, which is not the same thing as what the
+// layout says.
+//
+// Questions 2 and 4 both claim to be about what is drawn -- "one card escaped",
+// "some of it is underneath the rest" -- and until T6.6 nothing on this panel
+// could tell the two apart, because no card had ever held more than it could
+// show in either fixture. A scrolling card does, by design: its rows below the
+// fold are laid out past the card's bottom edge and clipped away, and as the
+// card walks up through them the ones above the top edge are clipped too.
+// getBoundingClientRect describes those boxes honestly and uselessly. Left
+// alone, every hidden row reads as a section escaping the viewport and as ink
+// sitting on top of the card below -- a hundred failures about pixels nobody
+// can see.
+//
+// So a rect inside a scrolling card is intersected with the boxes that clip it
+// before it is judged.
+//
+// Scoped to `[data-scroll]`, and not applied to the panel at large, which was
+// the first cut. Clipping every rect against every `overflow: hidden` ancestor
+// is more honest in the abstract and quietly guts question 2: `body` and
+// `#panel` both clip, so a card that escaped the panel would be intersected
+// back inside it and reported as fine. The one thing that changed in T6.6 is
+// that a card can now hold rows outside its own box on purpose, and that is
+// the one case this handles. Everything else measures exactly what it measured
+// before.
+//
+// Nothing here weakens question 3 either: whether a section's content fits
+// inside it is measured separately, per section, from scrollHeight -- a card
+// quietly eating its own rows still fails, and a card that says `data-scroll`
+// with nothing hidden fails too.
+//
+// One blind spot, named because it is not obvious and there is no instance of
+// it today. This assumes every clipping ancestor between the element and the
+// scrolling section actually clips it, which is false for an absolutely
+// positioned descendant whose containing block is outside that ancestor: such
+// an element paints outside the card and would be intersected back inside it
+// and reported as fine. Nothing in either theme is positioned inside a list
+// card -- but #battery is exactly that kind of element elsewhere on the panel,
+// and it is the fault that earned question 4 in the first place (T5.4). A
+// future "+3 more" badge pinned inside a scrolling card is the shape to watch
+// for.
+function paintedRect(el) {
+    let r = el.getBoundingClientRect();
+    const scope = el.parentElement && el.parentElement.closest('[data-scroll]');
+    if (!scope) {
+        return r;
+    }
+    for (let a = el.parentElement; a; a = a.parentElement) {
+        const style = getComputedStyle(a);
+        if (style.overflowX !== 'visible' || style.overflowY !== 'visible') {
+            const c = a.getBoundingClientRect();
+            r = {
+                top: Math.max(r.top, c.top),
+                left: Math.max(r.left, c.left),
+                bottom: Math.min(r.bottom, c.bottom),
+                right: Math.min(r.right, c.right),
+            };
+            r.width = Math.max(0, r.right - r.left);
+            r.height = Math.max(0, r.bottom - r.top);
+            if (!r.width || !r.height) {
+                return r;
+            }
+        }
+        if (a === scope) {
+            break;
+        }
+    }
+    return r;
+}
 
 function outside(r) {
     return r.top < -0.5 || r.left < -0.5 ||
@@ -55,17 +127,100 @@ for (const id of SECTIONS) {
     }
     // scrollHeight > clientHeight means the box is on screen but its content
     // does not fit inside it. Cards use overflow:hidden, so this is silent.
-    if (el.scrollHeight > el.clientHeight + 0.5 || el.scrollWidth > el.clientWidth + 0.5) {
+    //
+    // Unless the theme said it was not. A section carrying `data-scroll` holds
+    // more rows than it can show and is walking through them (T6.6), which is
+    // the answer to this fault rather than an instance of it. Both directions
+    // are checked, and they are not the same check:
+    //
+    //   - a section that overflows without the attribute is the old fault, and
+    //     it is still a failure,
+    //   - a section with the attribute and nothing hidden is motion for its own
+    //     sake on a panel in someone's peripheral vision (T6.6 step 2), and is
+    //     also a failure,
+    //   - a section with both is reported separately, so a pass can *require*
+    //     it and this harness can say something about the feature rather than
+    //     only about the absence of faults.
+    //
+    // The overflow of a scrolling card is not measurable on the section: the
+    // rows are two boxes down, inside the window that clips them, and the
+    // section's own content fits it exactly. overflowInside() finds it without
+    // being told the theme's class names -- any element taller than the parent
+    // that clips it.
+    const declared = el.hasAttribute('data-scroll');
+    const inside = overflowInside(el);
+    if (declared) {
+        if (inside.tall) {
+            out.scrolling.push('#' + id + ' ' + inside.tall);
+        } else {
+            out.pointlessMotion.push(
+                '#' + id + ' is marked data-scroll and nothing is hidden');
+        }
+    } else if (el.scrollHeight > el.clientHeight + 0.5 || inside.tall) {
         out.clippedContent.push(
             '#' + id + ' content ' + el.scrollWidth + 'x' + el.scrollHeight +
-            ' in a box of ' + el.clientWidth + 'x' + el.clientHeight);
+            ' in a box of ' + el.clientWidth + 'x' + el.clientHeight +
+            (inside.tall ? '; ' + inside.tall : ''));
     }
+
+    // Width is checked the same way whichever it is. `data-scroll` is a promise
+    // about a *vertical* scroll and excuses nothing sideways -- a card too
+    // narrow for its rows hides them for good, moving or not.
+    if (el.scrollWidth > el.clientWidth + 0.5 || inside.wide) {
+        out.clippedContent.push('#' + id + ' ' + (inside.wide
+            || ('content is ' + el.scrollWidth + 'px wide in a ' + el.clientWidth
+                + 'px box')));
+    }
+}
+
+// The worst thing inside `section` that its own clipping parent cannot show,
+// in each axis, as a sentence -- {tall, wide}, either of them null.
+//
+// A section's scrollHeight used to be enough, and stopped being when T6.6 put
+// the rows two boxes down: a nested `overflow: hidden` clips its descendants'
+// contribution, so a card whose rows do not fit its inner window measures as
+// fitting itself. This walks down and asks the question where it can still be
+// answered -- any element bigger than the parent that clips it -- and it does
+// so without being told one theme's class names.
+//
+// Elements only, so a nowrap label ellipsising its own *text* is not a finding:
+// that is the label doing its job, and it has no element child to measure.
+function overflowInside(section) {
+    let tall = null;
+    let wide = null;
+    section.querySelectorAll('*').forEach((node) => {
+        const parent = node.parentElement;
+        if (!parent) {
+            return;
+        }
+        const style = getComputedStyle(parent);
+        if (style.overflowY !== 'visible') {
+            const over = node.offsetHeight - parent.clientHeight;
+            if (over > 0.5 && (!tall || over > tall.over)) {
+                tall = { over: over, node: node, parent: parent };
+            }
+        }
+        if (style.overflowX !== 'visible') {
+            const over = node.offsetWidth - parent.clientWidth;
+            if (over > 0.5 && (!wide || over > wide.over)) {
+                wide = { over: over, node: node, parent: parent };
+            }
+        }
+    });
+    return {
+        tall: tall && ('holds ' + tall.node.offsetHeight + 'px of rows in a '
+                       + tall.parent.clientHeight + 'px window: '
+                       + Math.round(tall.over) + 'px of them are out of sight'),
+        wide: wide && ('holds a ' + wide.node.offsetWidth + 'px box in a '
+                       + wide.parent.clientWidth + 'px one: '
+                       + Math.round(wide.over) + 'px of it is cut off sideways'),
+    };
 }
 
 // Not just the five sections: any descendant can escape, and a row sticking out
 // of a card is as broken as a card sticking out of the page.
 document.querySelectorAll('body *').forEach((el) => {
-    const r = el.getBoundingClientRect();
+    const r = paintedRect(el);
     if (!r.width && !r.height) {
         return;
     }
@@ -100,7 +255,7 @@ function ink(root) {
         if (!drawsSomething) {
             return;
         }
-        const r = el.getBoundingClientRect();
+        const r = paintedRect(el);
         if (r.width < 0.5 || r.height < 0.5) {
             return;
         }
