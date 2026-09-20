@@ -119,7 +119,7 @@ something wider, so its text widths are a conservative estimate rather than the 
 | # | Task | State | Notes |
 |---|---|---|---|
 | T6.1 | Landscape layout, neon palette | done | 2026-09-16. All six acceptance commands exit 0 (`node --test` still 16/16; the task file's colour literals were updated with the palette). **Palette re-cut twice at the user's request**: cyan on violet-black -> pink/red -> the settled `#000000` ground with a `#D53FA7` accent. Pure black is load-bearing, not taste: this is an AMOLED showing one frame for hours, so `#000000` pixels are off - no power, nothing to burn in (ADR 0008, T6.2). Card fills were dropped for the same reason. `--accent-dim` `#BB81AA` is the accent *desaturated, not darkened*: it carries the smallest text on the panel, so it measures 6.8:1 on black against the accent's 5.1:1 - de-emphasis comes from chroma, never luminance. Up/down are separated three ways so they can never be two shades of one hue: hue (`--up` `#3FD56C` is the accent's exact complement, 138 deg vs 318 deg), brightness (10.9:1 vs 6.1:1), and the sign `format.js` already writes - any one surviving is enough, which also covers a red/green colour-blind reader. **The T2.3 clipping is gone, measured not guessed**: Firefox driven over Marionette with the layout viewport calibrated to exactly 872 x 392 (`SetWindowRect` sizes the *outer* window, so it iterates until `innerWidth/innerHeight` match - the first pass silently gave 306px and would have made every number meaningless), `documentElement.scrollHeight` is 392 against 620 before, and a sweep of every element under `body` returns nothing outside the viewport and no section whose `scrollHeight` exceeds its `clientHeight`. Verified on `mock.js` as served and on a stress payload (`Sao Jose dos Campos`, `Thunderstorm, heavy hail`, -10 to 42 degrees, a zero change, `SHIBAINU-VERYLONGNAME`, `STALE` forced visible, pt-BR date); also clean at 839x392 and 1024x500. Three traps paid for. `#panel`'s rows are `minmax(0, Nfr)`, never `auto`: with `auto` an extra ticker from server config walks the battery card off the bottom again, and tickers are config, not a rebuild. The clock is 60px, not the 64px first cut - off-device the stack falls through to a non-condensed fallback where `HH:MM:SS` is ~4.5em against Roboto Condensed's ~4.0em, leaving 4px of slack inside a `#sidebar` that clips; at 60px it measures 266px in a 296px box. And card titles are `::before` content because `app.js` clears each section with `textContent = ''`, so no `app.js` change was needed at all. **Two things to look at on the device, not settled here**: the user's "the four cards are in a good position" was said about the *old* build, where the cards were empty outlines in a 2x2 that only fits because they hold nothing - this layout is a 2-wide, 3-tall card block beside the clock, which is the only arrangement where all five fit populated, and he has not seen it yet; and `#D53FA7` is mid-luminance, so the 11px card titles at 6.8:1 are the thing most likely to be too dim across a desk (T6.3 owns that call - the fix is a lighter `--accent-dim`, never a brighter accent). **Traceability caveat, and it expires at the merge**: the first half of this work is not in a T6.1 commit. `web/index.html`, `web/css/style.css` and an earlier version of this row were picked up by two `git add -A` runs from other agents sharing the worktree, so on `wave/5-phone` they sit inside two commits titled `docs(android): ...`. Content was byte-for-byte what had been measured; only the history was wrong. Deliberately not split: the branch reaches `main` through `gh pr merge --squash`, which collapses it to one commit, so the misattribution never arrives there and rebasing a worktree three agents were writing to would have risked real work to fix a property the merge erases. **If you are reading this on `main`, the two short SHAs that used to be quoted here no longer resolve** - that is the squash, not a lost commit; `git log -S 'id="sidebar"' -- web/` finds the change in whichever history you are in. The parallel-agent hazard behind it is in the PR body |
-| T6.2 | Glow, micro-animations, burn-in shift | todo | |
+| T6.2 | Glow, micro-animations, burn-in shift | done | 2026-09-20. The panel moves now: `offsetFor(now)` in `format.js` walks a seven-position cycle 4px up and left, `host.js` writes it into `--burn-in-x/y` on every tick, and one rule in `css/style.css` translates `body > *`. **Core, against the task file's `Files:` line**, and for the reason T6.6 moved the animation pause there: it is the page's half of a promise about hardware, and a theme that forgot it would look perfectly fine and quietly etch the display. Glow and the pulse are taste and stayed in neon. Three defects found by the checks rather than by the eye — see the wave 15 section |
 | T6.6 | **Slow scroll when a card overflows** | done | 2026-09-20, wave 14. `overflowsBy` and `scrollPlan` in `format.js`; the rows moved into a `.scroller` inside a `.card-body` window in **both** themes, and the animation sits on an element `mount()` builds once, so the 60s rebuild never touches it — the task's step 4 asked for rows updated in place or an offset carried across, and neither is needed once the animated element is the one thing that does not get replaced. A card says `data-scroll` while it is hiding a row; `e2e/layout/overflow.js` is a third `check_layout.py` pass that fails in both directions. **The second acceptance line was replaced**: it could not fail, and what it asked for would have broken the feature and contradicted T6.1 — see the task file |
 | T6.7 | **A theme boundary** | done | 2026-09-20. All four acceptance commands exit 0, and the manual check is stronger than it was written to be: **the neon render is byte-identical before and after the move** — `check_layout.py --screenshots` on a worktree at `main` and on this branch produce the same PNG for the stress pass (`md5 41dadf5b…`), because that pass pins the clock, the date locale and every value. "Compare two screencaps" became an md5. **Where the line ended up.** `js/app.js` keeps the bridge, the payload, the clock's timing and the screen state, and contains no element, id or class name — that is the acceptance grep, and it is met by having no DOM in the file at all rather than by hiding it behind a helper. `js/host.js` is the seam: the live stylesheet, the current theme object, the root element, the blackout attribute. `web/themes/<name>/` owns everything else. A theme is an object with two functions, `render(payload, root)` and `tick(now, root)`, and `host.js` is the whole of the machinery — no registry of hooks, no lifecycle, because there is one consumer and it is a page that renders a payload. **Three constraints shaped it, and two of them are not obvious.** *(1) `#clock` has to exist before the page finishes loading*: `MainActivity.onPageFinished` reads it out of the DOM and logs `panel=rendered clock=` (T2.2, ADR 0009), so every script is in `<head>` with `defer` and every packaged theme registers as it parses. A dynamically injected `<script>` — the obvious way to load only the chosen theme — runs after that point, and the marker would have reported an empty clock on a panel that was about to be perfectly fine. `index.html` therefore carries a two-line manifest per theme; adding a theme is a rebuild whatever happens, because its files have to reach `assets/` somehow, and **switching** between packaged themes is what must not be. *(2) Stylesheets switch on `media`, not on the `disabled` property.* `disabled` was dropped from the HTML spec, and a browser that ignored it would apply every theme's rules at once — breaking the default look in order to make a non-default one work. `media="not all"` is not optional and cannot be misread. Both stylesheets are fetched at load, so a swap costs no request and shows no unstyled frame. *(3) The blackout is core's, not the theme's.* `body.pc-offline > *` and `body.too-hot > *` went to `css/style.css` as one rule on `:root[data-panel="dark"]`: it is the page's half of a promise about hardware (invariant 3, ADR 0005; T5.5, ADR 0012), and a theme that forgot it or spelled its class differently would leave a lit panel against a sleeping PC and look like a bug in Java. `docs/THEMING.md` states the one thing a theme owes it — never `visibility: visible`, which un-hides a descendant of a hidden parent. **Selection is the `theme` key T3.12 parked**: it rides `/quotes`, `DataPayload` passes it through untouched, and only the page decides. The server has no idea which themes the installed APK was built with, so an unknown name falls back to `neon` and warns once — a typo costs a line in logcat, never a blank panel. Verified: `--theme definitely-not-a-theme` renders a PNG byte-identical to neon's. An absent or empty key is **dropped** from the payload rather than sent as `""`, so an older server on the PC takes the same path. **The plain theme is the proof, and it is not decoration.** Same payload, different markup: the change sits before the number it describes, headings are real elements instead of `::before` content, the battery is in the flow instead of positioned, the weather is three lines, and the row wraps onto two — because four narrow columns cannot hold a ticker and two numbers on one line, and at one line it rendered `BTC` as `B1`. No core change was needed for any of it, which is the only thing that shows the boundary is real rather than a directory rename. It is held to T6.3's 20px floor, which is why that task's grep is now `-r` over `web/themes/`. **`check_layout.py --theme` earned itself immediately**: it caught the plain clock clipping its own digits by 5px, invisible in a screenshot, and again by 2px after the first fix. `mock.js` and `stress.js` both read `?theme=` so the two passes measure the same theme — without that, the stress pass would have switched a `--theme` run back to the default and measured the wrong panel while printing the right name. **Four earlier acceptance blocks were repaired, and one of them was already broken before this wave** — see the section below. **The review found six things and all six were fixed before the merge.** Five were small and real — a dead `fallbackTheme` field whose comment claimed two readers it did not have; an unknown-theme warning that latched on a *boolean* rather than on the name, so the owner's second typo months later would have been silent while `config.example.toml` still promised a line in logcat; `--screenshots` filenames that ignored `--theme`, which silently overwrote the very PNGs this wave's byte-identical claim compares; a `MainActivity` javadoc still pointing at the `index.html` guard T6.7 deleted; and a `THEMING.md` list that promised layout coverage for `#shortcuts`, which `measure.js` does not measure. **The sixth changed behaviour**: `onData` called `render` and `tick` into a blacked-out panel, contradicting `THEMING.md` and `app.js`'s own argument about not writing to a hidden DOM. It matters under the thermal cutoff specifically, where the poll loop deliberately keeps running so the device can notice itself cooling (T5.5) — so every cycle rebuilt the whole panel into a hidden DOM on a device being blanked *for working too hard*. A payload arriving while dark is now held, and the latest one is drawn the moment the panel returns. **That fix is why `e2e/layout/check_blackout.py` exists.** The blackout used to be two class names in the panel's own stylesheet; it is now an attribute on `<html>`, a rule in core CSS and a hold in `app.js`, none of which shows in a screenshot and none of which had a command. It drives the real page and asserts the round trip on both causes, and it is mutation-tested in both directions — deleting the hold fails it on three lines, `visibility: visible` on two. **Not verified on the device**: nothing here has been run on the phone. The three device-facing claims are that `panel=rendered` still reads a real clock, that the neon theme is unchanged under Roboto Condensed rather than the host's wider fallback, and that the plain theme is legible at 50cm |
 | T6.3 | Legibility on the physical device | done | 2026-09-16. Both acceptance commands exit 0, and T6.1's five re-run green. Driven by the user at the device rather than by a ratio: he called the card titles too small and the date "exactly at the limit of comfortable reading" - the date was 16px, which is why the task's 20px floor is the right number and not a round one. Four declarations violated it: date 16px, battery 17px, card titles 11px, STALE badge 11px. All now 20px; clock stays 60px and weather 24px. **The clock was not cut.** 20px titles nearly double a line that appears five times, and the room came from spacing instead: body padding 12->10px, `#panel` gap 10->8px, and the row split 1.22fr->1.3fr, which is where the three-row B3 card needed it. The task's own note says to resist shrinking things to fit more in, and the clock is what the panel is for. Title tracking went 0.22em->0.14em because wide tracking reads as a label at 11px and as a gap at 20px, and WEATHER stopped fitting its card. Prices are now bold - step 2 of this task's ordering, after size: the titles are the same size as the numbers beside them now, so hierarchy had to come from somewhere that costs no vertical space. **Re-measured, not assumed**: `e2e/layout/check_layout.py` exits 0 on both payloads, document exactly 392px in a 392px viewport, nothing outside it, nothing clipping its own content. Worst-case free space below the content: B3 6.9px, FX and CRYPTO 6.3px, DEVICE 8.5px, WEATHER 29.4px. That headroom is font-independent - every line-height in the file is a unitless multiple, so box heights are the same under the device's Roboto Condensed as under the host's wider fallback; only text *widths* differ, and those only shorten a label that already ellipsises. **Still open and genuinely human**: whether the 20px titles now read as titles rather than as one more data row, since they match the row labels in size and colour and are separated only by tracking and position. Contrast was deliberately not touched - the user reported size, so size is what changed; a lighter `--accent-dim` stays in reserve if dimness turns out to be separate. **Five levers were then measured rather than argued about** (`--extra-css`, stress payload, 872x392), after the user asked whether shrinking the WEATHER card would help: narrowing it to 170px, cutting it to one row, both together, narrowing the sidebar to 230px, widening the row split to 1.6fr, and cutting the clock to 40px. **The middle column is byte-identical in every one of them** - quotes h=140 free=6.9, fx and crypto h=108 free=6.3 - because `#panel`'s rows are `minmax(0, Nfr)`, so heights are fractional and never content-driven, and the two columns are vertically independent. Nothing in the right column can give vertical space to the middle one, and the clock is paying for nothing at all (the sidebar has ~244px unused). The only vertical budget is `392 - 2*body padding - 2*row gap`, both already spent. Three of the levers actively break: WEATHER at one row overflows by 57px under the stress payload **while passing the served one**, WEATHER at 170px clips its own longest word and pushes the battery line to three, and the 230px sidebar clips 36px off the clock - the T2.2 defect returning. Rows cannot wrap by construction (flex row, `nowrap` on all three spans, ellipsis on the label): measured row heights are [31, 32], one line each, in every scenario. The lever with real value is the opposite of the request - WEATHER wants **more** room, not less, and demoting the DEVICE card takes it from 256px to 372px with 87.3px free while nothing else moves. That is recorded in T5.4, whose own step 3 already asks for DEVICE to be small and in a corner. **Second round at the device: all three questions came back clean** - titles comfortable, titles read fine as they are, date better than before. No hierarchy problem, so the 5-6px of free space in FX and CRYPTO stays unspent, which is the right outcome with T3.4 and T5.4 still to put real content in those cards. One process note worth more than the code: a heading-rule change was built and measured against `titulo so uma linha`, which had been relayed as "the title reads as just another row" but actually meant "the titles fit on one line and are fine". Reverted in full (`f97f65c` then its revert; the stylesheet is byte-identical to `0d4e8e2`, which is the state the user approved). The ambiguity had been flagged before the work started, and the cheap move - one clarifying question to the human - was skipped in favour of proceeding on the likelier reading. When a human's verdict is ambiguous, resolve it with the human; do not pick a branch and spend measured headroom on it |
@@ -136,6 +136,7 @@ something wider, so its text widths are a conservative estimate rather than the 
 | T7.5 | **Running it locally, for a contributor with no phone and no LLM** | todo | Asked for 2026-09-20. Three tiers by what the reader owns — web only, web plus server, the full rig — plus minimum requirements and the dependency inventory, kept honest against the build files by `scripts/check_requirements.py` |
 | T7.6 | **Contribution guide, commit and PR templates** | todo | Asked for 2026-09-20. The readability argument is the substance: comments carry the why, logic stays out of Android classes, `format.js` stays pure, an invariant change needs an ADR. Conventional commits enforced by a script the hook and CI share |
 | T7.7 | **Opening the repo: contributor strategy and settings** | todo | Asked for 2026-09-20. Scope stated before the repo is public, device reports invited as a first-class contribution, and branch protection, labels, `CODEOWNERS` and `SECURITY.md` applied with `gh` and recorded in `docs/MAINTAINING.md` |
+| T7.8 | **Everything GitHub gives a public repo for nothing** | todo | Asked for 2026-09-20. Not `ci.yml` — TT.9 owns that and this must not rewrite it. This is what goes *around* it before the repo opens: CodeQL (free on a public repo and the only one of these that reads what the code does), Dependabot for the two ecosystems that actually exist, `permissions:` and SHA-pinned actions on every workflow, and a lint job whose shape is constrained by this project's own rules — `ruff` in CI but never in `server/`, PSScriptAnalyzer on the one file nobody here can run, and **not** ESLint, because `web/` has no `package.json` by design. Also runs the repo's own five guard scripts, which nothing runs today unless a human remembers. Deliberately no stale bot and no auto-labeller. Required status checks stay T7.7's; this task makes the checks worth requiring |
 | T7.3 | Pre-public review: secrets, README, screenshots | todo | Before flipping the repo public. Now runs **after** T7.4–T7.7 and carries the README's final pass; its `Prereqs:` line was updated to say so |
 | TT.8 | `e2e/run_e2e.py`, five scenarios | todo | Needs TT.6 |
 | TT.9 | CI workflow | todo | |
@@ -151,6 +152,170 @@ or phase 6.
 |---|---|---|---|
 | T8.1 | **`POST /action/{id}` actually acts** | todo | The first route that changes the machine the server runs on, and the server has no authentication — deliberately, because it is LAN-only and session-bound (ADR 0004). Those two facts were compatible only while the worst a stranger on the Wi-Fi could do was read a stock price, so **ADR 0015 comes first** and states the threat model. The catalogue of what an action runs lives in code; config only names which ones are enabled, and an unknown name fails the load with a console in front of the owner rather than 404ing at the desk. Two toggles to start (`mute-audio`, `mute-mic`), per-platform like T3.11 — `wpctl`/`pactl`, `osascript`, and PowerShell against Core Audio on Windows with no third-party download. `subprocess` argument lists, never `shell=True`, asserted through the AST because `grep` passes against `shell = True`. `shutdown` and `lock` are deliberately absent: the ADR's model is written around actions that are safe to repeat |
 | T8.2 | **Two buttons under the clock** | todo | After T8.1. `#shortcuts` has been in the sidebar since T6.1, empty on purpose so this would be a fill and not a re-layout. The hard part is invariant 1: the page cannot make the request, so a tap has to cross into Java through the app's **first inbound bridge** — everything so far runs Java→page. `invoke(id)` matches the id against a set Java already knows and never concatenates it into a URL, which is T8.1's rule made on the other side of the wire. Dead while the PC is away: a queued action that fired on reconnect would mute the PC minutes after somebody pressed a button they could not see. Which buttons exist rides the payload like `theme` does, so a third one is config and not a rebuild; the buttons are markup, so they belong to a theme (T6.7). 56px targets — a phone at arm's length with no pointer, and a mis-tap mutes the wrong device. And the button shows the last *result*, never a state it cannot know: one that lies about whether the mic is live is worse than no button |
+
+## Phase 9 — Suggested, not scheduled
+
+Two improvements asked for on 2026-09-20, **after** every task above. Both are written down in
+full so the idea is not lost and neither is started by accident; neither is part of any wave,
+and the first line of each file says so.
+
+| # | Task | State | Notes |
+|---|---|---|---|
+| T9.1 | **The next meeting, under the clock** | todo | Google Calendar and Microsoft Outlook merged, the soonest event under the clock in the `#shortcuts` strip, between T8.2's two buttons. Blocked behind T8.2 for a layout reason and behind **ADR 0016** for a bigger one: this is the first feature that puts *personal data* on a panel whose server has no authentication, and the refresh tokens it needs are credentials sitting on a desktop PC. OAuth stays on the PC and never reaches the APK — two acceptance lines exist for exactly that. The merge is where the design is: the two providers disagree about all-day events, about time zones and about the word for "declined" |
+| T9.2 | **Spike: can the panel talk to an assistant for nothing?** | todo | A button to ask something out loud and hear an answer, with the whole pipeline on the PC — invariant 1 means the page cannot call anything. Time-boxed, produces `docs/spikes/2026-voice-assistant.md` and a throwaway prototype under `spikes/`, and is allowed to conclude *do not build this*. The unknown is whether offline STT, a small local model and offline TTS fit inside a latency a person will stand at a panel for; Claude and DeepSeek are the paid comparison, not the plan. Also has to answer the awkward ones: `RECORD_AUDIO` would be the app's first dangerous permission, and an unauthenticated LAN endpoint that runs a model and speaks in someone's room is not in ADR 0015's family |
+
+## Resuming after 2026-09-20 (wave 15)
+
+Wave 15 is T6.2 alone, on `wave/15-glow-and-burn-in`. **The panel moves.** Every four minutes it
+sits a few pixels somewhere else, so that one unchanging layout on an AMOLED does not etch
+itself into the glass — and four things glow where nothing but the clock did, and a value that
+changed says so for 280ms.
+
+**Next: T6.4** (night profile), and it is the last of phase 6. Its web half is smaller than its
+task file implies — `isNight` has been in `format.js` and under test since T5.x — and its
+`night: {start, end}` is already in the payload and in `mock.js`. What it still needs is the
+native half (`screenBrightness`, the `night=on` marker) and a phone, which makes it the first
+task since T5.5 to need the device.
+
+### The one decision, and it contradicts the task file
+
+**The burn-in shift is core.** T6.2's `Files:` line said a theme, on the reasoning that a layout
+shift is presentation. The competing rule is newer and won: T6.7 put the blackout in
+`css/style.css` because it is the page's half of a promise about *hardware*, and wave 14 put the
+animation pause beside it for the same reason. A theme that forgot to move would look perfectly
+fine and quietly etch the display, which is that failure in that shape.
+
+So `offsetFor(now)` decides in `format.js` (pure, tested), `js/host.js` writes it into
+`--burn-in-x/--burn-in-y` on every tick, and one rule translates `body > *`. A theme owes it
+three things and all three are "do not"s (`docs/THEMING.md`). The task file carries the
+amendment and the reasoning.
+
+### Two constraints on the cycle that nobody asked for and both are load-bearing
+
+- **Every offset is up and left, never down or right.** A transform past the bottom or right
+  edge becomes the *document's* scrollable overflow. The panel is exactly one screen and
+  `check_layout.py`'s first question is "does the page scroll" — and a page that can scroll is a
+  page with somewhere to hide a row, which is the fault T6.6 exists to fix, arriving by the back
+  door.
+- **The step counts from the epoch, not from midnight.** Counting from midnight was the first
+  cut, it passed every other test, and it fails the task file's own closing note in one
+  sentence: the PC is on for roughly the same hours every day, so every offset would land under
+  the same glyphs at the same hour for ever. That is a rota, not a mitigation. From the epoch a
+  day is 360 steps against a cycle of seven, 360 mod 7 is 3, and the phase advances three
+  positions a night. **The test named for it is what caught it**, which is the first time in this
+  project a test has failed on a property nobody had implemented yet.
+
+### The harness was about to become time-dependent, which is worse than untested
+
+A panel that moves has seven positions, and `check_layout.py` measured whatever the wall clock
+had put on screen. A card that escapes the viewport only at `(-4,-3)` would have been a check
+that fails on a Tuesday — the most expensive kind of failure this repo has, because the next run
+passes.
+
+It now walks the whole cycle and measures at each position, and asserts two things one
+measurement cannot: that core's offset **reaches the glass** (delete the rule in
+`css/style.css` and the sweep still runs seven times, still passes, and has measured one
+position seven times), and that the panel **moves at all**. Both were mutation-tested.
+
+Making the sweep work needed the page's clock pinned, and that fixed something older by
+accident: the stress pass rendered **today's** pt-BR date, so "the widest case the panel can be
+asked to show" was only the widest case on the days it happened to be. It is pinned to
+`segunda-feira, 23 de fevereiro de 2026` now — the longest such date of the year, at 38
+characters, and it still fits the sidebar in two lines. Screenshots are comparable between runs
+again as well.
+
+`check_pulse.py` is the fourth browser check and it is the only one that is about a *theme*
+rather than about the panel. It exists for one failure that is invisible on this desk: `onData`
+replaces every row every minute whether or not a number moved, so a pulse keyed on the payload
+arriving looks perfect in a browser — `mock.js` jitters every price every three seconds — and
+on the device, with an upstream down and the server serving last-good values, it flashes the
+whole panel once a minute while STALE sits in the corner saying nothing has moved.
+
+### Two cross-realm traps, one in the page and one in the harness
+
+Both cost time and both are the same mistake in two places, so they are worth naming together:
+**`Date` is not one type, it is one type per realm.**
+
+- `offsetFor` guarded its argument with `instanceof Date`. A Date built anywhere else — an
+  iframe, a harness driving the page from outside — is not an instance of *this* realm's Date,
+  so the guard answered the origin for every clock the sweep handed it: seven positions, all
+  `(0,0)`, and a burn-in feature that reported as working perfectly while doing nothing. It is
+  duck-typed now. In production the Date comes from `js/app.js` and the bug could never fire;
+  the point is that it failed **silently**, and the sweep's own "the panel never moves"
+  assertion is the only thing that caught it.
+- Marionette executes in its own sandbox with its own globals, so `new Date()` inside an
+  injected script is the *harness's* clock however carefully the page's one has been pinned.
+  `check_layout.py` and `stress.js` both say `new window.Date()` now.
+
+### The review found seven, and the first one broke the feature's own promise
+
+**A wake from the blackout pulsed every number on the panel.** The pulse compares what it is
+about to draw against what the panel is showing, read out of the markup — and the blackout
+*hides* `body`, it does not empty it (T6.7: coming back is a repaint, not a relayout). So at
+nine in the morning, with the PC just switched on, every row from last night was still mounted,
+every price in it differed, and all of them flashed at once. The comment above the code named
+that exact outcome as the thing the design avoided. It guarded a row that was *absent* — a new
+ticker, a theme switch — and nothing else.
+
+The fix is the first change to the theme contract since T6.7 created it: `render` takes a third
+argument, and `context.resumed` is true on the first render after the panel has been dark.
+Core knows which render that is and a theme cannot work it out, which is exactly the shape of
+thing the boundary is for. `plain` ignores it; `docs/THEMING.md` documents it, and generalises
+it past the pulse — **what is in your markup was not necessarily seen.** `check_pulse.py` grew
+a fourth question and it was mutation-tested from both sides.
+
+**A test passed only in some of the world's timezones.** `offsetFor holds one position for the
+whole of a step` anchored its loop at local midnight, and steps are counted from the epoch — so
+local midnight is a step boundary only in a zone whose offset divides by four minutes.
+`TZ=Asia/Kolkata node --test` was 63 of 64. It anchors to a computed boundary now, and the
+suite is run under three zones before this section gets written.
+
+**The offsets table did not have the property its comment claimed.** Seven entries cannot use
+five values once each; and the y column summed to −13 rather than −14, so the ink sat very
+slightly low in the band. The table is corrected and, more to the point, the claim is now a
+test: every value in the band appears in each axis, and each axis has a mean of exactly −2.
+That is the fourth claim-without-a-check this repo has caught, and the first one caught in the
+same wave that wrote it.
+
+### And four smaller ones, all invisible on screen
+
+- **The shift ran outside any try**, one line above the theme's guarded tick, and it calls a
+  global out of `format.js`. That made the panel's *clock* — the one thing it owes
+  MainActivity (ADR 0009) — depend on that file having loaded. It has its own try now, which
+  keeps both halves of what the placement was for.
+- `check_layout.py` read the pinned instant out of the page once per position rather than once
+  per pass: twenty-one round trips to compute an addition.
+- `document.body.firstElementChild.getBoundingClientRect()` throws on a theme that rendered
+  nothing, so the harness would have **crashed where it should have reported**. "The harness
+  crashed" and "the panel is empty" are not the same finding, and an empty page is the failure
+  this directory already has three guards against.
+- `check_scroll.py` picks the first animating element in a card, and until this wave there was
+  only ever one. A pulsing value is a second. `[0]` is still right — the box that moves a card's
+  rows contains them, and an ancestor precedes its descendants — but that is now a fact worth
+  writing down rather than a coincidence the next person re-derives.
+
+Plus three of the review's own: the `will-change` comment said T6.6 had *refused* it when T6.6
+had in fact **scoped** it under `[data-scroll]` — in a repo where comments are the design
+record, that sends the next reader looking for a decision made the other way; `check_pulse.py`
+hard-coded `plain` as the theme it switches away from to empty the panel, so `--theme plain`
+silently stopped asking its first question at all; and `docs/TESTING.md` said all four browser
+checks pin the clock and sweep the burn-in cycle, which is true of one of them.
+
+`docs/TESTING.md` gained the browser harness at the same time, which it had never mentioned:
+four checks since T6.1 and no entry in the file that says how this project is tested.
+
+### What is still only true on this desk
+
+- **Nothing in this wave has been seen on the phone.** It is web-only, like wave 14, and it was
+  verified the way wave 14 was: the four browser checks, both themes. What that cannot answer is
+  whether a 10px halo reads as light or as a smudge at 50cm on a real AMOLED with Roboto
+  Condensed — the host falls back to a wider face, and the harness measures geometry. The
+  task file's manual check says so and it is outstanding.
+- **The server on this desk is still up** and still started by hand (T3.9 is still `todo`). Stop
+  it **by PID**, found through `ss -ltnp 'sport = :8777'`, never `pkill -f "server/server.py"`.
+- **The pulse fires every three seconds in a browser** and once a minute on the device. That is
+  `mock.js` jittering every price, not the feature being loud — and it is exactly why the
+  browser is the wrong place to judge whether 280ms is right.
 
 ## Resuming after 2026-09-20 (wave 14)
 

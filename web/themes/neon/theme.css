@@ -61,6 +61,21 @@
     --glow: rgba(213, 63, 167, 0.45);
     --glow-dim: rgba(187, 129, 170, 0.35);
 
+    /* The accent lightened, and the only colour on this panel that is never at
+     * rest: a value that just changed takes it for 280ms and comes back
+     * (T6.2 step 2). Lightened rather than saturated, because the accent is
+     * already near the edge of what this palette can saturate and the pulse
+     * has to read as "brighter for a moment" rather than as "a different
+     * value". 8.6:1 on black against the accent's 5.1:1, so the flash is
+     * upward in contrast and never dips toward unreadable. */
+    --accent-hi: #F59AD4;
+
+    /* The alarm's glow, and the one glow on the panel that is meant to be
+     * noticed. It is --down at the same alpha the accent's glow takes; STALE
+     * is the only thing here that means something is wrong, and it sits in a
+     * corner that is otherwise the quietest part of the panel. */
+    --glow-alarm: rgba(255, 61, 110, 0.45);
+
     /* Condensed system stack, no webfont: the WebView has no network by
      * design (ADR 0002), so anything fetched would simply fail to load.
      * 'sans-serif-condensed' is Android's own alias for Roboto Condensed; the
@@ -199,6 +214,22 @@ body {
     /* No fill. Every pixel inside a card that is not a glyph or a rule stays
      * at --ground, which on this AMOLED means switched off. */
     background: var(--ground);
+
+    /* The glow, and the whole of it on a card (T6.2 step 1). A blur of 10 with
+     * a spread of -6 is a halo that reaches about four pixels past the border
+     * and stops -- the border looks lit rather than the card looking like it
+     * is sitting on a lamp.
+     *
+     * Restraint is the requirement here, not the taste. A box-shadow is a blur
+     * over the whole perimeter, repainted whenever the card's content changes,
+     * and there are four of these plus two more glowing things on a 3GB phone;
+     * the first cut of this rule was a 24px blur at full alpha on every card
+     * and the panel's idle repaint cost went up for a look nobody asked for.
+     * --glow-dim rather than --glow for the same reason: the cards are the
+     * background of this design, and the two things that glow brightly are the
+     * clock and the temperature, which are what the panel is read for. */
+    box-shadow: 0 0 10px -6px var(--glow-dim);
+
     display: flex;
     flex-direction: column;
 }
@@ -276,10 +307,54 @@ body {
     85%, 100% { transform: translateY(calc(-1 * var(--scroll-distance, 0px))); }
 }
 
+/* --- A value that changed says so, once, briefly (T6.2 step 2) ------------
+ *
+ * The panel replaces every row about once a minute and, until this, said
+ * nothing about which of the numbers in front of you is new. A brief lift
+ * toward --accent-hi and back is enough: it is over before you can look
+ * straight at it, so what it leaves is the knowledge that *that* one moved,
+ * which is the only thing worth knowing on a panel read in passing.
+ *
+ * 280ms, inside the task's ~300ms ceiling, and the ceiling is the real
+ * constraint: this runs on something sitting beside you all day, and a pulse
+ * long enough to watch is a pulse you end up watching.
+ *
+ * Colour only. `.w-temp` carries a permanent glow and `.price` carries none,
+ * so a keyframe that also animated `text-shadow` would have to end on a
+ * different value for each of them or snap at the end of the pass -- and a
+ * blurred 20px price is the mushiness the glow rules above already refuse.
+ * One property is also one compositor-free repaint of one short string.
+ *
+ * `theme.js` is what decides *which* elements get the class, and it decides it
+ * by comparing against the text the row held a minute ago rather than by the
+ * fact that a payload arrived -- so a stale payload, which repeats the last
+ * good values, pulses nothing. A panel that flashed every number every minute
+ * while the upstream was down would be saying the opposite of what STALE says
+ * two inches away.
+ */
+@keyframes value-pulse {
+    from { color: var(--accent-hi); }
+    to   { color: var(--accent); }
+}
+
+.row .price.pulse,
+.w-temp.pulse {
+    animation: value-pulse 280ms ease-out 1;
+}
+
 /* The device will never set this. The browser this gets developed in might,
  * and a panel that ignores it is a panel whose author never thought about it. */
 @media (prefers-reduced-motion: reduce) {
     .card-list[data-scroll] .scroller {
+        animation: none;
+    }
+
+    /* The pulse is 280ms of colour and not movement, so it is the milder of
+     * the two -- but "reduce motion" on this panel means the numbers change
+     * and nothing else happens, and a flash is exactly what somebody setting
+     * that preference is asking not to get. */
+    .row .price.pulse,
+    .w-temp.pulse {
         animation: none;
     }
 }
@@ -537,6 +612,13 @@ body {
     letter-spacing: -0.01em;
     white-space: nowrap;
     color: var(--accent);
+    /* The second thing on the panel that glows, and the second largest (T6.2
+     * step 1). 12px against the clock's 16: the hierarchy is the point, and
+     * two things glowing equally would flatten it. Nothing smaller than these
+     * two gets a text-shadow at all -- a blur under a 20px glyph does not read
+     * as light, it reads as a font that is slightly out of focus, which is the
+     * "mushy" the task warns about and the opposite of T6.3's whole argument. */
+    text-shadow: 0 0 12px var(--glow);
 }
 
 /* The day's low and high. formatRange joins them with ` / ` rather than a
@@ -667,6 +749,12 @@ body {
     letter-spacing: 0.1em;
     padding: 0 7px;
     border-radius: 0 3px 0 3px;
+    /* The one glow meant to be noticed rather than felt. STALE is the only
+     * thing on this panel that says something is wrong, and it appears in the
+     * corner furthest from where the eye rests. Brighter than the cards'
+     * halo by design -- this is the exception the restraint above is measured
+     * against, and it is on screen for minutes a month. */
+    box-shadow: 0 0 12px var(--glow-alarm);
 }
 
 /* --- The blackout is core, not theme ------------------------------------- *

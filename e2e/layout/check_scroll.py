@@ -72,6 +72,13 @@ FITS = ("window.onData({quotes:[{symbol:'A',price:1,changePct:1}],fx:[],crypto:[
 # likes and call its moving box whatever it likes (docs/THEMING.md); a selector
 # here would make this file an assertion about neon's markup instead of about
 # the contract.
+#
+# `[0]` was the only animating element in a card until T6.2, which gave a value
+# that just changed a 280ms colour pulse. It is still the right one, and the
+# reason is document order rather than luck: the box that moves a card's rows
+# contains them, and an ancestor always precedes its descendants. A theme that
+# animated a *sibling* placed above its scroller would break this -- and would
+# be the first thing in either theme to do so.
 OFFSET = """
 const moving = Array.from(document.querySelectorAll('#quotes *'))
     .filter((el) => getComputedStyle(el).animationName !== 'none')[0];

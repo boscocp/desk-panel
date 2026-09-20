@@ -448,11 +448,156 @@ function isNight(now, start, end) {
     return at >= from || at < to;
 }
 
+// --- Burn-in mitigation: the panel never sits still for long (T6.2) ---------
+//
+// This device is an AMOLED showing one unchanging layout for every hour the PC
+// is on. That is the burn-in case ADR 0008 names: the clock's glyph edges, the
+// card borders and the four card titles are lit in exactly the same pixels all
+// day, and an OLED pixel ages by how long it has been lit. The ground is
+// already #000000 -- those pixels are physically off and cost nothing -- so
+// what is left to protect is the ink, and the cheap way to protect it is to
+// keep moving it.
+//
+// The decision is here rather than in a theme because it is a promise about
+// hardware, exactly as the blackout beside it is (css/style.css, ADR 0005), and
+// a theme that forgot it would look perfectly fine and quietly etch the
+// display. The theme owes it nothing at all: core applies the offset to
+// whatever the theme put in the body. What is genuinely a decision -- how far,
+// how often, and in what order -- is a pure function of the clock, which is
+// what makes it testable without watching a screen for half an hour.
+
+// How far the panel is allowed to travel, in CSS px.
+//
+// Small enough not to be noticeable and large enough to matter, which is the
+// whole of the tuning problem. Antialiased text has one or two pixels of edge,
+// so four is enough to put a glyph's edge somewhere it has not been; and four
+// against the neon theme's 10px body padding (12px on plain) leaves the panel
+// comfortably inside its own margin at every offset, which is what stops the
+// shift turning into a layout bug.
+const BURN_IN_AMPLITUDE_PX = 4;
+
+// How long the panel holds one offset.
+//
+// Four minutes: long enough that the step is not something you catch out of
+// the corner of your eye every time you look up, short enough that the ink
+// has moved fifteen times an hour.
+const BURN_IN_STEP_MINUTES = 4;
+
+// The cycle, and every number in it is negative or zero. **That is not a
+// stylistic choice and it must stay true.**
+//
+// A transform that pushes content past the bottom or right edge of the
+// document adds to the page's scrollable overflow; one that pulls it up and to
+// the left does not, because content above and left of the scroll origin is
+// unreachable rather than scrollable. The panel is exactly one screen and
+// `check_layout.py`'s first question is "does the document scroll" -- so
+// shifting down or right would either fail that check or, worse, make the page
+// genuinely scrollable and give a card somewhere to hide a row. Up and left
+// costs nothing: the ground behind the panel is black either way.
+//
+// Seven positions rather than a rectangle's four, and in an order that never
+// takes two short steps in a row: a four-cycle settles into a shape the eye
+// learns, and a slow raster leaves each position adjacent to the last, which
+// is the least relief per move.
+//
+// Two properties of the table, both asserted in web/test/format.test.js rather
+// than only claimed here -- an earlier version of this comment promised a third
+// that seven entries cannot have, which is what earned the test:
+//
+//   - every value in [-4, 0] appears in each axis, so the whole of the band is
+//     used and not just its corners,
+//   - each axis sums to -14, which is a mean of exactly -2: the middle of the
+//     band, so the panel has no standing offset in either direction.
+const BURN_IN_OFFSETS = [
+    { x: 0, y: 0 },
+    { x: -3, y: -1 },
+    { x: -1, y: -4 },
+    { x: -4, y: -3 },
+    { x: -2, y: -2 },
+    { x: 0, y: -4 },
+    { x: -4, y: 0 },
+];
+
+// now: Date. Returns {x, y} in CSS px, both <= 0.
+//
+// A pure function of the clock, and it has to stay one: js/host.js calls it
+// once a second and writes the result to two custom properties, so a value
+// that drifted with anything but the time would rewrite the transform under a
+// panel that had not moved.
+function offsetFor(now) {
+    // Duck-typed, and `instanceof Date` was the first cut. It is wrong in a way
+    // that is invisible: `instanceof` compares against *this realm's* Date, so
+    // a Date built anywhere else -- an iframe, a test harness driving the page
+    // from outside, e2e/layout/check_layout.py's Marionette sandbox -- is not
+    // an instance of it, and the guard answered the origin for every clock the
+    // sweep handed it. Seven positions, all (0,0), and a burn-in check that
+    // reported the feature working perfectly while measuring one position
+    // seven times. Nothing about it looked wrong; the sweep's own "the panel
+    // never moves" assertion is what caught it.
+    //
+    // In production the Date comes from js/app.js, one realm away from nothing.
+    // The point is that the failure was silent, and this is one line.
+    const time = now && typeof now.getTime === 'function' ? now.getTime() : NaN;
+    if (!Number.isFinite(time)) {
+        return { x: 0, y: 0 };
+    }
+    // Counted from the epoch and not from midnight, and the difference is the
+    // whole reason this is not a rota. A day is 360 steps against a cycle of
+    // seven; 360 mod 7 is 3, so the phase advances three positions a night and
+    // the panel is not where it was at this time yesterday until the seventh
+    // day. Counting from midnight was the first cut and it fails the thing the
+    // task file asks for in one sentence: the PC is on for roughly the same
+    // hours every day, so every offset would land under the same glyphs at the
+    // same hour, for ever -- a cycle that has itself become a pattern, which is
+    // the trap rather than the mitigation.
+    //
+    // The modulo is written twice because a Date before 1970 gives a negative
+    // step, and JavaScript's % keeps the sign: `-1 % 7` is -1, which indexes
+    // nothing. Nobody will run this panel in 1969; a table read off the end is
+    // still `undefined.x` a line later, which is the kind of failure that
+    // happens once and is never explained.
+    const size = BURN_IN_OFFSETS.length;
+    const step = Math.floor(time / (BURN_IN_STEP_MINUTES * 60000));
+    const offset = BURN_IN_OFFSETS[((step % size) + size) % size];
+    // A copy, not the table's own entry. The caller is outside this file, and
+    // one that wrote to what it was handed -- rounding it, clamping it, zeroing
+    // it for a frame -- would not fix a position, it would delete that position
+    // from the cycle for the life of the page.
+    return { x: offset.x, y: offset.y };
+}
+
+// The whole cycle, described, for anything that has to visit every offset
+// rather than wait for one.
+//
+// It exists for `e2e/layout/check_layout.py`. Without it that harness measures
+// the panel at whichever offset the wall clock happened to land on, which
+// means the worst case is measured one run in seven and a layout that only
+// fails at (-4,-3) is a check that fails on a Tuesday. With it the harness
+// drives the panel through every position and measures each -- and a shift
+// that pushed a card off the edge would be a certainty rather than a chance.
+//
+// `offsets` is the cycle in the order the panel walks it; which one is showing
+// right now is the clock's business, so a caller that wants all of them steps
+// the clock `stepMinutes` at a time, `offsets.length` times, from wherever it
+// happens to start. It gets every position, in a rotation of this order.
+//
+// Copies, because the caller is outside this file and the table is not its to
+// edit.
+function burnInSchedule() {
+    return {
+        stepMinutes: BURN_IN_STEP_MINUTES,
+        amplitudePx: BURN_IN_AMPLITUDE_PX,
+        offsets: BURN_IN_OFFSETS.map((o) => ({ x: o.x, y: o.y })),
+    };
+}
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         formatPrice, formatRate, formatPair, formatTemp, formatChange, changeClass,
         weatherLabel, weatherGlyph, formatRange, WEATHER_LABELS,
         isNight,
+        offsetFor, burnInSchedule,
+        BURN_IN_OFFSETS, BURN_IN_STEP_MINUTES, BURN_IN_AMPLITUDE_PX,
         overflowsBy, scrollPlan, worthScrolling,
         SCROLL_SECONDS_PER_ROW, SCROLL_MOVING_FRACTION, SCROLL_MIN_TRAVEL_PX,
         sparklinePath,
