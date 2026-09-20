@@ -26,8 +26,8 @@ window.DeskPanel.defineTheme('<name>', { render, tick });
 Two functions, and that is the whole interface:
 
 ```js
-function render(payload, root)   // the data changed: rebuild what shows it
-function tick(now, root)         // one second passed: `now` is a Date
+function render(payload, root, context)   // the data changed: rebuild what shows it
+function tick(now, root)                  // one second passed: `now` is a Date
 ```
 
 `root` is `document.body`, and everything inside it is yours. Nothing in core
@@ -37,6 +37,11 @@ puts an element there.
 when the theme is first selected, and once at page load with `payload` set to
 **`null`** — there is no data yet and the clock is still worth showing. Handle
 that case; `neon` builds its skeleton and leaves the cards empty.
+
+`context` is what you cannot work out for yourself, and today it carries one
+key: **`context.resumed`** is true when this is the first render after the panel
+has been dark. Ignore it and nothing breaks — `plain` does — but see the pulse
+section below, which is the one place it matters and the place it was added for.
 
 `tick` is called once a second while the panel is lit, and once immediately
 after every `render`. Keep it cheap: it is the only thing that runs on a panel
@@ -209,6 +214,81 @@ anything you animate stops on its own while the panel is dark and resumes where
 it left off — you owe that rule only the courtesy of not overriding
 `animation-play-state` on something inside a dark panel.
 
+## The burn-in shift is not yours either
+
+The panel moves. Every four minutes `js/host.js` writes a new offset into two custom
+properties on `<html>`, and `css/style.css` translates every direct child of `body` by it:
+
+```css
+body > * { transform: translate(var(--burn-in-x, 0px), var(--burn-in-y, 0px)); }
+```
+
+This device is an AMOLED showing one unchanging layout for every hour the PC is on, and an OLED
+pixel ages by how long it has been lit (ADR 0008). The ground is `#000000` and those pixels are
+physically off, so what is at risk is the ink — the clock's glyph edges, your card borders,
+your titles — and the cheap way to protect it is to keep moving it.
+
+It is core rather than yours for the same reason the blackout is: a theme that forgot it would
+look perfectly fine and quietly etch the display. You owe it three things, and they are all
+things not to do:
+
+- **Do not translate `body` or a direct child of it yourself.** `transform` does not compose by
+  accumulating — the last declaration wins — so a theme that sets one on `body > *` replaces
+  the shift with nothing. Animate something further in, as both themes' scrollers do.
+- **Leave your padding room.** The offsets reach 4px up and left, and both themes have 10–12px
+  of body padding for it to move into. A theme flush to the viewport edge would lose 4px of its
+  own margin at some positions.
+- **Do not expect it in a measurement.** Everything moves together, so nothing inside a card
+  changes position relative to anything else, and `getBoundingClientRect` is 0–4px different
+  from one minute to the next.
+
+One consequence that is not a rule but will surprise somebody: a `transform` makes an element
+the containing block for its absolutely positioned descendants. Every direct child of `body` is
+therefore one, whether or not you gave it `position: relative`. Neither theme notices — `neon`
+positions `#battery` and `#stale-badge` against `#panel`, which was already `relative` — but a
+theme that positioned something against the page itself would find it positioned against that
+child instead.
+
+The amplitude and the cycle are `offsetFor` in `js/format.js`, which is a pure function of the
+clock and tested as one. It is not in the list of formatters above because there is nothing for
+a theme to call: core applies it to whatever you put in the body.
+
+`check_layout.py` measures every pass at every position in the cycle, so a card that only
+escapes the viewport at one of them is a certain failure rather than a check that fails on a
+Tuesday.
+
+## Saying which value just changed, if you want to
+
+Optional, and `neon` does it: a value whose rendered text is not what it was a minute ago lifts
+toward a brighter accent for 280ms and comes back. `plain` does nothing, which is a legitimate
+answer — it has no accent to lift toward.
+
+If you do it, the rule is the one thing worth stating, because it is easy to get backwards and
+invisible when you do. **Key it on the value, never on the refresh.** `window.onData` replaces
+every row in every card about once a minute whether or not a single number moved, so a theme
+that flashed on arrival would look perfect in a browser — where `mock.js` jitters every price
+every three seconds — and would flash the entire panel once a minute on the desk with the
+upstream down, while `STALE` sat in the corner saying nothing had moved.
+
+`neon` compares against the text the row is showing, read out of the markup a moment before it
+is replaced, rather than keeping a table of its own: a symbol dropped from the PC's config
+leaves nothing behind, and a theme switch — which empties the root — starts with no history
+instead of pulsing the whole panel at once.
+
+**And `context.resumed` is the other half of that, which is not optional if you read the DOM.**
+The blackout *hides* `body`; it does not empty it. So on the first render after the PC has been
+away all night, every row from last night is still mounted, every price in it differs from this
+morning's, and a theme comparing the two flashes the entire panel at nine in the morning — the
+one moment it is least useful. That render is the one core flags, and `neon` pulses nothing in
+it. The same applies to any conclusion you draw by reading your own markup, not just to a
+pulse: what is in there was not necessarily seen.
+
+`check_pulse.py` asserts all four of those (nothing on a fresh mount, only the changed value on
+a refresh, nothing at all on an identical payload, nothing on the way back from the blackout)
+and that the pass is over inside ~300ms.
+Run it for a theme that pulses; a theme that does not will fail its second question, which is
+the only way that file can still fail when the feature is deleted.
+
 **Neither of your functions is called while the panel is dark.** `tick` stops,
 and a payload that arrives meanwhile is held rather than rendered — the data
 poller keeps running under the thermal cutoff, because the Activity stays in the
@@ -228,6 +308,7 @@ node --test "web/test/**/*.test.js"          # format.js, which you did not chan
 python e2e/layout/check_layout.py --theme <name>
 python e2e/layout/check_blackout.py --theme <name>
 python e2e/layout/check_scroll.py --theme <name>
+python e2e/layout/check_pulse.py --theme <name>    # only if your theme pulses
 ```
 
 The layout check drives a real browser at 872x392 — the phone's actual

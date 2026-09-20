@@ -22,6 +22,11 @@ make e2e                                         # python e2e/run_e2e.py
 make contract                                    # hits the real APIs, opt-in
 ```
 
+The four browser checks under `e2e/layout/` are **not** in `make check` and not in CI: they
+need Firefox on `PATH`, which is a host dependency neither of those can assume. They are run
+by the acceptance of the tasks that own them, and by hand after anything that moves markup.
+See the section below.
+
 `make check` is what agents call. **CI does not call it** — `.github/workflows/ci.yml` invokes
 `python -m unittest`, `node --test` and `./gradlew` directly, because the Android job has no
 Docker. That divergence is deliberate and TT.9 owns keeping the two in step; `check_workflow.py`
@@ -44,6 +49,50 @@ Node's built-in runner, stable since Node 20, with `node:assert`. No jsdom, ther
 `web/js/format.js` holds the pure functions (currency, percent change, WMO weather code to
 label, up/down colour) and that is what gets tested. DOM code stays thin enough not to need
 tests.
+
+## The panel, in a real browser — `e2e/layout/`
+
+Four checks, one harness. They drive Firefox over Marionette (its built-in automation
+protocol — no driver binary, no npm, standard library only) at **872x392**, the phone's real
+landscape viewport, and none of them needs the phone. `e2e/layout/README.md` is the long
+version; this is what each one is for.
+
+| | asks |
+|---|---|
+| `check_layout.py` | does every section fit, does anything clip, is anything drawn on top of anything else |
+| `check_blackout.py` | does the panel go dark on both causes, hold what arrives, and draw it on the way back |
+| `check_scroll.py` | does an overflowing card keep moving across a refresh |
+| `check_pulse.py` | does a value pulse only when it changed |
+
+All four take `--theme NAME`. Run `check_layout` and `check_blackout` for every theme;
+`check_scroll` for a theme that answers overflow with motion, and `check_pulse` for one that
+marks a changed value — both are optional in the theme contract (`docs/THEMING.md`).
+
+Three things are worth knowing before trusting one. The first is true of all four; the other
+two are `check_layout.py` alone, which is the only one of them that measures *where* anything
+is:
+
+- **The viewport is calibrated, not requested.** `SetWindowRect` sizes the outer window, and
+  asking for 872x392 gave an `innerHeight` of 306 on the machine this was written on — 86px
+  short, and wrong in the direction that looks like a pass. The harness measures what it got
+  and refuses to run if it cannot converge.
+- **`check_layout.py` measures each pass at every burn-in position.** The panel shifts a few
+  pixels every four minutes (T6.2), so measuring it once means checking the worst position one
+  run in seven, which is a check that fails on a Tuesday.
+- **`check_layout.py` pins the page's clock** to do that. Otherwise the panel puts itself back
+  where the wall clock says a moment after the harness moves it — and the stress pass rendered
+  *today's* pt-BR date, so "the widest case" was only the widest case on the days it happened
+  to be.
+
+  The other three freeze the page's timers instead, which is a weaker and sufficient
+  guarantee: none of them reads an absolute position, so the panel is free to be wherever the
+  shift last put it. `check_scroll.py` reads the scrolling box's *own* transform, which an
+  ancestor's does not enter into.
+
+What none of them can tell you is whether the panel is *readable*. Nothing here measures
+contrast, glow or type against a human at 50cm, and Android resolves `sans-serif-condensed` to
+Roboto Condensed while the host falls back to something wider — so text widths here are a
+conservative estimate, never the truth.
 
 ## Android — JVM and instrumented
 
@@ -156,5 +205,7 @@ Some things no script can judge, listed here so they are not forgotten:
 
 - The offline state genuinely looks off in a dark room.
 - Text is legible from about 50 cm.
+- The glow reads as light rather than as a smudge, on the real AMOLED at the real font — the
+  browser harness measures geometry and falls back to a wider typeface (T6.2).
 - The host is still clean: no Android SDK in `%LOCALAPPDATA%`, `java -version` still fails.
 - The app returns to the foreground on its own after a phone reboot.

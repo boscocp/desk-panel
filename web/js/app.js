@@ -70,8 +70,13 @@
         // Whatever arrived while nobody could see it, drawn now that somebody
         // can. Before applyClock, so the clock the timer starts painting is
         // already sitting in the markup this payload produced.
+        //
+        // `resumed`, because this is the one render where the panel's own
+        // markup is not evidence of anything: it has been hidden, for a minute
+        // under the thermal cutoff or for a night with the PC off, and nothing
+        // in it has been seen.
         if (visible() && pending) {
-            paintData();
+            paintData({ resumed: true });
         }
         applyClock();
     }
@@ -102,9 +107,15 @@
     // the payload, so changing the panel's look is editing a file on the PC,
     // never a rebuild. Every packaged theme is already loaded, so a switch
     // costs a re-render and no request.
-    function paintData() {
+    //
+    // `context` is handed straight to the theme (js/host.js). It says what the
+    // theme cannot see for itself: whether this render is the first since the
+    // panel was dark. The blackout hides the body rather than emptying it, so
+    // a theme comparing what it is about to draw against what it is showing
+    // would read values nobody has looked at for twelve hours as "current".
+    function paintData(context) {
         host.useTheme(payload && payload.theme);
-        host.render(payload);
+        host.render(payload, context);
         // Straight after the render, because a theme that rebuilt its clock
         // element would otherwise show an empty one for up to a second -- and
         // on the device the first payload lands within a second of the page
