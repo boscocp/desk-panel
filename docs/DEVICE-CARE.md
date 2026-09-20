@@ -35,9 +35,36 @@ phone loses about 4.4% an hour *while the framework reports `status: 2`, chargin
 cycling; it is a slow one-way discharge whenever anybody is looking at the panel.
 
 Nothing in software fixes that, and the options below do not either — they are about *cycling*,
-which is a different problem. **A port or charger that will negotiate more than 100 mA is the
-single change that turns the sign of the equation.** Check it after changing anything:
-`adb shell dumpsys battery | grep 'Max charging current'`.
+which is a different problem. **A port or charger that will deliver more than this is the single
+change that turns the sign of the equation.**
+
+### That number is one sample of a field that moves (2026-09-20)
+
+Re-measured a day later, after an extra supply was connected to the peripheral switch and the
+phone's cable was reseated. `Max charging current` is **not** a stable negotiated ceiling on this
+device:
+
+```
+11:22-11:24  100000  100000  100000  100000     # screen dozing, PC server down
+11:38-11:40  150000  200000  100000  100000  150000   # panel lit, PC online
+```
+
+It had also been sitting at **50000** for the ten minutes before the cable was reseated, with the
+framework reporting `AC powered: true`; the replug alone put it back to 100000 and flipped it to
+`USB powered: true`. So the field tracks something instantaneous and renegotiable, not a contract,
+and **a single reading of it establishes nothing** — including the one above, which was also a
+single reading.
+
+Two consequences worth keeping:
+
+- **A reseat is a real intervention.** The port can sit in a worse state indefinitely with nothing
+  on the panel or in `dumpsys` to say so. Reseat the cable before concluding anything about power.
+- **The trustworthy measurement is the level trend over hours**, which is what the 4.4%/hour
+  figure above actually is. Quote that, not the instantaneous field, when deciding whether this
+  desk's power problem has changed.
+
+Neither of these rescues the conclusion below: the data path is Wi-Fi, so the phone can move to a
+wall charger without a code change, and that remains the fix.
 
 Note what this does *not* cost: the panel's data path is Wi-Fi to the PC's LAN address, not the
 USB cable. The cable carries power and adb, nothing else — so the phone can move to a wall

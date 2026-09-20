@@ -427,6 +427,15 @@ body {
     color: var(--warn);
 }
 
+/* The last band before the screen blanks (T5.5, ADR 0012). --down rather than a
+ * fifth colour: it is already the alarm colour on this panel -- a loss, and the
+ * fill behind STALE -- and "at a limit" is what it means both times. Yellow and
+ * red enter the pink-on-black palette on the same argument green did: semantic,
+ * conventional, and used for nothing else. */
+#battery .hot {
+    color: var(--down);
+}
+
 /* STALE is a warning, so it takes --down rather than the accent: it must not
  * read as just another pink label. */
 #stale-badge {
@@ -455,5 +464,21 @@ body {
  * a viewport it is about to be shown in again.
  */
 body.pc-offline > * {
+    visibility: hidden;
+}
+
+/* --- Too hot: the same black, for the other reason ------------------------ *
+ *
+ * The screen is already at brightness zero when this class arrives
+ * (MainActivity.setBlanked); this is the render that goes with it, because zero
+ * is not the same as off on every panel. Same mechanism as offline above and
+ * deliberately the same look -- there is nothing useful to draw either way, and
+ * an owner who wants to know which of the two it is reads the temperature the
+ * panel was showing on the way down, or the logcat marker.
+ *
+ * The two can be true at once. Both hide the same children, so the combination
+ * needs no rule of its own.
+ */
+body.too-hot > * {
     visibility: hidden;
 }

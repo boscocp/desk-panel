@@ -10,7 +10,8 @@ package dev.bosco.deskpanel;
  * (ADR 0009).
  *
  * <p>Two kinds, and the distinction is the whole design. <b>Transitions</b> —
- * {@link #state}, {@link #screen}, {@link #night}, {@link #dormant} — are
+ * {@link #state}, {@link #screen}, {@link #thermal}, {@link #night},
+ * {@link #dormant} — are
  * emitted only when something changes, so "exactly one marker" is a countable assertion and a
  * steady state logs nothing. <b>Heartbeats</b> — {@link #tick}, {@link #ping},
  * {@link #data}, {@link #battery} — are emitted per cycle at a bounded rate,
@@ -30,7 +31,7 @@ package dev.bosco.deskpanel;
  * exists anywhere else in {@code main/java} — that is what keeps the suite from
  * passing against a stale inline copy — and it holds either way.
  *
- * <p>Resist adding more. Four behaviours are covered; more is noise to grep
+ * <p>Resist adding more. Five behaviours are covered; more is noise to grep
  * through.
  */
 public final class Markers {
@@ -56,6 +57,26 @@ public final class Markers {
      */
     public static String screen(boolean awake) {
         return awake ? "screen=wake" : "screen=sleep";
+    }
+
+    /**
+     * The thermal authority blanking the panel, or giving it back (T5.5).
+     *
+     * <p>Deliberately not {@link #screen(boolean)}. Both put the panel dark and
+     * the causes could not be further apart: {@code screen=sleep} means the PC
+     * went away and is the product working, while {@code screen=thermal} means
+     * the device is too hot to keep painting and the owner has a problem —
+     * ventilation, sun, or a cell on its way to a bulge. Collapsing them would
+     * make the panel's most expensive confusion unresolvable from the log, and
+     * the log is the only screen-state signal this project trusts (ADR 0009).
+     *
+     * <p>The mechanisms differ too, which is the other half of why one string
+     * cannot carry both: sleep releases {@code FLAG_KEEP_SCREEN_ON} and lets
+     * Android take the display, thermal holds the window foreground at
+     * brightness zero so it can bring the panel back by itself (ADR 0012).
+     */
+    public static String thermal(boolean blanking) {
+        return blanking ? "screen=thermal" : "screen=thermal-clear";
     }
 
     /** The night profile crossing its schedule boundary (T6.4). */
