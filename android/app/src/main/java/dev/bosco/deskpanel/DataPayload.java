@@ -23,7 +23,8 @@ import org.json.JSONObject;
  *  fx:     [{pair, rate, changePct}],
  *  crypto: [{symbol, price, changePct}],
  *  weather: {tempC, minC, maxC, code, city},
- *  stale:  bool}
+ *  stale:  bool,
+ *  theme:  string}
  * </pre>
  *
  * <p>{@code battery} is added afterwards by {@link #withBattery}, because it
@@ -91,6 +92,20 @@ public final class DataPayload {
             // if it is true of any part.
             payload.put("stale",
                     quotes.optBoolean("stale", false) || hasStale(weatherJson));
+
+            // Which theme the page should render with (T6.7). Passed straight
+            // through and never interpreted: the set of themes lives in the
+            // APK's assets, the page owns the fallback, and a name this class
+            // did not recognise would be a name it had no business rejecting.
+            //
+            // Absent rather than empty when the server does not send it, so an
+            // older server on the PC leaves window.onData's `theme` undefined
+            // and the page falls back — the same path as a typo, already
+            // specified. put(null) is how JSONObject removes a key, which is
+            // exactly what is wanted here and is a trap everywhere else in
+            // this file.
+            String theme = quotes.optString("theme", "");
+            payload.put("theme", theme.isEmpty() ? null : theme);
 
             return escapeForScript(payload.toString());
         } catch (JSONException malformed) {

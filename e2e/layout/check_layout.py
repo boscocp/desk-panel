@@ -25,6 +25,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PANEL = os.path.join(os.path.dirname(HERE), os.pardir, "web", "index.html")
@@ -136,8 +137,14 @@ def connect():
     return None
 
 
-def run(url, passes, viewport, extra_css, shot_dir):
-    """One browser, every pass. Returns {pass name: measurement}."""
+def run(url, passes, viewport, extra_css, shot_dir, shot_tag=""):
+    """One browser, every pass. Returns {pass name: measurement}.
+
+    `shot_tag` goes in the screenshot filename. Without it a --theme run
+    overwrites the default run's PNGs in the same directory, which is exactly
+    the comparison the flag exists to make: T6.7's claim that the neon render
+    survived the move is an md5 of two files written by two runs.
+    """
     profile = tempfile.mkdtemp(prefix="desk-panel-layout-")
     proc = launch(profile)
     sock = connect()
@@ -168,7 +175,7 @@ def run(url, passes, viewport, extra_css, shot_dir):
             results[name] = result
             if shot_dir:
                 png = m.cmd("WebDriver:TakeScreenshot", {"full": False, "hash": False})["value"]
-                path = os.path.join(shot_dir, "layout-%s.png" % name)
+                path = os.path.join(shot_dir, "layout-%s%s.png" % (shot_tag, name))
                 with open(path, "wb") as f:
                     f.write(base64.b64decode(png))
                 result["_screenshot"] = path
@@ -249,6 +256,10 @@ def main():
                          "without editing web/")
     ap.add_argument("--screenshots", metavar="DIR",
                     help="also save a PNG per pass")
+    ap.add_argument("--theme", metavar="NAME",
+                    help="measure web/themes/NAME instead of the default; passed to the "
+                         "page as ?theme=NAME, which mock.js and stress.js put in the "
+                         "payload exactly as the server's config key does (T6.7)")
     args = ap.parse_args()
 
     width, height = (int(n) for n in args.viewport.lower().split("x"))
@@ -260,6 +271,8 @@ def main():
         os.makedirs(args.screenshots, exist_ok=True)
 
     url = "file://" + os.path.abspath(PANEL)
+    if args.theme:
+        url += "?theme=" + urllib.parse.quote(args.theme)
 
     # Two passes, and the second is not decoration. A typical tick never breaks
     # a layout; the widest case does. mock.js already ships the long symbol, the
@@ -270,7 +283,8 @@ def main():
     passes = [("served", None), ("stress", "stress.js")]
 
     print("desk-panel layout check -- %s" % url)
-    results = run(url, passes, (width, height), extra_css, args.screenshots)
+    results = run(url, passes, (width, height), extra_css, args.screenshots,
+                  shot_tag=("%s-" % args.theme) if args.theme else "")
 
     broken = False
     for name, _ in passes:

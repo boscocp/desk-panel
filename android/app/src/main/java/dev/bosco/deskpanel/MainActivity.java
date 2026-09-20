@@ -21,8 +21,10 @@ import androidx.webkit.WebViewClientCompat;
  * One Activity, one WebView (T2.2). The panel is served from
  * https://appassets.androidplatform.net/ by WebViewAssetLoader rather than
  * file://: that is what makes the page a secure origin, and it is also what
- * keeps web/js/mock.js inert on the device, since the mock loader in
- * index.html only fires under the file: protocol.
+ * keeps web/js/mock.js inert on the device -- the mock feed returns early
+ * unless location.protocol is file:, which it never is here. The guard is at
+ * the top of mock.js itself; T6.7 moved it out of index.html, where an inline
+ * loader could not be placed in the deferred script order the panel now needs.
  */
 public class MainActivity extends Activity implements PanelService.Panel {
 
