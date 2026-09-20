@@ -398,10 +398,10 @@ def burn_in(result, viewport, already):
          and still reports a pass -- having measured one position seven times.
          So every position is checked against where the panel actually went.
       2. does the panel still fit at every position? This is the reason the
-         sweep exists. A card 3px clear of the bottom edge at (0,0) is off it
-         at (0,-4)... in the other direction, and a card 3px clear of the top
-         is the one to worry about -- either way, measuring one position out of
-         seven turns a layout bug into a check that fails on a Tuesday.
+         sweep exists. Every offset is up and left, so the edges at risk are
+         the top and the left: a card sitting 3px clear of the top of the
+         viewport at (0,0) is over it at (-1,-4), and that is one position out
+         of seven. Measured once, it is a layout bug that fails on a Tuesday.
 
     `already` is what the reported position failed on, so a fault present at
     every offset -- a card that does not fit at all -- is said once rather than
