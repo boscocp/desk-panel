@@ -21,6 +21,15 @@
     let online = true;
     let tooHot = false;
     let clockTimer = null;
+    // A payload arrived while the panel was dark and has not been drawn.
+    let pending = false;
+
+    // Both blackouts mean the same thing to the page: there is nothing worth
+    // lighting a pixel for, so there is nothing worth writing to the DOM for
+    // either.
+    function visible() {
+        return online && !tooHot;
+    }
 
     // --- The clock ---------------------------------------------------------
     // Core keeps the time and the schedule; the theme decides what a clock
@@ -41,11 +50,10 @@
     // the worse of the two bargains. Offline it is cost paid in exactly the
     // state the device holds a wake lock to survive (ADR 0014).
     function applyClock() {
-        const visible = online && !tooHot;
-        if (visible && clockTimer === null) {
+        if (visible() && clockTimer === null) {
             paintClock();
             clockTimer = setInterval(paintClock, 1000);
-        } else if (!visible && clockTimer !== null) {
+        } else if (!visible() && clockTimer !== null) {
             clearInterval(clockTimer);
             clockTimer = null;
         }
@@ -58,7 +66,13 @@
     // theme that forgot it (invariant 3, ADR 0005; T5.5, ADR 0012).
 
     function applyScreen() {
-        host.blackout(!online || tooHot);
+        host.blackout(!visible());
+        // Whatever arrived while nobody could see it, drawn now that somebody
+        // can. Before applyClock, so the clock the timer starts painting is
+        // already sitting in the markup this payload produced.
+        if (visible() && pending) {
+            paintData();
+        }
         applyClock();
     }
 
@@ -84,6 +98,21 @@
         applyScreen();
     };
 
+    // Theme selection is runtime config (T3.12): the server's `theme` key rides
+    // the payload, so changing the panel's look is editing a file on the PC,
+    // never a rebuild. Every packaged theme is already loaded, so a switch
+    // costs a re-render and no request.
+    function paintData() {
+        host.useTheme(payload && payload.theme);
+        host.render(payload);
+        // Straight after the render, because a theme that rebuilt its clock
+        // element would otherwise show an empty one for up to a second -- and
+        // on the device the first payload lands within a second of the page
+        // load that MainActivity reads #clock from.
+        paintClock();
+        pending = false;
+    }
+
     // The one entry point for quotes, fx, crypto, weather and battery --
     // native in production, js/mock.js in the browser. Payload shape:
     // tasks/T1.2-mock-fixtures.md. A full replacement, never a patch.
@@ -92,17 +121,22 @@
             return;
         }
         payload = next;
-        // Theme selection is runtime config (T3.12): the server's `theme` key
-        // rides the payload, so changing the panel's look is editing a file on
-        // the PC, never a rebuild. Every packaged theme is already loaded, so
-        // a switch costs a re-render and no request.
-        host.useTheme(payload.theme);
-        host.render(payload);
-        // Straight after the render, because a theme that rebuilt its clock
-        // element would otherwise show an empty one for up to a second -- and
-        // on the device the first payload lands within a second of the page
-        // load that MainActivity reads #clock from.
-        paintClock();
+        // Held, not drawn, while the panel is dark -- the same bargain the
+        // clock timer takes, and for the stronger reason. The data poller keeps
+        // running under the thermal cutoff, because the Activity stays in the
+        // foreground so it can notice the device cooling (T5.5), so without
+        // this every cycle would rebuild the whole panel into a hidden DOM on
+        // a device that is being blanked *because* it is working too hard
+        // (ADR 0012). Offline the poller is paused anyway, so this costs
+        // nothing there and is still the honest place for the rule.
+        //
+        // Nothing is lost: applyScreen draws the held payload the moment the
+        // panel comes back, and `payload` is always the latest one.
+        if (!visible()) {
+            pending = true;
+            return;
+        }
+        paintData();
     };
 
     // --- Start -------------------------------------------------------------
@@ -113,7 +147,13 @@
     // (T2.2, ADR 0009). A panel whose first paint waited for a payload would
     // report an empty clock, and would show nothing at all on a PC whose
     // server is up but whose upstreams are down.
+    // The skeleton and the clock are painted unconditionally, before the screen
+    // state is known: a page that loads while the device is still too hot must
+    // not report an empty clock, and onThermal(true) arrives on every page load
+    // for exactly that reason (T5.5). This is once per page, not once a cycle,
+    // so the rule onData takes below does not apply to it.
     host.useTheme(null);
     host.render(payload);
+    paintClock();
     applyScreen();
 })();

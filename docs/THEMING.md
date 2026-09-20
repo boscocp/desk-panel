@@ -42,6 +42,8 @@ that case; `neon` builds its skeleton and leaves the cards empty.
 after every `render`. Keep it cheap: it is the only thing that runs on a panel
 nobody is touching.
 
+Neither is called while the panel is dark — see the blackout below.
+
 Neither function may assume it was called before. Core empties `root` when the
 theme changes, so build your skeleton if it is not there:
 
@@ -88,8 +90,9 @@ set the APK carries. Edit the file, restart the server, and the panel changes at
 its next poll.
 
 A name no packaged theme answers to falls back to `neon` and writes one line to
-the console — once, not once a minute. The server does not validate it, because
-the server has no idea which themes the installed APK was built with.
+the console — once per name, not once a minute, so a second typo months later is
+still reported. The server does not validate it, because the server has no idea
+which themes the installed APK was built with.
 
 In a browser, `web/index.html?theme=plain` does the same thing through
 `js/mock.js`. `python e2e/layout/check_layout.py --theme plain` measures it at
@@ -119,11 +122,15 @@ the phone's real viewport.
   asset pipeline, the https origin, JavaScript and the DOM all worked (T2.2,
   ADR 0009). The E2E suite greps for it.
 - **Prefer the conventional ids for the rest.** `date`, `quotes`, `fx`,
-  `crypto`, `weather`, `battery`, `stale-badge`, `shortcuts`. Nothing breaks if
-  you do not, but `e2e/layout/measure.js` measures those eight sections — is
+  `crypto`, `weather`, `battery`, `stale-badge`. Nothing breaks if you do not,
+  but `e2e/layout/measure.js` measures exactly those seven plus `clock` — is
   anything off screen, does a card clip its own content, does one section's ink
   land on another's — and a theme that renames them opts out of the only check
   that has ever caught a layout bug here.
+
+  `shortcuts` is **not** in that list, and both themes still use the name: it is
+  the reserved strip in the sidebar that T8.2's buttons will fill, and it holds
+  nothing to measure until they do.
 
 ## The blackout is not yours
 
@@ -145,14 +152,24 @@ The one thing you owe it: **never set `visibility: visible`**, on anything. That
 un-hides a descendant of a hidden parent, and it is the only way a stylesheet
 can defeat the rule.
 
-Your `tick` also stops being called while the panel is dark, so do not hang
-anything on it that has to keep running. Nothing does.
+**Neither of your functions is called while the panel is dark.** `tick` stops,
+and a payload that arrives meanwhile is held rather than rendered — the data
+poller keeps running under the thermal cutoff, because the Activity stays in the
+foreground so it can notice the device cooling, and rebuilding a hidden panel
+once a minute is work done by a device that is being blanked precisely for
+working too hard. The held payload is always the latest one, and `render` is
+called with it the moment the panel comes back, immediately followed by `tick`.
+
+So do not hang anything on `tick` that has to keep running, and do not treat a
+`render` call as "this is new since the last one" — you may have missed several.
+Nothing in either theme needs to.
 
 ## Checking it
 
 ```bash
 node --test "web/test/**/*.test.js"          # format.js, which you did not change
 python e2e/layout/check_layout.py --theme <name>
+python e2e/layout/check_blackout.py --theme <name>
 ```
 
 The layout check drives a real browser at 872x392 — the phone's actual
@@ -162,6 +179,11 @@ widest case the panel can legitimately be asked to show
 negative temperature, a six-figure price beside a sub-1 one, a ticker far
 longer than five characters, and the STALE badge shown). The second one is the
 one that fails.
+
+`check_blackout.py` is the other half, and it is the one your theme can fail without looking
+wrong: it drives the page dark on both causes and asserts that nothing is drawn while it is,
+that the payload you missed arrives on the way back, and that `#clock` holds a time before any
+payload at all. If you put `visibility: visible` on something, this is what tells you.
 
 Then look at it on the device, because the harness cannot: Android resolves
 `sans-serif-condensed` to Roboto Condensed and the desktop falls back to

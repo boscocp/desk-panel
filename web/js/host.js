@@ -27,7 +27,14 @@
     const themes = {};
     let current = null;      // the theme object in force
     let currentName = null;  // its name, so a repeat select() is a no-op
-    let warned = false;      // the unknown-theme line is said once, not every 60s
+    // The unknown-theme line is said once per *name*, not once per process. A
+    // bare boolean was the first cut and it loses the second typo: fix "nen" to
+    // "plain", mistype it as "plian" months later, and the panel falls back in
+    // silence while config.example.toml still promises the mistake costs a look
+    // in logcat. Keyed on the name, the warning is still not repeated every 60s
+    // -- useTheme returns early once the fallback is current -- and a *new*
+    // wrong name is still reported.
+    let warnedFor = null;
 
     // document.body, and that is the whole of the theme's territory. The
     // scripts live in <head> with defer, so the body a theme is handed is
@@ -68,12 +75,12 @@
     function useTheme(name) {
         let wanted = name || FALLBACK;
         if (!themes[wanted]) {
-            if (!warned) {
+            if (warnedFor !== wanted) {
                 // Reaches logcat through Chromium's own console bridge; there
                 // is no WebChromeClient and this is not worth adding one for.
                 console.warn('desk-panel: no theme "' + wanted + '" is packaged; '
                              + 'falling back to "' + FALLBACK + '"');
-                warned = true;
+                warnedFor = wanted;
             }
             wanted = FALLBACK;
         }
@@ -132,7 +139,5 @@
         render: render,
         tick: tick,
         blackout: blackout,
-        // Read by mock.js and by the layout harness, never by app.js.
-        fallbackTheme: FALLBACK,
     };
 })();

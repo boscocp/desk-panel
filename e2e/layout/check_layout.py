@@ -137,8 +137,14 @@ def connect():
     return None
 
 
-def run(url, passes, viewport, extra_css, shot_dir):
-    """One browser, every pass. Returns {pass name: measurement}."""
+def run(url, passes, viewport, extra_css, shot_dir, shot_tag=""):
+    """One browser, every pass. Returns {pass name: measurement}.
+
+    `shot_tag` goes in the screenshot filename. Without it a --theme run
+    overwrites the default run's PNGs in the same directory, which is exactly
+    the comparison the flag exists to make: T6.7's claim that the neon render
+    survived the move is an md5 of two files written by two runs.
+    """
     profile = tempfile.mkdtemp(prefix="desk-panel-layout-")
     proc = launch(profile)
     sock = connect()
@@ -169,7 +175,7 @@ def run(url, passes, viewport, extra_css, shot_dir):
             results[name] = result
             if shot_dir:
                 png = m.cmd("WebDriver:TakeScreenshot", {"full": False, "hash": False})["value"]
-                path = os.path.join(shot_dir, "layout-%s.png" % name)
+                path = os.path.join(shot_dir, "layout-%s%s.png" % (shot_tag, name))
                 with open(path, "wb") as f:
                     f.write(base64.b64decode(png))
                 result["_screenshot"] = path
@@ -277,7 +283,8 @@ def main():
     passes = [("served", None), ("stress", "stress.js")]
 
     print("desk-panel layout check -- %s" % url)
-    results = run(url, passes, (width, height), extra_css, args.screenshots)
+    results = run(url, passes, (width, height), extra_css, args.screenshots,
+                  shot_tag=("%s-" % args.theme) if args.theme else "")
 
     broken = False
     for name, _ in passes:
