@@ -136,6 +136,7 @@ something wider, so its text widths are a conservative estimate rather than the 
 | T7.5 | **Running it locally, for a contributor with no phone and no LLM** | todo | Asked for 2026-09-20. Three tiers by what the reader owns — web only, web plus server, the full rig — plus minimum requirements and the dependency inventory, kept honest against the build files by `scripts/check_requirements.py` |
 | T7.6 | **Contribution guide, commit and PR templates** | todo | Asked for 2026-09-20. The readability argument is the substance: comments carry the why, logic stays out of Android classes, `format.js` stays pure, an invariant change needs an ADR. Conventional commits enforced by a script the hook and CI share |
 | T7.7 | **Opening the repo: contributor strategy and settings** | todo | Asked for 2026-09-20. Scope stated before the repo is public, device reports invited as a first-class contribution, and branch protection, labels, `CODEOWNERS` and `SECURITY.md` applied with `gh` and recorded in `docs/MAINTAINING.md` |
+| T7.8 | **Everything GitHub gives a public repo for nothing** | todo | Asked for 2026-09-20. Not `ci.yml` — TT.9 owns that and this must not rewrite it. This is what goes *around* it before the repo opens: CodeQL (free on a public repo and the only one of these that reads what the code does), Dependabot for the two ecosystems that actually exist, `permissions:` and SHA-pinned actions on every workflow, and a lint job whose shape is constrained by this project's own rules — `ruff` in CI but never in `server/`, PSScriptAnalyzer on the one file nobody here can run, and **not** ESLint, because `web/` has no `package.json` by design. Also runs the repo's own five guard scripts, which nothing runs today unless a human remembers. Deliberately no stale bot and no auto-labeller. Required status checks stay T7.7's; this task makes the checks worth requiring |
 | T7.3 | Pre-public review: secrets, README, screenshots | todo | Before flipping the repo public. Now runs **after** T7.4–T7.7 and carries the README's final pass; its `Prereqs:` line was updated to say so |
 | TT.8 | `e2e/run_e2e.py`, five scenarios | todo | Needs TT.6 |
 | TT.9 | CI workflow | todo | |
@@ -246,7 +247,37 @@ Both cost time and both are the same mistake in two places, so they are worth na
   injected script is the *harness's* clock however carefully the page's one has been pinned.
   `check_layout.py` and `stress.js` both say `new window.Date()` now.
 
-### The review found four, all invisible on screen
+### The review found seven, and the first one broke the feature's own promise
+
+**A wake from the blackout pulsed every number on the panel.** The pulse compares what it is
+about to draw against what the panel is showing, read out of the markup — and the blackout
+*hides* `body`, it does not empty it (T6.7: coming back is a repaint, not a relayout). So at
+nine in the morning, with the PC just switched on, every row from last night was still mounted,
+every price in it differed, and all of them flashed at once. The comment above the code named
+that exact outcome as the thing the design avoided. It guarded a row that was *absent* — a new
+ticker, a theme switch — and nothing else.
+
+The fix is the first change to the theme contract since T6.7 created it: `render` takes a third
+argument, and `context.resumed` is true on the first render after the panel has been dark.
+Core knows which render that is and a theme cannot work it out, which is exactly the shape of
+thing the boundary is for. `plain` ignores it; `docs/THEMING.md` documents it, and generalises
+it past the pulse — **what is in your markup was not necessarily seen.** `check_pulse.py` grew
+a fourth question and it was mutation-tested from both sides.
+
+**A test passed only in some of the world's timezones.** `offsetFor holds one position for the
+whole of a step` anchored its loop at local midnight, and steps are counted from the epoch — so
+local midnight is a step boundary only in a zone whose offset divides by four minutes.
+`TZ=Asia/Kolkata node --test` was 63 of 64. It anchors to a computed boundary now, and the
+suite is run under three zones before this section gets written.
+
+**The offsets table did not have the property its comment claimed.** Seven entries cannot use
+five values once each; and the y column summed to −13 rather than −14, so the ink sat very
+slightly low in the band. The table is corrected and, more to the point, the claim is now a
+test: every value in the band appears in each axis, and each axis has a mean of exactly −2.
+That is the fourth claim-without-a-check this repo has caught, and the first one caught in the
+same wave that wrote it.
+
+### And four smaller ones, all invisible on screen
 
 - **The shift ran outside any try**, one line above the theme's guarded tick, and it calls a
   global out of `format.js`. That made the panel's *clock* — the one thing it owes
@@ -263,8 +294,15 @@ Both cost time and both are the same mistake in two places, so they are worth na
   rows contains them, and an ancestor precedes its descendants — but that is now a fact worth
   writing down rather than a coincidence the next person re-derives.
 
-`docs/TESTING.md` also gained the browser harness, which it had never mentioned: four checks
-since T6.1 and no entry in the file that says how this project is tested.
+Plus three of the review's own: the `will-change` comment said T6.6 had *refused* it when T6.6
+had in fact **scoped** it under `[data-scroll]` — in a repo where comments are the design
+record, that sends the next reader looking for a decision made the other way; `check_pulse.py`
+hard-coded `plain` as the theme it switches away from to empty the panel, so `--theme plain`
+silently stopped asking its first question at all; and `docs/TESTING.md` said all four browser
+checks pin the clock and sweep the burn-in cycle, which is true of one of them.
+
+`docs/TESTING.md` gained the browser harness at the same time, which it had never mentioned:
+four checks since T6.1 and no entry in the file that says how this project is tested.
 
 ### What is still only true on this desk
 

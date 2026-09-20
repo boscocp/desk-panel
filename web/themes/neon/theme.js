@@ -26,6 +26,18 @@
     // The skeleton's elements, cached between renders. Null until mount().
     let els = null;
 
+    // True for the length of one render: the panel has been dark, so the values
+    // it is still showing are not evidence of anything and nothing may pulse
+    // (T6.2). Core sets it -- see `context.resumed` in js/host.js -- because it
+    // is the one thing about a render a theme cannot work out for itself: the
+    // blackout hides `body` rather than emptying it, so last night's prices are
+    // sitting in the markup at nine this morning looking exactly like a value
+    // that just changed.
+    //
+    // Set unconditionally at the top of render(), so a render that throws
+    // halfway cannot leave it stuck on.
+    let resumed = false;
+
     function el(tag, id, className) {
         const node = document.createElement(tag);
         if (id) {
@@ -204,10 +216,20 @@
     //
     // `undefined` means there was no row under this key a moment ago -- a first
     // render, a new ticker, a theme that has just been switched in. A new row
-    // does not pulse: the whole panel arriving is not news about any one value,
-    // and a panel that flashed every number on every wake from the blackout
-    // would flash every number every morning.
+    // does not pulse: the whole panel arriving is not news about any one value.
+    //
+    // That covers a row that was *absent* and nothing else, which is why
+    // `resumed` is a separate question and not the same one. The blackout
+    // leaves every row mounted and merely hides it, so on the first render
+    // after a night with the PC off this map is full, every price in it
+    // differs, and the panel would flash all of them at once -- at nine in the
+    // morning, in the second it comes back. The review of T6.2 is what found
+    // that; this comment previously claimed the opposite outcome as a
+    // property of the design.
     function pulseIfChanged(node, previous) {
+        if (resumed) {
+            return;
+        }
         if (node && previous !== undefined && previous !== node.textContent) {
             node.classList.add('pulse');
         }
@@ -410,8 +432,9 @@
     // `payload` is null before the first word from the PC: the skeleton is
     // built and the cards are empty, which is what the panel looked like in
     // that state before T6.7 too.
-    function render(payload, root) {
+    function render(payload, root, context) {
         ensure(root);
+        resumed = !!(context && context.resumed);
         if (!payload) {
             return;
         }

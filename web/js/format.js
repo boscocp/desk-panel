@@ -498,16 +498,23 @@ const BURN_IN_STEP_MINUTES = 4;
 // Seven positions rather than a rectangle's four, and in an order that never
 // takes two short steps in a row: a four-cycle settles into a shape the eye
 // learns, and a slow raster leaves each position adjacent to the last, which
-// is the least relief per move. Every column and every row of the 5x5 lattice
-// this picks from is used exactly once somewhere in the cycle, and the mean
-// lands at the middle of it, so the panel has no resting bias in either axis.
+// is the least relief per move.
+//
+// Two properties of the table, both asserted in web/test/format.test.js rather
+// than only claimed here -- an earlier version of this comment promised a third
+// that seven entries cannot have, which is what earned the test:
+//
+//   - every value in [-4, 0] appears in each axis, so the whole of the band is
+//     used and not just its corners,
+//   - each axis sums to -14, which is a mean of exactly -2: the middle of the
+//     band, so the panel has no standing offset in either direction.
 const BURN_IN_OFFSETS = [
     { x: 0, y: 0 },
     { x: -3, y: -1 },
     { x: -1, y: -4 },
     { x: -4, y: -3 },
     { x: -2, y: -2 },
-    { x: 0, y: -3 },
+    { x: 0, y: -4 },
     { x: -4, y: 0 },
 ];
 

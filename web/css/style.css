@@ -112,8 +112,14 @@ body {
  * somewhere to hide a row.
  *
  * No `will-change`. It would ask for a compositor layer and hold it for the
- * life of the panel, for a property that changes once every four minutes --
- * which is the bargain T6.6 already refused for the scroll's own transform.
+ * life of the panel, for a property that changes once every four minutes.
+ *
+ * T6.6 faced the same choice on the scroll's transform and answered it the
+ * other way, and the difference is the reason: it declares `will-change` but
+ * only under `[data-scroll]`, so the layer is held by a card that is actually
+ * moving and released when it stops. There is no equivalent here -- every
+ * child of the body carries this rule, all of the time -- so the whole panel
+ * would sit on held layers for four minutes of stillness at a stretch.
  */
 body > * {
     transform: translate(var(--burn-in-x, 0px), var(--burn-in-y, 0px));
