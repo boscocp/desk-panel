@@ -4,43 +4,51 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Desk Panel</title>
+
+    <!-- Core: the box, the ground, and the blackout that invariant 3 owns. -->
     <link rel="stylesheet" href="css/style.css">
+
+    <!-- The packaged theme manifest, and the only place a theme is named
+         outside its own directory. Two lines per theme, and both are needed:
+         the stylesheet so switching costs no request, and the script so the
+         theme is registered before the page finishes loading.
+
+         Every theme ships in the APK and one is chosen at runtime from the
+         server's `theme` key, which is what keeps the project's rule that
+         changing what the panel shows never needs a rebuild (T3.12, ADR 0013).
+         Adding a *new* theme is a rebuild whatever happens - its files have to
+         get into assets/ somehow - so a line here costs nothing that the
+         directory did not already cost.
+
+         media="not all" rather than the `disabled` property: disabled was
+         dropped from the HTML spec, and a browser that ignored it would apply
+         every theme's rules at once - breaking the default look in order to
+         make a non-default one work. js/host.js flips `media` on the one that
+         wins. -->
+    <link rel="stylesheet" href="themes/neon/theme.css" data-theme="neon" media="all">
+    <link rel="stylesheet" href="themes/plain/theme.css" data-theme="plain" media="not all">
+
+    <!-- defer, and the order matters: format.js defines the formatters every
+         theme uses, host.js defines the registry the themes call, the themes
+         register, and app.js selects one and renders. Deferred scripts run in
+         order, after parsing and before the load event - which is what puts
+         #clock in the DOM before MainActivity.onPageFinished reads it for the
+         panel=rendered marker (T2.2, ADR 0009). -->
+    <script defer src="js/format.js"></script>
+    <script defer src="js/host.js"></script>
+    <script defer src="themes/neon/theme.js"></script>
+    <script defer src="themes/plain/theme.js"></script>
+    <script defer src="js/app.js"></script>
+
+    <!-- Mock fixtures for browser-only development (Chrome, no APK, no phone,
+         no server). It loads everywhere and does nothing anywhere but a file:
+         page - the guard is inside the file, because a conditional loader in
+         the markup could not be deferred into the right position in this
+         list. See web/js/mock.js. -->
+    <script defer src="js/mock.js"></script>
 </head>
-<body>
-    <div id="sidebar">
-        <div id="clock-container">
-            <div id="clock"></div>
-            <div id="date"></div>
-        </div>
-        <!-- Reserved for the v2 shortcut buttons: empty on purpose, so that
-             adding them later fills a space that already exists instead of
-             forcing the panel to be laid out again. -->
-        <div id="shortcuts"></div>
-    </div>
-    <div id="panel">
-        <section id="quotes" class="card-list"></section>
-        <section id="fx" class="card-list"></section>
-        <section id="crypto" class="card-list"></section>
-        <section id="weather" class="card"></section>
-        <!-- Not a .card: the battery is a diagnostic, and T5.4 demotes it to a
-             line in the corner rather than a fifth box with a title. The class
-             is what carried the border, the padding and the DEVICE label. -->
-        <section id="battery"></section>
-        <div id="stale-badge" hidden>STALE</div>
-    </div>
-    <script src="js/format.js"></script>
-    <script src="js/app.js"></script>
-    <script>
-        // Mock fixtures for browser-only development (Chrome, no APK, no
-        // phone, no server) — see web/js/mock.js. Guarded so it never runs
-        // inside the APK: the WebView there is served from
-        // https://appassets.androidplatform.net/, never file:, and the
-        // native layer sets window.__nativeBridge before these scripts run.
-        if (location.protocol === 'file:' && typeof window.__nativeBridge === 'undefined') {
-            var mockScript = document.createElement('script');
-            mockScript.src = 'js/mock.js';
-            document.body.appendChild(mockScript);
-        }
-    </script>
-</body>
+<!-- Empty on purpose. <body> is the theme's root element: host.js hands it to
+     render() and tick(), and web/themes/<name>/theme.js builds everything
+     inside it. Nothing in core may put an element here. -->
+<body></body>
 </html>

@@ -152,15 +152,19 @@ history_days = 30
 night_start = "22:00"
 night_end = "07:00"
 
-# Which theme renders the panel. **Reserved — nothing reads this yet.** T6.7
-# is the task that splits rendering into web/themes/<name>/ and makes this key
-# select between them; until it lands, changing this value does nothing at all,
-# and does not raise either. It is here now so the key, its default and its
-# meaning are settled before anything depends on them.
+# Which theme renders the panel — the name of a directory in the APK's
+# web/themes/. Every theme is packaged, so switching one is a restart of this
+# server and not a reinstall of the app.
 #
-# Once T6.7 ships: every theme is packaged in the APK, so switching one is a
-# restart of this server and not a reinstall of the app. "neon" is the
-# cyberpunk skin the project ships.
+# Shipped with the project:
+#   neon   the cyberpunk skin the panel was designed as. The default.
+#   plain  grey on black, one heading and a list per section, no glow. It
+#          exists to prove a theme really is a directory (docs/THEMING.md).
+#
+# A name no packaged theme answers to is **not** an error here: the server has
+# no idea which themes the installed APK was built with. The page falls back to
+# "neon" and says so once in logcat, so a typo costs a look rather than a blank
+# panel. Writing your own: docs/THEMING.md.
 theme = "neon"
 
 

@@ -2,19 +2,40 @@
 // server. Feeds window.onData() the exact payload shape production sends, so
 // the panel can be built and reviewed with nothing else running.
 //
-// Loaded by index.html only behind a guard that keeps it out of the APK —
-// see the inline script at the bottom of index.html. Never reference this
-// file from anywhere that also runs inside the WebView.
+// Loaded by index.html like every other script, and gated by the guard at the
+// top of the IIFE below rather than by a conditional loader in the markup:
+// the rest of the page is deferred, and a script injected from an inline
+// <script> cannot be placed in that ordered list, so it could run before
+// window.onData existed. The guard is what keeps it inert in the APK — it has
+// always shipped inside assets/, since build.gradle.kts points assets.srcDirs
+// straight at web/.
 //
 // The payload shape is a contract between three places: this file, the
 // server's /quotes and /weather responses, and the Android DataPoller.
 // Each quote/fx/crypto row also carries `history`, an array of recent values
-// oldest first, which the panel draws as a sparkline.
+// oldest first, which the panel draws as a sparkline, and the payload carries
+// `theme`, the name of a directory in web/themes/ (T6.7).
 // Changing a key here means changing it in both other places too. See
 // tasks/T1.2-mock-fixtures.md for the full shape.
 
 (function () {
     'use strict';
+
+    // The APK serves the panel from https://appassets.androidplatform.net/,
+    // never from file:, so this is the whole of the test for "am I in a
+    // browser?". __nativeBridge is checked as well because it is the name a
+    // future JavaScript interface would take, and a mock feed fighting a real
+    // one is a confusing thing to debug.
+    if (location.protocol !== 'file:' || typeof window.__nativeBridge !== 'undefined') {
+        return;
+    }
+
+    // Develop a theme in a browser: open web/index.html?theme=plain. The name
+    // rides the payload in production too — it comes from the server's config
+    // (T3.12) — so this is the same path, fed from the query string instead of
+    // from the PC. e2e/layout/check_layout.py --theme uses it to measure a
+    // theme other than the default.
+    const THEME = new URLSearchParams(location.search).get('theme') || undefined;
 
     const BASE_QUOTES = [
         { symbol: 'PETR4', price: 38.42, changePct: 1.2 },
@@ -120,6 +141,10 @@
             // Must actually happen here, or the degraded path ships untested.
             stale: tick % 5 === 0,
             night: NIGHT,
+            // Absent unless asked for, so the browser shows what the device
+            // shows: an unset `theme` is what a config that never mentions one
+            // sends, and the panel falls back to neon.
+            theme: THEME,
         };
     }
 

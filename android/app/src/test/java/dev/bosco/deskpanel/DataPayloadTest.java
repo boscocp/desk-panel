@@ -54,6 +54,38 @@ public class DataPayloadTest {
     }
 
     @Test
+    public void theThemeRidesQuotesThroughUntouched() throws Exception {
+        // T6.7: the name of a directory in the APK's assets, chosen by the PC's
+        // config. This class passes it through and never interprets it -- the
+        // page owns the fallback, because the page is the only layer that knows
+        // which themes the APK was built with.
+        String themed = QUOTES.replace("\"stale\":false", "\"stale\":false,\"theme\":\"plain\"");
+        assertEquals("plain",
+                new JSONObject(DataPayload.merge(themed, WEATHER)).getString("theme"));
+
+        // A name no theme answers to is still passed through: rejecting it here
+        // would turn a cosmetic typo into a decision made by the wrong layer.
+        String nonsense = QUOTES.replace("\"stale\":false", "\"stale\":false,\"theme\":\"nope\"");
+        assertEquals("nope",
+                new JSONObject(DataPayload.merge(nonsense, WEATHER)).getString("theme"));
+    }
+
+    @Test
+    public void anAbsentOrEmptyThemeLeavesTheKeyOutAltogether() throws Exception {
+        // An older server on the PC sends no theme at all, and a config with an
+        // empty one means the same thing. Both have to reach the page as
+        // `undefined` rather than as "", because host.js reads a falsy name as
+        // "use the fallback" and an empty string that survived would be a name
+        // no theme answers to -- the same outcome, reached by a warning nobody
+        // needed to read.
+        assertFalse("no theme key in, no theme key out",
+                new JSONObject(DataPayload.merge(QUOTES, WEATHER)).has("theme"));
+
+        String empty = QUOTES.replace("\"stale\":false", "\"stale\":false,\"theme\":\"\"");
+        assertFalse(new JSONObject(DataPayload.merge(empty, WEATHER)).has("theme"));
+    }
+
+    @Test
     public void eitherUpstreamBeingStaleMakesThePayloadStale() throws Exception {
         String staleQuotes = QUOTES.replace("\"stale\":false", "\"stale\":true");
         assertTrue(new JSONObject(DataPayload.merge(staleQuotes, WEATHER))

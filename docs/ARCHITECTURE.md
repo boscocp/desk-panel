@@ -86,7 +86,10 @@ See [ADR 0005](adr/0005-real-screen-sleep.md).
    the window becomes visible and nothing else would make it.
 4. While online, `DataPoller` hits `/quotes` and `/weather` on their own slower intervals and
    pushes results through `window.onData()`. While offline it is paused entirely.
-5. `web/js/app.js` renders. All formatting logic lives in `web/js/format.js` as pure functions.
+5. `web/js/app.js` takes the payload, `web/js/host.js` hands it to the theme named by the PC's
+   `theme` config key, and `web/themes/<name>/theme.js` builds the markup. Core holds no
+   element, id or class name; all formatting lives in `web/js/format.js` as pure functions,
+   which themes share. See [THEMING.md](THEMING.md).
 6. Every transition emits a logcat marker on the `DeskPanel` tag. The E2E suite asserts on
    those, because Android exposes no documented way to read screen state
    ([ADR 0009](adr/0009-testing-strategy.md)).
