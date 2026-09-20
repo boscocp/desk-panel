@@ -1,6 +1,12 @@
 # 0013 — Two kinds of local configuration, and the line between them
 
-Status: accepted · 2026-09-16
+Status: accepted · 2026-09-16 · amended 2026-09-20 (T3.12)
+
+**Amendment, T3.12.** The runtime side is now `server/config.toml`, and `config.json` is still
+read so that no existing install breaks. Only the file's *format* changed: the line this record
+draws — build-time in `.env`, run-time on the PC, and an API token never on the build side — is
+untouched, and so is every consequence below. The `.json` spellings in the Context section are
+left as written; they are what was true when this was decided.
 
 ## Context
 
@@ -27,12 +33,12 @@ The obvious fix is a `.env`. The obvious fix is also how a token ends up inside 
 
 **Two mechanisms, split by lifecycle, and the split is the point.**
 
-| | `.env` | `server/config.json` |
+| | `.env` | `server/config.toml` |
 | --- | --- | --- |
 | Read at | **build time**, by Gradle | **run time**, by the server |
 | Ends up | baked into the APK | on the PC only |
 | Changing it needs | a rebuild and a reinstall | a server restart |
-| Committed twin | `.env.example` | `server/config.example.json` |
+| Committed twin | `.env.example` | `server/config.example.toml` |
 | Holds | the PC's LAN address, signing passwords, the panel's orientation | the brapi token, tickers, city, intervals |
 
 **API tokens never go in `.env`.** Not the brapi token, not any future one. The phone never talks
@@ -86,15 +92,15 @@ operator remembering.
 - `keystore.properties` disappears. T7.1's acceptance greps for it by name, so that task's file
   is amended rather than left asserting the old layout.
 - One more file joins the set a new machine needs before the project works end to end, alongside
-  `server/config.json` and the keystore itself. `docs/INSTALL-PHONE.md` and `docs/BUILD.md` carry
+  `server/config.toml` and the keystore itself. `docs/INSTALL-PHONE.md` and `docs/BUILD.md` carry
   the list.
 
 ## Alternatives rejected
 
 **A single `.env` for everything, including the token.** It is the conventional answer and it is
 wrong here for one specific reason: Gradle reading a value means that value is in the APK.
-Keeping the token in `server/config.json` is not tidiness, it is the mechanism by which the token
-stays off the phone.
+Keeping the token in `server/config.toml` is not tidiness, it is the mechanism by which the
+token stays off the phone.
 
 **Edit `network_security_config.xml` locally and do not commit it.** The status quo. It makes the
 tested artefact differ from the committed one, relies on a human remembering under `git add -A`,
@@ -103,5 +109,5 @@ and this session demonstrated twice that the reliance is misplaced.
 **Widen the cleartext exemption to the whole private range.** Removes the problem by removing the
 protection. `android/CLAUDE.md` forbids it in as many words.
 
-**Put the address in `server/config.json` and have the app fetch it.** Circular: the app cannot
+**Put the address in `server/config.toml` and have the app fetch it.** Circular: the app cannot
 reach the server to learn which server to reach.

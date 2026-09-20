@@ -19,11 +19,32 @@ from `default.target` — lights the panel for an empty room and looks like a ph
 ## Configuration
 
 ```bash
-cp server/config.example.json server/config.json
+cp server/config.example.toml server/config.toml
 ```
 
-Edit it: tickers, city, brapi token, port. `config.json` is gitignored and never leaves the PC
-— the token in particular must never reach the APK.
+Edit that copy: tickers, city, brapi token, port. `config.toml` is gitignored and never leaves
+the PC — the token in particular must never reach the APK.
+
+**Read `config.example.toml` rather than this section.** It is written as documentation, not as
+a sample: every key carries what it does, what its default is, and — the part that used to mean
+reading `providers_brapi.py` — which values actually work. Which four B3 tickers answer without
+a token, how an FX pair is spelled, which coins Binance quotes, and why the quotes interval is
+600 seconds and not 300.
+
+TOML rather than JSON because JSON cannot carry any of that: no comments, and a trailing comma
+is a fatal error a page from where it was typed. TOML rather than YAML because the server is
+standard-library-only (`server/CLAUDE.md`) and PyYAML is a dependency, while `tomllib` has
+shipped with Python since 3.11.
+
+### If you already have a `config.json`
+
+Nothing to do. It is still read, exactly as before, and the server prints one line at startup
+naming the replacement. The format is chosen by the suffix, and `config.toml` wins where both
+files exist — so the migration is: copy the example, move your values across, delete the old
+file. Do it when convenient, or not at all.
+
+An explicit `--config` or `DESK_PANEL_CONFIG` is never second-guessed: it names its own file
+and its own format. Only the fallback beside `server.py` chooses between the two names.
 
 ## Run it once by hand
 
@@ -43,7 +64,7 @@ matched `--expect`, 1 when it did not, 2 when the probe itself could not tell.
 powershell -ExecutionPolicy Bypass -File server\install_task.ps1
 ```
 
-`config.json` has to exist first: the installer runs `server.py --check-only` before it
+The config has to exist first: the installer runs `server.py --check-only` before it
 registers anything, and stops with the copy command if it is missing.
 
 This registers a task with an **"At log on" trigger**, scoped to your user.

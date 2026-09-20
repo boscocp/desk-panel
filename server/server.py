@@ -32,6 +32,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from server import providers_awesomeapi, providers_binance, providers_brapi, providers_openmeteo  # noqa: E402
+from server.config_format import ConfigError, format_for_path, merge, parse  # noqa: E402
 from server.upstream import UpstreamError  # noqa: E402
 
 HOST = "0.0.0.0"
@@ -39,12 +40,20 @@ PORT = 8777
 MIN_PYTHON = (3, 11)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-EXAMPLE_CONFIG_PATH = SCRIPT_DIR / "config.example.json"
+EXAMPLE_CONFIG_PATH = SCRIPT_DIR / "config.example.toml"
 
-# Every key config.example.json ships, with a safe empty/inert default.
-# `load_config` fills in whatever a real config.json omits so that a
+# The two names the script_dir fallback will answer to, best first. Order is
+# the whole rule: config.toml wins wherever both exist (T3.12 step 3).
+CONFIG_FILENAMES = ("config.toml", "config.json")
+
+# Every key config.example.toml ships, with a safe empty/inert default.
+# `load_config` fills in whatever a real config file omits so that a
 # partial file degrades gracefully instead of raising KeyError deep inside
 # a handler -- see server/CLAUDE.md ("config drives behaviour").
+#
+# TT.2 asserts that this dict and the example file carry the same key set,
+# in both directions. The example is where the catalogue of legal values
+# lives, so a key added here and not there is a key no owner finds out about.
 DEFAULT_CONFIG = {
     "port": PORT,
     "brapi_token": "",
@@ -70,55 +79,55 @@ DEFAULT_CONFIG = {
     "history_days": 30,
     "night_start": "22:00",
     "night_end": "07:00",
+    # Reserved for T6.7, which turns rendering into web/themes/<name>/ and
+    # selects between them from here. Defaulted rather than left absent so
+    # that the key is already in the example file, already documented, and
+    # already merged into every config by the time anything reads it --
+    # selecting a theme must never need a rebuild, which is the whole reason
+    # it is runtime config and not .env (ADR 0013).
+    "theme": "neon",
     "actions": {},
 }
 
 
-class ConfigError(Exception):
-    """A missing or malformed config.json.
-
-    The message is always safe to print or log: it never contains the
-    token or any other config value, only the path involved -- see
-    server/CLAUDE.md ("secrets stay here").
-    """
+# ConfigError is defined in config_format, beside the two parsers whose
+# exceptions it replaces, and re-exported here because every caller in this
+# file and in the tests has always imported it from `server.server`.
 
 
 def load_config(path):
-    """Pure: load config.json from `path`, filling missing keys with
-    DEFAULT_CONFIG. Raises ConfigError -- never a bare exception -- for a
-    missing file or invalid JSON, so callers get one exception type to
-    handle. No I/O beyond the single read; no logging, no defaults baked
-    into the network layer. Pure so TT.2 can test it without a server.
+    """Load the config at `path`, filling missing keys with DEFAULT_CONFIG.
+
+    The format comes from the suffix -- `.toml` is TOML, anything else is
+    JSON (`config_format.format_for_path`). Raises ConfigError, never a
+    bare exception, for a missing file or a malformed one, so callers get
+    one type to handle.
+
+    The single read is the only I/O; the parsing and the merge are pure
+    functions in config_format, which is what lets TT.2 cover both formats
+    without a filesystem. No logging, and no defaults baked into the
+    network layer.
     """
     try:
         raw = Path(path).read_text(encoding="utf-8")
     except FileNotFoundError:
         raise ConfigError(
             f"{path} not found. Copy {EXAMPLE_CONFIG_PATH} to that path "
-            f"and fill in your brapi token."
+            f"(the suffix is what picks the parser) and fill in your "
+            f"brapi token."
         ) from None
     except OSError as exc:
         raise ConfigError(f"cannot read {path}: {exc}") from None
 
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ConfigError(f"{path} is not valid JSON: {exc}") from None
-
-    if not isinstance(data, dict):
-        raise ConfigError(f"{path} must contain a JSON object")
-
-    config = dict(DEFAULT_CONFIG)
-    config.update(data)
-    return config
+    return merge(parse(raw, format_for_path(path), name=str(path)), DEFAULT_CONFIG)
 
 
-def config_search_paths(argv, env, script_dir):
+def config_search_paths(argv, env, script_dir, exists=None):
     """Pure: ordered config path candidates, highest priority first.
 
     Order: `--config <path>` (from argv), then `DESK_PANEL_CONFIG` (from
-    env), then `script_dir / "config.json"`. Only sources that are actually
-    set contribute a candidate; the script_dir fallback always does, so the
+    env), then the script_dir fallback. Only sources that are actually set
+    contribute a candidate; the script_dir fallback always does, so the
     list is never empty and the caller can just take the first entry.
 
     This is what makes config discovery cwd-independent -- a Scheduled Task
@@ -126,6 +135,25 @@ def config_search_paths(argv, env, script_dir):
     relative "server/config.json" resolves to nothing. All three launchers
     pass an absolute --config, so cwd never matters for them; the
     script_dir fallback is for running the server by hand.
+
+    **The fallback is the only place the two formats can meet**, and that
+    is not an accident: the other two sources are handed a path, and a path
+    names its own format. So `--config x.json` stays exactly as
+    authoritative as it was -- it is never quietly upgraded to a `.toml`
+    sitting next to it, and a launcher pointing at a file that has been
+    deleted still fails loudly instead of starting on somebody else's
+    config.
+
+    Among the fallback's two names, `config.toml` wins; `config.json` is
+    chosen only when it is there and the .toml is not, which is T3.12 step
+    3 -- nobody's running panel may break because a file was renamed. With
+    neither present the candidate is `config.toml`, so the "not found"
+    message names the file the owner should write rather than the one being
+    retired.
+
+    `exists` is injected rather than read, which is what keeps this pure:
+    main passes `os.path.exists`, a test passes a set's `__contains__`, and
+    None means "nothing is there" -- the answer is then always the .toml.
     """
     paths = []
     argv = list(argv) if argv is not None else []
@@ -142,8 +170,52 @@ def config_search_paths(argv, env, script_dir):
     if env_val:
         paths.append(Path(env_val))
 
-    paths.append(Path(script_dir) / "config.json")
+    paths.append(_fallback_config_path(script_dir, exists))
     return paths
+
+
+def _fallback_config_path(script_dir, exists=None):
+    """Pure given `exists`: which of CONFIG_FILENAMES the script_dir
+    fallback names. First one that exists wins; failing that, the first
+    name in the tuple. See config_search_paths for why only this source
+    gets a choice.
+    """
+    candidates = [Path(script_dir) / name for name in CONFIG_FILENAMES]
+    if exists is not None:
+        for candidate in candidates:
+            if exists(candidate):
+                return candidate
+    return candidates[0]
+
+
+def legacy_format_notice(path, example_path=None):
+    """Pure: one line pointing a JSON config at its TOML replacement, else
+    None.
+
+    Not a deprecation and not a warning. `config.json` is still read and
+    still entirely correct (T3.12 step 3); what it cannot do is carry
+    comments, which means it cannot tell its owner which tickers answer
+    without a token or how an FX pair is spelled. That catalogue is the
+    actual deliverable of this change, and an owner who is never told the
+    file exists never gets it.
+
+    Silent for the committed example. `config.example.json` is what T3.11's
+    acceptance loads on every run, and a line nagging about a file nobody
+    edited is how people learn to skim the output -- the same argument
+    config_permission_warning makes about the mode bits on that same file.
+    """
+    path = Path(path)
+    if format_for_path(path) != "json":
+        return None
+    if path.name.startswith("config.example"):
+        return None
+    example = EXAMPLE_CONFIG_PATH if example_path is None else example_path
+    return (
+        f"notice: {path} is the older JSON config; it still works. The TOML "
+        f"replacement is commented -- it names every key, its default, and "
+        f"which tickers, pairs and coins actually answer. Copy {example} to "
+        f"{path.with_name('config.toml')} when convenient."
+    )
 
 
 def config_permission_warning(mode, platform, path=None, token=""):
@@ -673,7 +745,10 @@ def parse_args(argv=None):
     parser.add_argument(
         "--config",
         default=None,
-        help="path to config.json (see config_search_paths for discovery order)",
+        help=(
+            "path to config.toml or config.json; the suffix picks the parser "
+            "(see config_search_paths for the discovery order)"
+        ),
     )
     parser.add_argument(
         "--check-only",
@@ -716,7 +791,9 @@ def main(argv=None):
             except (AttributeError, ValueError):
                 pass
 
-    config_path = config_search_paths(raw_argv, os.environ, SCRIPT_DIR)[0]
+    config_path = config_search_paths(
+        raw_argv, os.environ, SCRIPT_DIR, exists=os.path.exists
+    )[0]
 
     # A server that starts with silently-empty config looks healthy and
     # shows an empty panel -- worse than one that refuses to start with a
@@ -738,6 +815,10 @@ def main(argv=None):
             )
             if warning:
                 print(warning, file=sys.stderr)
+
+    notice = legacy_format_notice(config_path)
+    if notice:
+        print(notice, file=sys.stderr)
 
     if args.check_only:
         print(f"config OK: {config_path}")

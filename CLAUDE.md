@@ -65,9 +65,11 @@ by looking at output, the task file is wrong — fix the task file.
 - English everywhere: code, comments, docs, commit messages.
 - Conventional commits (`feat:`, `fix:`, `docs:`, `test:`, `chore:`).
 - **Commit messages carry no Claude attribution and no `Co-Authored-By` line.**
-- Secrets never enter git: `server/config.json` and `*.keystore` are gitignored. The brapi
+- Secrets never enter git: `server/config.toml` (and the older `server/config.json`) and
+  `*.keystore` are gitignored. The brapi
   token lives on the PC and is proxied, so it never ships inside the APK.
-- Changing tickers or the city must never require rebuilding the APK — it is server config.
+- Changing tickers, the city or the theme must never require rebuilding the APK — it is server
+  config, in `server/config.toml`, whose committed example documents every legal value.
 
 ## Traps that have already cost time
 - **MIUI kills background apps.** `FLAG_KEEP_SCREEN_ON` stops the screen sleeping; it does not

@@ -32,8 +32,9 @@ to be moved, and a panel that silently renders nothing is the failure this
 project keeps designing against.
 
 **Tokens.** PETR4, MGLU3, VALE3 and ITUB4 are the documented free sample set
-and are what `config.json` ships. Any other ticker needs a token, which stays
-in config.json and is sent as a header, never in the query string — see
+and are what `config.example.toml` ships, with that catalogue written out
+beside them. Any other ticker needs a token, which stays in the config and is
+sent as a header, never in the query string — see
 `upstream._safe` for why that distinction is load-bearing.
 """
 from server.upstream import UpstreamError, get_json
@@ -160,7 +161,7 @@ def load_history(symbols, token="", get=get_json, days=30):
     emptiness for six hours with nothing to say why.
 
     Keyed by the upstream's spelling, upper-cased, because that is how the
-    price rows are keyed -- a lowercase ticker in config.json would otherwise
+    price rows are keyed -- a lowercase ticker in the config would otherwise
     silently lose its line.
     """
     symbols = list(symbols or [])

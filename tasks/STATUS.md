@@ -62,7 +62,7 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 | T3.9 | Linux: systemd user unit (graphical-session) | todo | Dev box. Beware `Linger=yes` |
 | T3.10 | macOS: LaunchAgent | blocked | No Mac. Plist and docs ship anyway |
 | T3.11 | Server portability hardening | done | 2026-09-16. `config_search_paths()` (`--config` → `DESK_PANEL_CONFIG` → `script_dir/config.json`, cwd-independent), `config_permission_warning()` (POSIX-only, warns not refuses), `check_python_version()` (3.11 floor), `Server(HTTPServer)` with `allow_reuse_address = os.name != "nt"`, `--check-only` and `--log-file` flags, explicit UTF-8 everywhere. All 5 acceptance commands exit 0 |
-| T3.12 | **Config in TOML, with the catalogue in the file** | todo | Asked for as YAML, delivered as TOML: `server/CLAUDE.md` makes stdlib-only a hard constraint and PyYAML is a dependency, while `tomllib` has been in the standard library since 3.11 — this project's floor — and gives every property the request was about (comments, no trailing-comma traps, bare keys). Config already drives tickers without a rebuild; what is missing is the file being able to say which values work. Carries the catalogue: the four free brapi tickers, that one paid ticker 401s the whole request, and that the free plan allows one symbol per request |
+| T3.12 | **Config in TOML, with the catalogue in the file** | done | 2026-09-20. `server/config_format.py` (pure `parse`/`merge`/`format_for_path`, plus `ConfigError`, moved here from `server.py` and re-exported so every existing import still works) and `server/config.example.toml`, which is written as documentation rather than as a sample. **TOML, not the YAML that was asked for**, and the reason is in the file: stdlib-only is a hard constraint in `server/CLAUDE.md`, PyYAML is a dependency, and `tomllib` has been in the standard library since 3.11 — this project's floor. `load_config` dispatches on the suffix; the merge and both parsers are pure, so TT.2 covers every case without a filesystem. **The transition is real and was exercised in all four states** in a scratch rig (neither file, only `.json`, both, only `.toml`): `config.toml` wins, a lone `config.json` still loads and prints one line naming the replacement, and with neither present the not-found message names the `.toml`. **An explicit `--config` or `DESK_PANEL_CONFIG` is never second-guessed** — only the `script_dir` fallback chooses between the two names, because it is the only source that names a file rather than being handed one. Without that rule a launcher pointing at a deleted path would have silently started on whatever config sat in the repo: somebody else's tickers and somebody else's token. `exists` is injected into `config_search_paths`, so it stays pure and the whole matrix is a unit test. **Two things the task file got wrong, both corrected in the catalogue.** (a) "One paid ticker 401s the whole request, so a single unlisted symbol empties the card" is only true when `brapi_symbols_per_request` is raised; at the shipped value of 1 each ticker is its own request and a refused one costs its own row — `load` already works that way. (b) The two upstream catalogues are cited from endpoints that were *checked*, not from a docs page taken on trust: AwesomeAPI lists 540 pairs at `/json/available` and Binance 3,708 symbols at `/api/v3/ticker/price`, and every pair and coin named in the example was confirmed present. **`config.example.json` shipped `quotes_interval_s: 300` while the default was 600** — the arithmetic beside `DEFAULT_CONFIG` says 300 burns brapi's 15,000/month budget by the 17th, and copying that file was the documented first step. Fixed, the three keys it was missing added, and a test now asserts the example's key set equals `DEFAULT_CONFIG`'s in both directions and that neither example ships an interval below the default. The `theme` key is reserved and defaulted to `neon` for T6.7. `config.toml` inherits the gitignore rule and both agent denylists (`.claude/settings.json` and `reasonix.toml`, changed together). **`install_task.ps1` learned both formats and that half is unverified**: no PowerShell exists on this box, so `Resolve-DeskPanelConfig` and the TOML branch of `Get-ConfiguredPort` were reviewed, not run. The port scan is a line scan that stops at the first `[section]` and warns when it finds nothing, so a miss degrades to the 8777-plus-warning the function always had. All four acceptance commands exit 0; `make lint-tasks`, the web suite and the Android JVM suite are green |
 | T3.6 | Serve the APK at `/app` | todo | |
 | T3.7 | `POST /action/{id}` stub returning 501 | done | 2026-09-19. Rode along with wave 8 because TT.3 was `blocked` on it as well as on T3.3, and stranding TT.3 a second time for a five-line route would have been the more expensive choice. Matched narrowly by a pure `action_id(path)`: one segment, non-empty, no nesting, no `..`, no query — which is the first half of the closed-allowlist promise in `server/CLAUDE.md`. 501 rather than 404 or 200, because the route exists and does nothing yet, and that is exactly what 501 says. `probe.py --serve --url /action/anything --method POST --expect-status 501` exits 0 |
 | TT.2 | Server unit tests + fixtures | done | 2026-09-19. Re-opened by wave 8, as its earlier note asked. 86 tests now, up from 32: every provider normaliser against a **real recorded response** in `server/tests/fixtures/`, plus the cache, the stale fallback and the payload assembly. The fixtures are captures, not hand-written shapes — which is the point, since the shapes for crypto and FX were not in anybody's documentation. `TimedCache` takes `now` as an argument and `App` takes its clock, so a 300s TTL expires in a function call rather than a sleep. **A test found a real defect**: after a failed refresh the cache did not move `fetched_at`, so every subsequent request retried — an upstream that is down would have become one outbound call per panel poll, the exact traffic the cache exists to prevent, arriving when the upstream can least afford it. A failure now spends the TTL like a success does. The acceptance's real check passes too: the whole suite is green inside a network namespace with no route out, proved by a `URLError` on a live URL from that same namespace |
@@ -431,3 +431,59 @@ state where it is hot while nobody is.
   sequence is legible, and it needs a genuinely warm phone.
 - **`server/config.json` is mode 0644** and holds the brapi token; the server warns about it on
   every start. Fixing it is one `chmod 600`, and T7.3's secret audit will want it done.
+
+## Resuming after 2026-09-20 (wave 12)
+
+Wave 12 is T3.12 alone, on `wave/12-config-in-toml`. The runtime config is `server/config.toml`
+now, and `server/config.example.toml` is the deliverable — the format change is the convenience,
+the catalogue is the thing. An owner can answer "which tickers can I put here?" without opening
+a `.py`, which was the actual complaint.
+
+**Next: T6.7** (a theme boundary), which T3.12 was blocking and which then unblocks T6.6. Read
+the `Prereqs:` lines rather than the phase order. `theme` is already in `DEFAULT_CONFIG`, already
+in both example files and already defaulted to `neon`; what T6.7 has to add is delivering it in
+the payload and the `web/themes/<name>/` split.
+
+### Nothing here was a new capability, and two old things were wrong anyway
+
+Config has driven tickers without a rebuild since T3.2. What this wave found while moving the
+format is worth more than the format:
+
+- **`config.example.json` shipped a 300-second quotes interval against a 600-second default.**
+  The comment beside `DEFAULT_CONFIG` has spelled out since T3.3 why 300 is wrong — three
+  tickers, one request each, 25,920 requests a month against brapi's 15,000, so the B3 card goes
+  permanently stale around the 17th. The documented first step was `cp config.example.json
+  config.json`, so the default nobody would have chosen was the value everybody got. It is 600
+  now, and a test fails the build if an example ever drops below the default again.
+- **The example was missing three keys entirely** (`brapi_symbols_per_request`,
+  `history_interval_s`, `history_days`). A key that exists only in `DEFAULT_CONFIG` is a key no
+  owner finds out about. The key sets are now asserted equal in both directions, for both files.
+
+### The catalogue was checked, not recalled
+
+Every fact in `config.example.toml` came from either this repository's own measured notes or a
+live endpoint, never from memory. AwesomeAPI lists 540 pairs at `/json/available`; Binance lists
+3,708 symbols at `/api/v3/ticker/price`; every pair and coin the example names was confirmed
+present in those listings before being written down. The four free brapi tickers come from
+`providers_brapi.FREE_TIER_SYMBOLS`, and a test now asserts the example still names all four —
+a catalogue that drifts from the provider is worse than no catalogue.
+
+**The task file itself had a fact wrong**, and the example says the corrected version: "one paid
+ticker 401s the whole request" holds only when `brapi_symbols_per_request` is raised above 1. At
+the shipped value each ticker is its own request and `load` already loses only that ticker's row.
+The file the owner reads should not repeat a simplification from the file the owner never sees.
+
+### What is still only true on this desk
+
+- **The Windows installer's half is unverified.** `Resolve-DeskPanelConfig` and the TOML branch
+  of `Get-ConfiguredPort` are written and reviewed; no PowerShell exists on this machine, so
+  neither has been *run*. Both degrade the way the surrounding code already degraded — a port
+  the scan cannot find falls back to 8777 with a warning — but T3.8 is still the task that
+  proves it on the box. Re-run `install_task.ps1` there before trusting it.
+- **The server on this desk was restarted onto the new code** (stopped by PID from
+  `ss -ltnp 'sport = :8777'`, as ever) and still loads `server/config.json`, because that is the
+  only config file this machine has. The notice fires on every start, which is the transition
+  working rather than a defect.
+- **`server/config.json` is still mode 0644** and holds the brapi token; the server warns about
+  it on every start. Fixing it is one `chmod 600`, and T7.3's secret audit will want it done —
+  and will want it done to `config.toml` if the migration happens first.

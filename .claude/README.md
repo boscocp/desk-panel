@@ -16,7 +16,7 @@ Three things are **not** in it, on purpose:
 `rm -rf out` and `./gradlew clean`, so it prompts. That is the intended friction — deleting
 build output is cheap to redo and easy to confuse with deleting something else.
 
-Secrets are denied at read level, not just write: `server/config.json` holds the brapi token
+Secrets are denied at read level, not just write: the real config holds the brapi token
 and `keystore.properties` holds signing passwords. An agent has no reason to read either, and
 this repo becomes public later.
 

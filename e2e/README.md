@@ -7,7 +7,7 @@ it ahead of time, which is why nothing here runs yet.
 
 - Phone reachable over adb (see `docs/INSTALL-PHONE.md`)
 - The app installed, with MIUI autostart and battery exemption already granted
-- `server/config.json` present and valid
+- `server/config.toml` (or the older `server/config.json`) present and valid
 
 ## Running
 

@@ -1,0 +1,170 @@
+# desk-panel — the PC server's runtime configuration.
+#
+#   cp server/config.example.toml server/config.toml
+#
+# Then edit that copy. `config.toml` is gitignored and never leaves the PC;
+# this file is committed and holds no secret.
+#
+# Everything here is read when the server starts, so changing any of it needs
+# a server restart and **never a rebuild of the APK**. That is a project rule,
+# not a convenience: if changing what the panel shows meant reinstalling the
+# app, the design would be broken (ADR 0013). The only things that do need a
+# rebuild live in `.env` — the PC's LAN address, the signing key, the
+# orientation — and an API token must never be one of them.
+#
+# This file is TOML. YAML was what was asked for and is not available: the
+# server is standard-library-only so that it runs on a clean box, and PyYAML
+# is a dependency, while `tomllib` has shipped with Python since 3.11. What
+# the request was actually about — comments, no trailing-comma traps, bare
+# keys — TOML has.
+#
+# A `config.json` from before this file existed is still read, unchanged. It
+# just cannot carry any of the notes below, which is the reason to move.
+
+
+# The port the server listens on. The phone reaches it at
+# http://<PC-IP>:8777/, and the address half of that is baked into the APK
+# (`PC_IP` in .env), so changing the port here means changing it on the phone
+# too — and reopening it in the firewall. There is rarely a reason to.
+port = 8777
+
+
+# ---------------------------------------------------------------------------
+# B3 stock quotes — brapi.dev
+# ---------------------------------------------------------------------------
+
+# Your brapi token, or "" for none. It is sent as an Authorization header and
+# is never included in anything the phone receives (ADR 0004). This is the one
+# secret in the file, and the reason `config.toml` is gitignored.
+brapi_token = ""
+
+# **Which tickers work without a token.** Exactly these four:
+#
+#     PETR4   MGLU3   VALE3   ITUB4
+#
+# They are brapi's documented free sample. Any other B3 ticker needs a token;
+# without one the request for it is refused and that row simply is not on the
+# panel. At the default `brapi_symbols_per_request = 1` below, a refused
+# ticker costs only its own row — the rest of the card still renders.
+#
+# Spelling is the B3 ticker as written on the exchange, uppercase, no ".SA"
+# suffix and no exchange prefix.
+quotes = ["PETR4", "VALE3", "ITUB4"]
+
+# How many tickers may ride in one request. **One is what brapi's free plan
+# allows**, and asking for more is not a partial success — the whole request
+# is refused, with `400 QUOTES_PER_REQUEST`, and every symbol in it is lost
+# together. Raise this only to the number your paid plan actually permits.
+brapi_symbols_per_request = 1
+
+
+# ---------------------------------------------------------------------------
+# FX — AwesomeAPI (no token, no account)
+# ---------------------------------------------------------------------------
+
+# Any pair AwesomeAPI serves, spelled `FROM-BRL` with a hyphen — that is the
+# spelling this file uses and the one the upstream uses. The panel renders it
+# as `USD/BRL`; do not write the slash here. `USDBRL` is accepted too, for a
+# config typed the other way.
+#
+# `USD-BRL`, `EUR-BRL`, `GBP-BRL`, `ARS-BRL` and `BTC-BRL` all answer. So do
+# about 540 others: the upstream lists every one of them, name included, at
+#
+#     https://economia.awesomeapi.com.br/json/available
+#
+# A pair it does not serve costs its own row and nothing else.
+fx = ["USD-BRL", "EUR-BRL"]
+
+
+# ---------------------------------------------------------------------------
+# Crypto — Binance (no token, no account)
+# ---------------------------------------------------------------------------
+
+# Any Binance symbol, spelled **bare**: `BTC`, not `BTCUSDT` and not
+# `BTC/USDT`. Everything here is quoted against USDT, which the server appends
+# on the way out and strips on the way back; the panel labels it USD, since a
+# stablecoin pegged 1:1 is honest at the precision a desk panel shows.
+#
+# `BTC`, `ETH`, `SOL`, `XRP`, `DOGE` and `ADA` all answer, as does anything
+# else holding a USDT spot pair — there are a few thousand, and the upstream
+# lists them all as `<COIN>USDT` entries at
+#
+#     https://api.binance.com/api/v3/ticker/price
+#
+# A coin without a USDT pair costs its own row and nothing else.
+crypto = ["BTC", "ETH"]
+
+
+# ---------------------------------------------------------------------------
+# Weather — Open-Meteo (no token)
+# ---------------------------------------------------------------------------
+
+# The city is geocoded by name, and the first match wins. Plain ASCII is the
+# safe spelling: Windows' console and an older Python reading this file as
+# cp1252 both mangle "São Paulo", and a mangled name geocodes to nothing.
+# Add the country when a name is ambiguous — "Santos, BR".
+city = "Sao Paulo"
+
+# An IANA timezone name, and it is load-bearing rather than cosmetic. It is
+# what cuts the forecast into days: without it the upstream cuts them on UTC,
+# so after 21:00 in Sao Paulo the panel shows *tomorrow's* high as today's —
+# a wrong number rather than an error. Set it to the city's own zone.
+timezone = "America/Sao_Paulo"
+
+
+# ---------------------------------------------------------------------------
+# How often to refresh — seconds
+# ---------------------------------------------------------------------------
+# These govern how often the *server* asks an upstream. The phone's own poll
+# is a separate, faster clock and is not configurable: it only ever asks this
+# server, which is already caching, so nothing the phone does can spend an API
+# budget.
+
+# 600, not 300, and the arithmetic is the reason. brapi's free plan allows one
+# symbol per request and about 15,000 requests a month, so the three tickers
+# above cost three requests per refresh. At 300s that is 25,920 a month
+# against a 15,000 budget and the B3 card goes permanently stale around the
+# 17th; at 600s it is 12,960 with the PC logged in around the clock. More
+# tickers, or a shorter interval, and that arithmetic has to be redone.
+quotes_interval_s = 600
+
+# Open-Meteo allows 10,000 requests a day for non-commercial use, so this is
+# not near any limit. Weather does not move faster than this anyway.
+weather_interval_s = 900
+
+# The sparkline's series: daily closes, which change once a day, so this is on
+# a clock measured in hours. Six hours costs four requests a day per provider.
+history_interval_s = 21600
+
+# How many days of history the sparkline covers. brapi only accepts named
+# ranges (5d, 1mo, 3mo, 6mo, 1y, 5y) and rounds up to the nearest one that
+# covers this; the other two providers take the count as written.
+history_days = 30
+
+
+# ---------------------------------------------------------------------------
+# Presentation
+# ---------------------------------------------------------------------------
+
+# The night profile's window, 24-hour "HH:MM", local to the panel. Inside it
+# the panel dims. A window that wraps midnight is normal and is what these
+# defaults do.
+night_start = "22:00"
+night_end = "07:00"
+
+# Which theme renders the panel. Every theme is packaged in the APK, so
+# switching one is a restart of this server and not a reinstall of the app.
+# "neon" is the cyberpunk skin the project ships; an unknown name falls back
+# to it and says so once in the log.
+theme = "neon"
+
+
+# ---------------------------------------------------------------------------
+# Actions — reserved
+# ---------------------------------------------------------------------------
+
+# A closed allowlist of ids the panel may POST back to, for a future version.
+# It is empty, `POST /action/{id}` answers 501, and nothing reads this yet.
+# When it does, only ids named here will exist — never a command, path or
+# argument taken from the request.
+[actions]
