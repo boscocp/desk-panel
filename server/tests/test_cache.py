@@ -9,6 +9,8 @@ upstream that has gone away must cost the panel its freshness, never its
 contents. The panel showing a slightly old price beats the panel showing
 nothing, and `stale` is how the page knows to say so.
 """
+import contextlib
+import io
 import unittest
 
 from server.server import App, TimedCache, action_id, route
@@ -336,6 +338,52 @@ class AppPayloadTests(unittest.TestCase):
         self.assertEqual(len(payload["fx"]), 1, "a working market was emptied by another's failure")
         self.assertEqual(len(payload["crypto"]), 1)
         self.assertTrue(payload["stale"])
+
+    def test_a_partial_first_market_does_not_crash_the_payload(self):
+        """A configured ticker that does not resolve must cost its own row.
+
+        `quotes()` read `key` inside the partial-market branch and assigned it
+        five lines below. On the first market in the loop that made the whole
+        payload raise UnboundLocalError -- a 500 on /quotes, and a blank panel,
+        for one missing ticker. Found on the desk the first time a configured
+        symbol did not come back, which is also the only condition that
+        reaches that branch: with every ticker resolving it never ran.
+        """
+        app = App(dict(CONFIG, quotes=["PETR4", "TAE11"]), clock=self.clock)
+        self._stub_providers(
+            quotes=[{"symbol": "PETR4", "price": 1.0, "changePct": 0.0}],
+            fx=[{"pair": "USD/BRL", "rate": 5.0, "changePct": 0.0}],
+            crypto=[{"symbol": "BTC", "price": 1.0, "changePct": 0.0}],
+        )
+        with contextlib.redirect_stderr(io.StringIO()):
+            payload = app.quotes()
+        self.assertEqual([row["symbol"] for row in payload["quotes"]], ["PETR4"])
+        self.assertEqual(len(payload["fx"]), 1, "another market paid for the missing ticker")
+        self.assertEqual(len(payload["crypto"]), 1)
+        self.assertTrue(payload["stale"])
+
+    def test_a_partial_fx_market_names_the_pair_that_is_actually_missing(self):
+        """The other half of the same bug, which does not raise.
+
+        On any market after the first, `key` still held the *previous*
+        market's key -- `symbol` while assembling `fx`. Every row then read as
+        the empty string, so the diagnostic named every configured pair as
+        missing, including the ones sitting in front of it.
+        """
+        app = App(dict(CONFIG, fx=["USD-BRL", "CNY-BRL"]), clock=self.clock)
+        self._stub_providers(
+            quotes=[{"symbol": "PETR4", "price": 1.0, "changePct": 0.0}],
+            fx=[{"pair": "USD/BRL", "rate": 5.0, "changePct": 0.0}],
+            crypto=[{"symbol": "BTC", "price": 1.0, "changePct": 0.0}],
+        )
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            payload = app.quotes()
+        report = stderr.getvalue()
+        self.assertEqual([row["pair"] for row in payload["fx"]], ["USD/BRL"])
+        self.assertIn("CNY-BRL", report)
+        self.assertNotIn("USD-BRL", report,
+                         "the pair that did arrive was reported missing")
 
     def test_a_market_that_recovers_alone_clears_the_stale_flag(self):
         import server.server as server_module

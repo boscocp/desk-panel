@@ -351,6 +351,12 @@ class App:
             rows, market_stale = self.market_caches[market].get(now, ttl, produce)
             rows = rows if rows is not None else []
 
+            # Before the partial-market check below, which reads it. Assigned
+            # after it, this was unbound on the first market and held the
+            # *previous* market's key on the rest -- a crash on one path and a
+            # silently wrong answer on the other.
+            key = key_for(market)
+
             # Fewer rows than were asked for is a failure the cache cannot see.
             # brapi sends one symbol per request now, so a 429 on one ticker
             # returns the other two and looks like a success: that row would
@@ -376,7 +382,6 @@ class App:
                       + (f", missing {', '.join(missing)}" if missing else ""),
                       file=sys.stderr)
 
-            key = key_for(market)
             # Attached rather than merged into the cache, so a history that
             # failed or has not been fetched yet costs the row its picture and
             # nothing else. An absent series is an absent key: the page draws
