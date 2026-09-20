@@ -6,6 +6,9 @@ const assert = require('node:assert/strict');
 const {
     formatPrice, formatRate, formatPair, formatChange, changeClass, weatherLabel, isNight,
     sparklinePath, formatTemp, formatBattery, tempClass, BATTERY_WARN_C, BATTERY_HOT_C,
+    formatRange, weatherGlyph, WEATHER_LABELS,
+    overflowsBy, scrollPlan, worthScrolling,
+    SCROLL_SECONDS_PER_ROW, SCROLL_MOVING_FRACTION, SCROLL_MIN_TRAVEL_PX,
 } = require('../js/format.js');
 
 test('formatPrice formats a BRL price with two decimals', () => {
@@ -261,4 +264,173 @@ test('tempClass treats a missing temperature as normal', () => {
     assert.equal(tempClass(null), 'normal');
     assert.equal(tempClass(NaN), 'normal');
     assert.equal(tempClass('43'), 'normal');
+});
+
+// --- T6.6: the slow scroll, and when there must not be one ------------------
+
+test('overflowsBy counts nothing hidden when the rows exactly fill the card', () => {
+    // The boundary in the direction that must NOT move. A card that scrolls
+    // with everything already on screen is motion for its own sake, in
+    // someone's peripheral vision, all day.
+    assert.equal(overflowsBy(5, 5), 0);
+    assert.equal(overflowsBy(2, 5), 0);
+    assert.equal(overflowsBy(0, 5), 0);
+});
+
+test('overflowsBy counts the rows one more than fits leaves hidden', () => {
+    assert.equal(overflowsBy(6, 5), 1);
+    assert.equal(overflowsBy(9, 3), 6);
+});
+
+test('overflowsBy takes a fractional measurement conservatively', () => {
+    // The theme measures pixels and divides, so visibleRows arrives fractional.
+    // 4.9 rows of room shows four rows, not five: half a row is not readable,
+    // and rounding it up would leave the last row permanently cut in half at
+    // the bottom of the card with nothing moving to reveal it.
+    assert.equal(overflowsBy(5, 4.9), 1);
+    assert.equal(overflowsBy(5, 5.1), 0);
+});
+
+test('overflowsBy treats an unusable measurement as no overflow', () => {
+    // Fail still. A card that started moving because a measurement came back
+    // NaN would be a thing flickering in the corner of the eye with no way to
+    // tell what it was for.
+    assert.equal(overflowsBy(NaN, 5), 0);
+    assert.equal(overflowsBy(6, NaN), 0);
+    assert.equal(overflowsBy(undefined, undefined), 0);
+});
+
+test('scrollPlan says do not scroll at the boundary, and does one row past it', () => {
+    assert.equal(scrollPlan(5, 5, 4, 0.7), null);
+    const plan = scrollPlan(6, 5, 4, 0.7);
+    assert.equal(plan.hidden, 1);
+    // One hidden row travels for one row's worth of seconds; the cycle is
+    // longer than the travel by whatever the keyframes hold at the two ends.
+    assert.equal(plan.seconds, Math.round((4 / 0.7) * 100) / 100);
+});
+
+test('scrollPlan spends the theme seconds per hidden row', () => {
+    // Six rows hidden at four seconds each is 24 seconds of travel, in a cycle
+    // that also holds at both ends.
+    const plan = scrollPlan(9, 3, 4, 0.7);
+    assert.equal(plan.hidden, 6);
+    assert.ok(Math.abs(plan.seconds * 0.7 - 24) < 0.05,
+              `expected ~24s of travel, got ${plan.seconds * 0.7}`);
+});
+
+test('scrollPlan falls back to its own numbers when the theme sets none', () => {
+    // getComputedStyle on a custom property a theme never declared parses to
+    // NaN, which must not become a NaN-second animation.
+    const plan = scrollPlan(6, 5, NaN, NaN);
+    assert.equal(plan.seconds,
+                 Math.round((SCROLL_SECONDS_PER_ROW / SCROLL_MOVING_FRACTION) * 100) / 100);
+    assert.deepEqual(scrollPlan(6, 5, 0, 0), plan);
+    assert.deepEqual(scrollPlan(6, 5, -4, 2), plan);
+});
+
+test('a refresh that changes no rows produces the identical plan, so the scroll is not reset', () => {
+    // This is step 4 of the task, stated where it can be tested. window.onData
+    // replaces every row in the card every 60s; the scroll survives that for
+    // two reasons, and this is the second of them.
+    //
+    // The first is structural and lives in the themes: the animation is on a
+    // .scroller that mount() builds once and render() only refills, and
+    // replacing an element's children does not disturb its animation.
+    //
+    // The second is this. The theme rewrites --scroll-seconds and
+    // --scroll-distance on every render, and a CSS animation whose declaration
+    // changes mid-flight jumps. An unchanged symbol set means an unchanged row
+    // count, and an unchanged row count has to mean a byte-identical plan --
+    // no clock, no random, no accumulating state. A plan that drifted by a
+    // hundredth of a second per refresh would rewrite the declaration once a
+    // minute, for ever.
+    const before = scrollPlan(9, 3.4, 4, 0.7);
+    const after = scrollPlan(9, 3.4, 4, 0.7);
+    assert.deepEqual(after, before);
+    // And the card that stopped overflowing stops moving, rather than keeping
+    // an animation with a stale distance.
+    assert.equal(scrollPlan(3, 3.4, 4, 0.7), null);
+});
+
+// --- T6.8: the weather card -------------------------------------------------
+
+test('formatRange joins two positive temperatures readably', () => {
+    assert.equal(formatRange(18, 27), '18° / 27°');
+});
+
+test('formatRange is unambiguous when the low is negative', () => {
+    // The bug. The card joined two formatTemp calls with a hyphen, so the
+    // stress payload rendered `(-12-42°C)` -- a string nobody can parse by
+    // eye, and it was on screen in e2e/layout/stress.js. A test that only
+    // covered positives would have passed against it.
+    assert.equal(formatRange(-12, 42), '-12° / 42°');
+});
+
+test('formatRange is unambiguous when both temperatures are negative', () => {
+    assert.equal(formatRange(-12, -3), '-12° / -3°');
+});
+
+test('formatRange keeps a real zero, which is a temperature and not an absence', () => {
+    assert.equal(formatRange(0, 8), '0° / 8°');
+    assert.equal(formatRange(-4, 0), '-4° / 0°');
+});
+
+test('formatRange renders a missing bound as an absence, without a unit on it', () => {
+    // Not `--°`, which is a temperature of nothing-degrees and is the same kind
+    // of unparseable string this function exists to stop.
+    assert.equal(formatRange(null, 27), '-- / 27°');
+    assert.equal(formatRange(18, null), '18° / --');
+    assert.equal(formatRange(null, null), '--');
+    assert.equal(formatRange(undefined, undefined), '--');
+});
+
+test('weatherGlyph names a picture for every code the panel can label', () => {
+    // Every code in the WMO table gets a glyph from the closed set. A code
+    // that fell through to 'unknown' here would be a condition the card can
+    // name in words and cannot draw, which is a gap worth failing on.
+    const NAMES = new Set(['clear', 'cloudy', 'rain', 'snow', 'storm', 'fog']);
+    for (const code of Object.keys(WEATHER_LABELS)) {
+        const name = weatherGlyph(Number(code));
+        assert.ok(NAMES.has(name),
+                  `code ${code} (${WEATHER_LABELS[code]}) mapped to ${name}`);
+    }
+});
+
+test('weatherGlyph has a defined answer for a code nobody has seen yet', () => {
+    // open-meteo can add a code after this was written. 'unknown' is a real
+    // member of the set -- the theme draws no glyph for it and the label still
+    // says what it is -- and it must never be undefined, which would render as
+    // an empty box.
+    assert.equal(weatherGlyph(9999), 'unknown');
+    assert.equal(weatherGlyph(undefined), 'unknown');
+    assert.equal(weatherGlyph(null), 'unknown');
+});
+
+test('worthScrolling refuses a travel a pair of roundings could have invented', () => {
+    // The device lays out at dpr 2.75 and clientHeight/scrollHeight are
+    // integers, so a card whose rows exactly fill it can measure a pixel over.
+    // A card that declared a scroll for that would hold a compositor layer and
+    // twitch one pixel every seventeen seconds for as long as the panel is on,
+    // and every check in e2e/layout would pass it: 1px is a real overflow as
+    // far as a measurement can tell.
+    assert.equal(worthScrolling(1), false);
+    assert.equal(worthScrolling(2), false);
+    assert.equal(worthScrolling(0), false);
+});
+
+test('worthScrolling allows anything a genuinely hidden row could be', () => {
+    // A row is twenty-odd pixels tall on either theme, so the floor is nowhere
+    // near a real overflow.
+    assert.equal(worthScrolling(SCROLL_MIN_TRAVEL_PX), true);
+    assert.equal(worthScrolling(20), true);
+    assert.equal(worthScrolling(184), true);
+});
+
+test('worthScrolling treats an unusable measurement as not worth moving for', () => {
+    assert.equal(worthScrolling(NaN), false);
+    assert.equal(worthScrolling(undefined), false);
+    // Infinity too: a measurement that came back unbounded is a broken
+    // measurement, and the panel's answer to one is to stay still (the same
+    // bargain overflowsBy takes with NaN).
+    assert.equal(worthScrolling(Infinity), false);
 });

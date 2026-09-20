@@ -67,6 +67,24 @@
      * rest are the desktop equivalents for the browser check. */
     --font: 'sans-serif-condensed', 'Roboto Condensed', 'Liberation Sans Narrow',
             'DejaVu Sans Condensed', 'Arial Narrow', system-ui, sans-serif;
+
+    /* --- How fast an overflowing card gives up its hidden rows (T6.6) -------
+     *
+     * Four seconds a row, and the number is here rather than in format.js
+     * because it is taste and a theme is where taste lives. This panel sits in
+     * someone's peripheral vision all day: at four seconds a row the movement
+     * is not noticeable unless it is looked at, and a card with three rows
+     * hidden still gives up all three inside a minute.
+     *
+     * The fraction is the part of one pass @keyframes card-scroll spends
+     * moving -- 70%, because it holds for 15% at each end so the top and the
+     * bottom of the card can actually be read. The two numbers are one
+     * decision and they are deliberately in the same file: theme.js reads both
+     * off this block and hands them to scrollPlan, which does the arithmetic
+     * and knows nothing about either. Change the keyframes below and this
+     * number changes with them. */
+    --scroll-seconds-per-row: 4;
+    --scroll-moving-fraction: 0.7;
 }
 
 /* html's height, its black ground and the text-size-adjust guard are core
@@ -183,6 +201,87 @@ body {
     background: var(--ground);
     display: flex;
     flex-direction: column;
+}
+
+/* --- The window and the scroller (T6.6) -----------------------------------
+ *
+ * `.card-list` still clips; that is what keeps a sixth ticker from pushing the
+ * panel off the bottom of the screen, and T6.1's acceptance asserts it. What
+ * changed is that clipping is no longer the end of the story. The rows sit in
+ * a `.scroller` inside a `.card-body` window, and when there are more of them
+ * than the window can show, the scroller is walked slowly past it.
+ *
+ * The window takes the height, the scroller takes its content's: that pair is
+ * what makes the overflow measurable in theme.js, which reads one against the
+ * other and asks format.js whether the difference is worth moving for.
+ *
+ * **Never put `min-height: 0` on the scroller.** That is the one edit that
+ * breaks this quietly, and it is the kind of edit that gets made for an
+ * unrelated reason -- there are four `min-height: 0` rules in this file
+ * already, every one of them added to stop a grid or flex track refusing to
+ * shrink. The scroller is as tall as its rows today whichever way the window
+ * is written: as a block box it simply is its content's height, and as a flex
+ * item it still cannot shrink below its own min-content height. Give it that
+ * floor of zero inside a flex window and it squeezes to the window instead,
+ * the measurement comes back "everything fits", no card ever declares
+ * data-scroll again, and the rows are silently unreadable -- the exact fault
+ * this task is fixing, wearing a different hat.
+ *
+ * That last sentence used to end "and passing every check in e2e/layout". It
+ * does not: the overflow pass fails on all three cards, because a fixture with
+ * more rows than any card can show and no card scrolling is the one thing that
+ * pass refuses to call a pass. Verified by making the edit.
+ *
+ * (Two earlier versions of this comment named `flex: 0 0 auto` on the scroller
+ * as the guard. It was there and it did nothing -- a child of a block
+ * container is not a flex item, and a flex item does not shrink past
+ * min-content anyway. The review of T6.6 caught the first mistake and a
+ * mutation test caught the second.)
+ */
+.card-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* Flex column so the rows stack exactly as they did when they were children of
+ * the card itself -- this box was slid in underneath them and must not change
+ * how they lay out. */
+.scroller {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Motion is opt-in, per card, and the attribute is set by theme.js only when
+ * rows are actually hidden (T6.6 step 2). A card that scrolls with two rows in
+ * it is motion for its own sake, and the clock and the weather card -- neither
+ * of which is a .card-list -- can never acquire it from this rule. */
+.card-list[data-scroll] .scroller {
+    animation: card-scroll var(--scroll-seconds, 20s) ease-in-out infinite alternate;
+    /* Under the attribute, not on `.scroller` at large. `will-change` asks for
+     * a compositor layer and keeps it, so declaring it unconditionally would
+     * hold three layers open on a 3GB phone for three cards that are usually
+     * not moving at all. A transform is what is animated -- rather than `top`,
+     * which would relayout the card on every frame of a movement that runs all
+     * day. */
+    will-change: transform;
+}
+
+/* `alternate`, so the card walks back up rather than snapping: a jump is the
+ * one motion the eye cannot ignore. The holds at 0-15% and 85-100% are the
+ * pause at each end -- long enough to read the row that just arrived -- and
+ * they are what --scroll-moving-fraction above describes. */
+@keyframes card-scroll {
+    0%, 15%   { transform: translateY(0); }
+    85%, 100% { transform: translateY(calc(-1 * var(--scroll-distance, 0px))); }
+}
+
+/* The device will never set this. The browser this gets developed in might,
+ * and a panel that ignores it is a panel whose author never thought about it. */
+@media (prefers-reduced-motion: reduce) {
+    .card-list[data-scroll] .scroller {
+        animation: none;
+    }
 }
 
 /* Card titles come from CSS, not markup: app.js clears each section with
@@ -344,6 +443,121 @@ body {
 .card > div {
     margin-top: auto;
     margin-bottom: auto;
+}
+
+/* --- The weather card, which had 87px of slack and one line in it (T6.8) ---
+ *
+ * T6.3 measured the free space -- more than twice any other card's -- and put
+ * it there deliberately, because WEATHER is the card whose content varies
+ * most: the city is server config and `Thunderstorm, heavy hail` is a real
+ * label. The room was bought and never spent. These rules spend it on
+ * hierarchy, and on nothing else: every value below was already on the panel.
+ *
+ * The sizes are a measurement rather than a taste, and these are the measured
+ * numbers at 872x392 under the stress payload -- a two-line city and a two-line
+ * condition, which is the tallest this card can be asked to be. The card is
+ * 370px inside its border, of which 5 is padding, 62 is the foot reserved for
+ * the battery line and 27 is the WEATHER title: 276 for the content. The stack
+ * comes to 204 -- city 48, glyph and temperature 53, range 30, condition 54 --
+ * so 72px is still free and the card is centring its content rather than
+ * clipping it. T6.3 measured 87.3px free with the old one-line render, so the
+ * hierarchy cost 15px and bought four lines out of one.
+ *
+ * check_layout.py's stress pass is what keeps those numbers honest, and it is
+ * run on both themes because a card that grows is how T2.3 put a section off
+ * the bottom edge.
+ */
+.w-body {
+    min-width: 0;
+}
+
+/* The smallest thing in the card and the one nobody needs to read: the owner
+ * knows what town they are in. It is here because the city is server config,
+ * so the panel has to be able to say it changed. */
+.w-city {
+    font-size: 20px;
+    line-height: 1.2;
+    /* 0.04em, not the 0.14em the card titles take. At title tracking the
+     * stress payload's `SAO JOSE DOS CAMPOS` -- a real city near this desk,
+     * and the reason the fixture uses it -- came to 209px in a 202px box and
+     * was ellipsised, on the one card whose whole argument is that the city is
+     * server config. The ellipsis below is still the safety net for a longer
+     * name; it is no longer what the documented worst case renders as. */
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--accent-dim);
+    /* Wraps, where every other label on the panel ellipsises. The row labels
+     * share a line with a price and a chart and have nowhere to go; this one
+     * has 72px of the card still free above it (see the measurements above).
+     * A city is the one string here a reader cannot reconstruct from a
+     * truncation -- `SAO JOSE DOS CA...` could be two different towns -- and
+     * it is server config, so the panel has to be able to say which one it is.
+     * Two lines of it fits, measured. The card's own clip is the backstop for
+     * something longer than the worst case anyone has written down, and
+     * check_layout.py's stress pass is what says where that line is. */
+    overflow-wrap: anywhere;
+}
+
+/* The glance: a number and a picture, on one line. */
+.w-main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+    min-width: 0;
+}
+
+.w-glyph {
+    flex: 0 0 auto;
+    width: 46px;
+    height: 46px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    color: var(--accent-dim);
+}
+
+/* 48px: the second largest thing on the panel after the clock, and the only
+ * other number anybody looks at from across the room. It shares a 200px row
+ * with a 46px glyph and an 8px gap, which leaves it 146px; the stress payload's
+ * `-10°C` is drawn there with room to spare.
+ *
+ * `nowrap` is the guard rather than the risk. A temperature that did not fit
+ * would break onto a second line and grow the card silently; refusing to wrap
+ * makes it overflow instead, which is what check_layout.py measures on every
+ * run. Fail visibly, in the harness, rather than invisibly on the desk. */
+.w-temp {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 48px;
+    line-height: 1.1;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+    color: var(--accent);
+}
+
+/* The day's low and high. formatRange joins them with ` / ` rather than a
+ * hyphen, because `-12-42` is a string nobody can read and it was on this card
+ * until T6.8. */
+.w-range {
+    margin-top: 8px;
+    font-size: 24px;
+    line-height: 1.25;
+    color: var(--accent);
+}
+
+/* The only prose on the panel, so it takes the secondary colour and the
+ * smallest size the panel allows, and it is allowed to wrap: the longest
+ * label in format.js is `Thunderstorm, heavy hail`, which is two lines in a
+ * 202px column and must not be cut to one. */
+.w-cond {
+    margin-top: 6px;
+    font-size: 22px;
+    line-height: 1.22;
+    color: var(--accent-dim);
 }
 
 #weather {
