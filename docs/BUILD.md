@@ -68,13 +68,13 @@ and the panel can come back upside down. Read the current one off the device wit
 the PC, and the PC talks to the provider ([ADR 0004](adr/0004-server-is-login-signal-and-proxy.md)).
 A value Gradle reads is a value compiled into the APK, and an APK is a zip file. Tokens, and
 everything else the owner might want to change — tickers, city, intervals — belong in
-`server/config.json`, which is read at run time and never leaves the PC. The split is
+`server/config.toml`, which is read at run time and never leaves the PC. The split is
 [ADR 0013](adr/0013-local-configuration-boundaries.md).
 
 `PC_IP` must match the static DHCP reservation for the PC. **Changing it needs a rebuild and a
 reinstall**: cleartext permission is a property of the APK, not of the server. Nothing else in
 the project works that way, and that is exactly why the address is here and not in
-`server/config.json`.
+`server/config.toml`.
 
 The committed `res/xml/network_security_config.xml` keeps the placeholder `192.168.1.100`.
 Gradle substitutes `PC_IP` into a generated copy of `res/`, so the tracked file is never

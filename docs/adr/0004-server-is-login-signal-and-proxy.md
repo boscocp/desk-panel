@@ -22,7 +22,7 @@ so it runs inside the user's session. "It answers" therefore means "someone is l
 Windows Service would answer before and without a login — the same uptime, the wrong meaning.
 
 **As the data proxy:** `/quotes` and `/weather` call upstream on the server's behalf. The token
-stays in `config.json` on the PC, gitignored and never shipped.
+stays in `config.toml` on the PC, gitignored and never shipped.
 
 ## Consequences
 

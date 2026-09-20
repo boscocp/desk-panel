@@ -1,6 +1,7 @@
 {
   "port": 8777,
   "brapi_token": "",
+  "brapi_symbols_per_request": 1,
   "quotes": [
     "PETR4",
     "VALE3",
@@ -16,9 +17,12 @@
   ],
   "city": "Sao Paulo",
   "timezone": "America/Sao_Paulo",
-  "quotes_interval_s": 300,
+  "quotes_interval_s": 600,
   "weather_interval_s": 900,
+  "history_interval_s": 21600,
+  "history_days": 30,
   "night_start": "22:00",
   "night_end": "07:00",
+  "theme": "neon",
   "actions": {}
 }

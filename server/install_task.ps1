@@ -87,12 +87,51 @@ function Get-ConfiguredPort {
     param([string] $Path)
     $port = 8777
     try {
-        $parsed = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($parsed.PSObject.Properties.Name -contains 'port') { $port = [int] $parsed.port }
+        if ($Path -like '*.toml') {
+            # Not a TOML parser and not pretending to be: one integer, for one
+            # firewall rule. `port` is a top-level key, so the scan stops at the
+            # first [table] header -- which is what keeps it from one day
+            # picking up a `port` written under [actions]. A miss costs nothing
+            # new; this function has always fallen back to 8777 with a warning.
+            $found = $false
+            foreach ($line in @(Get-Content -LiteralPath $Path -Encoding UTF8)) {
+                if ($line -match '^\s*\[') { break }
+                if ($line -match '^\s*port\s*=\s*(?<port>\d+)') {
+                    $port = [int] $Matches['port']
+                    $found = $true
+                    break
+                }
+            }
+            if (-not $found) {
+                Write-Warning (
+                    "no top-level port in $Path; assuming $port. If that is " +
+                    'wrong, move the port line above the first [section] header.')
+            }
+        } else {
+            $parsed = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($parsed.PSObject.Properties.Name -contains 'port') { $port = [int] $parsed.port }
+        }
     } catch {
         Write-Warning "could not read the port out of $Path; assuming $port."
     }
     return $port
+}
+
+function Resolve-DeskPanelConfig {
+    <#
+        Which config the installer means when the caller named none -- the same
+        rule server.py itself applies in config_search_paths: config.toml wins,
+        config.json is answered only when it is what is actually there, and with
+        neither present the name is the .toml, so the "create it first" message
+        names the file the owner should write rather than the one being retired.
+        T3.12.
+    #>
+    $serverDir = Join-Path $RepoRoot 'server'
+    foreach ($name in @('config.toml', 'config.json')) {
+        $candidate = Join-Path $serverDir $name
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+    }
+    return (Join-Path $serverDir 'config.toml')
 }
 
 function New-DeskPanelFirewallRule {
@@ -432,7 +471,7 @@ if ($Uninstall) {
         Remove-NetFirewallRule -DisplayName $FirewallRuleName -ErrorAction SilentlyContinue
         Write-Note "firewall rule '$FirewallRuleName' removed if it existed."
     }
-    Write-Note 'config.json and the logs were left alone.'
+    Write-Note 'the config file and the logs were left alone.'
     exit 0
 }
 
@@ -445,7 +484,7 @@ if ($Uninstall) {
 if ($FirewallOnly) {
     Write-Step 'Firewall rule only -- not touching the Scheduled Task'
     if ([string]::IsNullOrWhiteSpace($Config)) {
-        $Config = Join-Path (Join-Path $RepoRoot 'server') 'config.json'
+        $Config = Resolve-DeskPanelConfig
     }
     $Config = Resolve-AbsolutePath $Config
     New-DeskPanelFirewallRule -Port (Get-ConfiguredPort -Path $Config)
@@ -488,14 +527,16 @@ Write-Note "version : $($interpreter.Version)  (resolved via $($interpreter.Sour
 # -- config ----------------------------------------------------------------
 Write-Step 'Validating the configuration'
 if ([string]::IsNullOrWhiteSpace($Config)) {
-    $Config = Join-Path (Join-Path $RepoRoot 'server') 'config.json'
+    $Config = Resolve-DeskPanelConfig
 }
 $Config = Resolve-AbsolutePath $Config
 if (-not (Test-Path -LiteralPath $Config -PathType Leaf)) {
     Stop-WithError (
         "there is no $Config. Create it first:`n" +
-        "    Copy-Item server\config.example.json server\config.json`n" +
-        '  then edit it: tickers, city, brapi token, port.')
+        "    Copy-Item server\config.example.toml server\config.toml`n" +
+        '  then edit it: tickers, city, brapi token, port. The example is ' +
+        'written as documentation -- it names every key and which tickers, ' +
+        'pairs and coins actually answer.')
 }
 # The real python, not pythonw: this one has to be able to print its complaint.
 # stderr is deliberately left flowing to the console rather than captured --

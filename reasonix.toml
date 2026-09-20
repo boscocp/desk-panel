@@ -50,10 +50,12 @@ allow = [
 deny = [
   # Secrets, mutation side. The read side is [sandbox] forbid_read.
   "Edit(server/config.json)",
+  "Edit(server/config.toml)",
   "Edit(keystore.properties)",
 ]
 
 [sandbox]
 # Hard read block: covers read_file, grep and `cat` alike, unlike a permission
-# rule. server/config.json holds the brapi token; the keystore signs the APK.
-forbid_read = ["server/config.json", "keystore.properties"]
+# rule. The real config holds the brapi token, in either format (T3.12 reads
+# both during the transition); the keystore signs the APK.
+forbid_read = ["server/config.json", "server/config.toml", "keystore.properties"]

@@ -31,9 +31,11 @@
     ],
     "deny": [
       "Read(./server/config.json)",
+      "Read(./server/config.toml)",
       "Read(./keystore.properties)",
       "Read(./*.keystore)",
       "Edit(./server/config.json)",
+      "Edit(./server/config.toml)",
       "Edit(./keystore.properties)"
     ]
   }
