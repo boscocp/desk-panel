@@ -193,6 +193,11 @@ return at;
 # `body.firstElementChild` is the theme's own outermost element, which is what
 # css/style.css translates -- every theme has one and none of them is named
 # here, the same rule the rest of this harness follows.
+#
+# A body with nothing in it returns nulls rather than throwing, and burn_in()
+# turns that into a sentence. A theme that rendered nothing at all would
+# otherwise take this harness down with a TypeError, and "the harness crashed"
+# and "the panel is empty" are not the same report.
 # `new window.Date()` and not `new Date()`: this script runs in Marionette's own
 # sandbox, which has its own globals, so a bare `new Date()` here is built from
 # the *harness's* Date and reads the wall clock however carefully the page's one
@@ -201,24 +206,28 @@ return at;
 # cross-realm trap that made `instanceof Date` the wrong guard in offsetFor.
 BURN_IN_AT = ("window.DeskPanel.tick(new window.Date());"
               "const s = document.documentElement.style;"
-              "const r = document.body.firstElementChild.getBoundingClientRect();"
+              "const el = document.body.firstElementChild;"
+              "const r = el ? el.getBoundingClientRect() : null;"
               "return [parseFloat(s.getPropertyValue('--burn-in-x')) || 0,"
               "        parseFloat(s.getPropertyValue('--burn-in-y')) || 0,"
-              "        r.left, r.top];")
+              "        r && r.left, r && r.top];")
 
 
-def pinned_ms(m, step_minutes, index):
-    """The pinned instant advanced by `index` burn-in steps, as epoch ms.
+def pinned_base_ms(m):
+    """PINNED as epoch ms, read out of the page.
 
-    Computed in the page rather than in Python: offsetFor counts steps from the
-    epoch, so the number that selects a position is a UTC instant, and the page
-    is the only thing here that knows what local time the panel is running in.
+    In the page rather than in Python because offsetFor counts steps from the
+    epoch, so the number that selects a position is a UTC instant -- and the
+    page is the only thing here that knows what local time the panel is
+    running in. Once per pass; the steps are added to it in Python.
+
+    `window.__realDate` is the unpinned constructor, kept by PIN_CLOCK, so
+    calling this a second time answers the same instant instead of one derived
+    from the pin.
     """
     year, month, day, hour, minute, second = PINNED
     return m.script("return new (window.__realDate || Date)(%d, %d, %d, %d, %d, %d)"
-                    ".getTime() + %d;"
-                    % (year, month - 1, day, hour, minute, second,
-                       index * step_minutes * 60 * 1000))
+                    ".getTime();" % (year, month - 1, day, hour, minute, second))
 
 
 def run(url, passes, viewport, extra_css, shot_dir, shot_tag=""):
@@ -270,9 +279,11 @@ def run(url, passes, viewport, extra_css, shot_dir, shot_tag=""):
 
             m.script(FREEZE)
             schedule = m.script("return window.burnInSchedule();")
+            base_ms = pinned_base_ms(m)
+            step_ms = schedule["stepMinutes"] * 60 * 1000
             shifted = []
             for i in range(len(schedule["offsets"])):
-                m.script(PIN_CLOCK % pinned_ms(m, schedule["stepMinutes"], i))
+                m.script(PIN_CLOCK % (base_ms + i * step_ms))
                 x, y, left, top = m.script(BURN_IN_AT)
                 # The prelude again, because the tick above repaints the clock
                 # and the date -- and the stress pass exists partly to measure
@@ -405,9 +416,17 @@ def burn_in(result, viewport, already):
 
     base_offset = result["_offset"]
     base_anchor = result["_anchor"]
+    if base_anchor[0] is None:
+        return ["the theme put nothing in the body, so there is nothing for the burn-in "
+                "shift to move -- and every measurement in this pass was taken of an "
+                "empty page"]
     moves = False
     for other in shifted:
         asked = [other["_offset"][i] - base_offset[i] for i in (0, 1)]
+        if other["_anchor"][0] is None:
+            bad.append("the panel was empty at burn-in offset (%d,%d)"
+                       % (other["_offset"][0], other["_offset"][1]))
+            continue
         went = [other["_anchor"][i] - base_anchor[i] for i in (0, 1)]
         if asked != [0, 0]:
             moves = True
