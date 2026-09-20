@@ -24,7 +24,7 @@ into the APK. It comes from `PC_IP` in the gitignored `.env` at the repository r
 ([ADR 0013](adr/0013-local-configuration-boundaries.md)). **Never put an API token there:**
 the phone never reaches a data provider, the PC does, and anything Gradle reads is compiled
 into the APK, which is a zip file. Tokens, tickers, the city and the intervals live in
-`server/config.json` on the PC instead.
+`server/config.toml` on the PC instead.
 
 So before building the APK you install here, set `PC_IP` to the PC's LAN address — the one from
 its static DHCP reservation. **If that address ever changes, editing `.env` is not enough: the

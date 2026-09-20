@@ -15,7 +15,7 @@ the key-free replacement.
 **A currency pair is spelled three ways in this one file**, and the T3.3 task
 file warned about two of them before the third turned up:
 
-    config.json   USD-BRL      the hyphen, as the owner types it
+    config.toml   USD-BRL      the hyphen, as the owner types it
     request path  USD-BRL      the hyphen again, which is AwesomeAPI's own
     response key  USDBRL       no separator at all
     payload       USD/BRL      the slash, which is what the panel renders
@@ -116,7 +116,7 @@ def normalise(raw, pairs=None):
 
     `pairs` is the configured order. AwesomeAPI returns a JSON object, and
     while CPython preserves insertion order, the panel's row order should
-    follow what the owner wrote in config.json rather than what an upstream
+    follow what the owner wrote in the config rather than what an upstream
     happened to serialise first. Absent, the response's own order is used.
     """
     if not isinstance(raw, dict):

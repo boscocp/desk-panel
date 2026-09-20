@@ -32,7 +32,7 @@ from server.upstream import UpstreamError, get_json
 TICKER_URL = "https://api.binance.com/api/v3/ticker/24hr"
 KLINES_URL = "https://api.binance.com/api/v3/klines"
 
-# What a bare coin from config.json is quoted against.
+# What a bare coin from the config is quoted against.
 QUOTE_ASSET = "USDT"
 
 
@@ -118,7 +118,7 @@ def load_history(coins, days, get=get_json):
 def normalise(raw):
     """Pure: Binance's response -> `[{symbol, price, changePct}, ...]`.
 
-    `symbol` is the bare coin, matching what config.json asked for, so the
+    `symbol` is the bare coin, matching what the config asked for, so the
     panel shows BTC rather than BTCUSDT.
     """
     if not isinstance(raw, list):

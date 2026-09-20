@@ -1,5 +1,6 @@
 # --- secrets: never commit ---
 server/config.json
+server/config.toml
 *.keystore
 *.jks
 keystore.properties
