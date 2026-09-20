@@ -361,3 +361,62 @@ race the clear usually wins, leaving an empty log and an app that did everything
 The server's own log prints one line per request with a timestamp, so the panel's poll cadence —
 2s for `/ping`, 60s for the data pair — is directly countable without touching the app. The app
 now says the same thing from its own side: `ping=` per probe, `data=` per cycle.
+
+## Resuming after 2026-09-20 (wave 11)
+
+Wave 11 is T5.5 alone, on `wave/11-thermal-cutoff`. **Invariant 3 now has two authorities**: the
+screen is lit only when the PC is online *and* the device is below 45 °C, and it comes back at
+38. The DEVICE line reddens through amber at 40 and red at 43 on the way there, which is the
+half that keeps a black panel from being read as "the PC died".
+
+**Next: T3.12** (config in TOML). It is the only `todo` in phase 3 that needs no hardware, and it
+is what unblocks T6.7, which in turn unblocks T6.6 — read the `Prereqs:` lines rather than the
+phase order. T5.5 was the last of phase 5, so phase 6 is the natural continuation after that.
+
+Four new task files, **T7.4 to T7.7**, carry the documentation and repo-opening work that was
+asked for on 2026-09-20 and is meant to run at the end: phone setup checked against the official
+Android docs, a local-run tutorial for a contributor with no phone and no model, a contribution
+guide with commit and PR templates, and the strategy and settings for opening the repo. T7.3 now
+declares all four as prerequisites and carries the README's final pass.
+
+### Two acceptance blocks were wrong, which makes five
+
+- **T5.5's own.** `screen=thermal` is a prefix of `screen=thermal-clear`, so `grep -q
+  'screen=thermal'` matches the line saying the panel came *back*. An implementation that never
+  blanked but logged the clear would have passed. Every assertion anchors the end of the line now.
+- **TT.6's**, and this one was **failing on `main` while protecting nothing**. `grep -rn
+  'state=\|screen='` fires on any javadoc that *names* a marker, and this repo's javadoc names
+  them constantly — explaining why `screen=thermal` is not `screen=sleep` is the whole reason the
+  pair exists. Three hits, all prose. It matches quoted strings now, which is the property that
+  was meant: no marker *built* anywhere but `Markers.java`.
+
+The pattern from wave 9 holds and is worth restating: **an assertion nobody has proved can fail
+is not an assertion.** Both of these passed, or were ignored, for exactly that reason.
+
+### The review found something the device could not
+
+The first cut logged the thermal marker at the verdict. That is wrong in a sequence no test on
+this desk would have produced: the phone gets hot overnight with the PC away, `screen=thermal` is
+logged while *nothing blanks* because the display is already out, and the morning's login then
+brings the panel up black with only `screen=wake` in the log — both halves backwards from what
+ADR 0012 promises the marker means. It is emitted from `MainActivity.setBlanked` now, where the
+panel's appearance actually changes. Nine findings, seven applied; the two declined have their
+reasons written next to the code.
+
+### What is still only true on this desk
+
+- **`Max charging current` is not a measurement.** It moved through 50000, 100000, 150000, 200000
+  and 250000 in one session on 2026-09-20 with nothing touched, and had been stuck at 50000 until
+  the cable was reseated — while the framework called that state `AC powered: true`. It is
+  instantaneous and renegotiable, so a single reading of it establishes nothing, including the one
+  `DEVICE-CARE.md` had been quoting since 2026-09-19. That file now carries the numbers and the
+  method: the trustworthy measure is the level trend over hours. **A reseat is a real
+  intervention** — the port can sit in a worse state indefinitely with nothing to say so.
+- **`dumpsys battery set temp` sticks until `reset`.** A forgotten injection is indistinguishable
+  from a real thermal fault, and the panel will sit black with the PC plainly on. Every T5.5 run
+  ends with `adb shell dumpsys battery reset`; check `temperature:` afterwards.
+- **The manual check is outstanding.** The temperature has only ever been injected on this desk.
+  Watching the DEVICE line go amber then red *before* the screen blanks is what proves the
+  sequence is legible, and it needs a genuinely warm phone.
+- **`server/config.json` is mode 0644** and holds the brapi token; the server warns about it on
+  every start. Fixing it is one `chmod 600`, and T7.3's secret audit will want it done.
