@@ -37,13 +37,21 @@
     // A section is a heading plus a body the renderers refill. Two elements
     // rather than one because the heading is markup here, which is half of
     // what this theme is demonstrating.
+    //
+    // Three elements now: the body is the window and the scroller inside it is
+    // what moves when a column holds more rows than it can show (T6.6). The
+    // arrangement is the same one the neon theme uses -- it has to be, because
+    // the rule it obeys is "a card must not eat a row in silence", and that is
+    // a rule about the panel and not about a look.
     function column(id, title) {
         const section = el('section', id, 'col');
         const heading = el('h2', null, 'col-title');
         heading.textContent = title;
         const body = el('div', null, 'col-body');
+        const scroller = el('div', null, 'scroller');
+        body.appendChild(scroller);
         section.append(heading, body);
-        return { section, body };
+        return { section, body, scroller };
     }
 
     function mount(root) {
@@ -75,8 +83,14 @@
         root.append(header, grid, battery, shortcuts);
         els = {
             root, clock, date, stale, battery,
-            quotes: quotes.body, fx: fx.body, crypto: crypto.body,
-            weather: weather.body,
+            quotes, fx, crypto,
+            // The scroller, not the bundle: the weather column is not a list
+            // and nothing calls applyScroll on it. It has one anyway because
+            // column() builds every section the same way, and a fourth shape of
+            // section to save one empty div is a worse trade. It clips like any
+            // other card if a forecast ever outgrows it, exactly as it did
+            // before T6.6.
+            weather: weather.scroller,
         };
     }
 
@@ -100,18 +114,59 @@
         return node;
     }
 
-    function fill(body, items, labelField, valueField, currency, format, formatLabel) {
-        body.textContent = '';
+    function fill(list, items, labelField, valueField, currency, format, formatLabel) {
+        list.scroller.textContent = '';
         for (const item of items) {
             const label = formatLabel ? formatLabel(item[labelField], currency)
                                       : item[labelField];
-            body.appendChild(row(label, item.changePct, format(item[valueField], currency)));
+            list.scroller.appendChild(
+                row(label, item.changePct, format(item[valueField], currency)));
         }
+        applyScroll(list, items.length);
     }
 
-    // Three lines, because a narrow column and one long sentence do not agree
+    // The same measurement the neon theme makes, and deliberately not shared
+    // code: the arithmetic is shared -- it is scrollPlan, in format.js -- and
+    // the measuring is not, because this theme's rows are two lines tall and
+    // neon's are one. A helper that measured both would have to be told what a
+    // row is by each of them, which is the same amount of code with an extra
+    // seam in it.
+    function applyScroll(list, rowCount) {
+        const available = list.body.clientHeight;
+        const content = list.scroller.scrollHeight;
+        const rowHeight = rowCount > 0 ? content / rowCount : 0;
+        const visibleRows = rowHeight > 0 ? available / rowHeight : rowCount;
+        const style = getComputedStyle(list.section);
+        const plan = scrollPlan(rowCount, visibleRows,
+                                parseFloat(style.getPropertyValue('--scroll-seconds-per-row')),
+                                parseFloat(style.getPropertyValue('--scroll-moving-fraction')));
+        // The second half is the twitch guard the neon theme's copy of this
+        // explains at length: integer box metrics at dpr 2.75 can invent a
+        // hidden row that is one pixel tall, and a card that moved for it would
+        // twitch on the device and pass every check here.
+        if (!plan || !worthScrolling(content - available)) {
+            list.section.removeAttribute('data-scroll');
+            list.scroller.style.removeProperty('--scroll-distance');
+            list.scroller.style.removeProperty('--scroll-seconds');
+            return;
+        }
+        list.scroller.style.setProperty('--scroll-distance',
+                                        `${Math.round(content - available)}px`);
+        list.scroller.style.setProperty('--scroll-seconds', `${plan.seconds}s`);
+        list.section.setAttribute('data-scroll', '');
+    }
+
+    // Four lines, because a narrow column and one long sentence do not agree
     // -- "Sao Jose dos Campos: -10°C (-10-42°C) Thunderstorm, heavy hail" is a
     // real payload (e2e/layout/stress.js).
+    //
+    // The range comes from formatRange now (T6.8), not from two formatTemp
+    // calls joined here. This theme had already reached for a ` / ` separator
+    // on its own, which is most of the argument for the function existing: the
+    // hyphen was ambiguous below zero in neon and would have been ambiguous
+    // here too, and a rule that each theme has to rediscover is a rule in the
+    // wrong file. No glyph: this theme is undesigned on purpose, and the label
+    // is the whole of what it has to say.
     function renderWeather(weather) {
         els.weather.textContent = '';
         if (!weather) {
@@ -122,9 +177,10 @@
         const temp = el('div', null, 'w-temp');
         temp.textContent = `${formatTemp(weather.tempC)}°C`;
         const range = el('div', null, 'w-range');
-        range.textContent = `${formatTemp(weather.minC)} / ${formatTemp(weather.maxC)}°C`
-            + ` · ${weatherLabel(weather.code)}`;
-        els.weather.append(city, temp, range);
+        range.textContent = formatRange(weather.minC, weather.maxC);
+        const cond = el('div', null, 'w-cond');
+        cond.textContent = weatherLabel(weather.code);
+        els.weather.append(city, temp, range, cond);
     }
 
     function renderBattery(battery) {

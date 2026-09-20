@@ -52,3 +52,31 @@ body {
 :root[data-panel="dark"] body {
     visibility: hidden;
 }
+
+/* And nothing may keep moving behind it.
+ *
+ * `visibility: hidden` stops the panel being drawn and does not stop an
+ * animation: a CSS animation on a hidden element keeps ticking, and its
+ * compositor layer keeps being recomposited. T6.6 put the first one on this
+ * page -- an overflowing card walking slowly through its rows -- and the two
+ * states this rule covers are exactly the two where that is pure cost:
+ *
+ *   - offline, the screen is asleep and the device is on battery (ADR 0014),
+ *     which is the state the project spends the most hours in,
+ *   - too hot, the device is being blanked *because* it is working too hard
+ *     (ADR 0012), so animating through it is the worse of the two bargains.
+ *
+ * Core rather than per-theme, and for the same reason the line above it is:
+ * it is the page's half of a promise about hardware, and a theme that forgot
+ * it would look perfectly fine and quietly cost battery overnight. A theme
+ * owes this rule nothing except not overriding `animation-play-state` on
+ * something inside a dark panel.
+ *
+ * `paused` rather than `none`: the panel comes back where it left off instead
+ * of snapping to the top of the card, and a pause does not restart anything.
+ */
+:root[data-panel="dark"] body *,
+:root[data-panel="dark"] body *::before,
+:root[data-panel="dark"] body *::after {
+    animation-play-state: paused !important;
+}
