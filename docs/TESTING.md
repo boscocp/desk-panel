@@ -68,18 +68,26 @@ All four take `--theme NAME`. Run `check_layout` and `check_blackout` for every 
 `check_scroll` for a theme that answers overflow with motion, and `check_pulse` for one that
 marks a changed value — both are optional in the theme contract (`docs/THEMING.md`).
 
-Three things about them are worth knowing before trusting one:
+Three things are worth knowing before trusting one. The first is true of all four; the other
+two are `check_layout.py` alone, which is the only one of them that measures *where* anything
+is:
 
 - **The viewport is calibrated, not requested.** `SetWindowRect` sizes the outer window, and
   asking for 872x392 gave an `innerHeight` of 306 on the machine this was written on — 86px
   short, and wrong in the direction that looks like a pass. The harness measures what it got
   and refuses to run if it cannot converge.
-- **Each pass is measured at every burn-in position.** The panel shifts a few pixels every
-  four minutes (T6.2), so measuring it once means checking the worst position one run in
-  seven, which is a check that fails on a Tuesday.
-- **They pin the page's clock.** Otherwise the panel puts itself back where the wall clock
-  says a moment after the harness moves it — and the stress pass rendered *today's* pt-BR
-  date, so "the widest case" was only the widest case on the days it happened to be.
+- **`check_layout.py` measures each pass at every burn-in position.** The panel shifts a few
+  pixels every four minutes (T6.2), so measuring it once means checking the worst position one
+  run in seven, which is a check that fails on a Tuesday.
+- **`check_layout.py` pins the page's clock** to do that. Otherwise the panel puts itself back
+  where the wall clock says a moment after the harness moves it — and the stress pass rendered
+  *today's* pt-BR date, so "the widest case" was only the widest case on the days it happened
+  to be.
+
+  The other three freeze the page's timers instead, which is a weaker and sufficient
+  guarantee: none of them reads an absolute position, so the panel is free to be wherever the
+  shift last put it. `check_scroll.py` reads the scrolling box's *own* transform, which an
+  ancestor's does not enter into.
 
 What none of them can tell you is whether the panel is *readable*. Nothing here measures
 contrast, glow or type against a human at 50cm, and Android resolves `sans-serif-condensed` to

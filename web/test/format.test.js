@@ -450,19 +450,64 @@ function at(hours, minutes, seconds = 0) {
     return new Date(2026, 8, 20, hours, minutes, seconds);
 }
 
+// The first instant of a step, at or after `at(0, 0)`.
+//
+// Steps are counted from the epoch, so a step boundary is a multiple of the
+// step length in UTC -- and local midnight is only one of those in a zone
+// whose offset happens to divide by four minutes. Anchoring a "holds for the
+// whole step" loop to a wall-clock hour therefore passes in UTC and in -03 and
+// fails in +05:30, where midnight lands two minutes into a step. It did:
+// `TZ=Asia/Kolkata node --test` was 63 of 64 before this.
+function stepBoundary(extraSteps = 0) {
+    const stepMs = BURN_IN_STEP_MINUTES * 60 * 1000;
+    const start = Math.ceil(at(0, 0).getTime() / stepMs) * stepMs;
+    return new Date(start + extraSteps * stepMs);
+}
+
 test('offsetFor holds one position for the whole of a step', () => {
     // Four minutes on one offset is the promise; a shift that changed with the
     // minute would be a panel twitching six times an hour more than it needs
     // to, and one that changed with the second would be an animation.
-    const first = offsetFor(at(0, 0, 0));
-    for (let minute = 0; minute < BURN_IN_STEP_MINUTES; minute += 1) {
-        assert.deepEqual(offsetFor(at(0, minute, 0)), first);
-        assert.deepEqual(offsetFor(at(0, minute, 59)), first);
+    const start = stepBoundary();
+    const first = offsetFor(start);
+    for (let second = 0; second < BURN_IN_STEP_MINUTES * 60; second += 1) {
+        assert.deepEqual(offsetFor(new Date(start.getTime() + second * 1000)), first,
+                         `${second}s into a step is a different position`);
     }
+    // And the second after it is not this one, so the loop above is measuring
+    // a boundary rather than a function that never changes at all.
+    assert.notDeepEqual(offsetFor(stepBoundary(1)), first);
 });
 
 test('offsetFor moves to a different position at the next step', () => {
+    // True from any starting instant, boundary or not: one step later is one
+    // index later whatever the phase.
     assert.notDeepEqual(offsetFor(at(0, BURN_IN_STEP_MINUTES)), offsetFor(at(0, 0)));
+});
+
+test('the cycle has no resting bias, and uses the whole of its amplitude', () => {
+    // Both halves of this were a comment beside BURN_IN_OFFSETS and neither was
+    // true: seven entries cannot use five values once each, and the y column
+    // summed to -13 rather than -14, so the ink spent slightly longer in the
+    // lower half of the band than the table claimed. A property worth stating
+    // is a property worth asserting -- it is the fourth time in this repo that
+    // a claim with no check behind it has turned out to be wrong.
+    for (const axis of ['x', 'y']) {
+        const values = BURN_IN_OFFSETS.map((o) => o[axis]);
+        const sum = values.reduce((a, b) => a + b, 0);
+        // The mean sits exactly at the middle of [-amplitude, 0], so the panel
+        // has no standing offset in either direction.
+        assert.equal(sum * 2, -BURN_IN_AMPLITUDE_PX * BURN_IN_OFFSETS.length,
+                     `the ${axis} column is not centred in the band`);
+        // And every position in the band is visited by something in the cycle.
+        for (let v = 0; v >= -BURN_IN_AMPLITUDE_PX; v -= 1) {
+            assert.ok(values.includes(v), `no offset has ${axis} = ${v}`);
+        }
+    }
+    // Distinct, which is what makes it seven positions rather than seven visits
+    // to fewer.
+    const keys = new Set(BURN_IN_OFFSETS.map((o) => o.x + ',' + o.y));
+    assert.equal(keys.size, BURN_IN_OFFSETS.length);
 });
 
 test('offsetFor repeats after a full cycle and not before', () => {

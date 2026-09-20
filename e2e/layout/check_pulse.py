@@ -23,6 +23,14 @@ for, and it is three payloads long.
      (T6.7), and it is the same state the page is in at load.
   2. a value that changed does pulse, and only that value,
   3. the identical payload again pulses nothing. This is the stale case.
+  4. and nothing pulses on the way back from the blackout, however much moved
+     while the panel was dark. This one is the review of T6.2's finding rather
+     than the task's: the blackout hides `body` and leaves every row mounted,
+     so a theme comparing what it is about to draw against what it is showing
+     reads last night's prices as current and flashes the entire panel at nine
+     in the morning -- the exact outcome the code's own comment claimed to
+     avoid. `context.resumed` is core's answer (js/host.js) and this is what
+     says it is wired up.
 
 Plus one number, because the task file gives one: the pass must be over inside
 ~300ms. A pulse long enough to watch is a pulse you end up watching, on
@@ -34,7 +42,9 @@ check of a theme rather than of the panel's contract, and it is run for the
 themes that pulse and not for the ones that do not. There is no skip: a theme
 where nothing pulses fails question 2, which is the only way this file can
 still fail when the feature is deleted. `--theme` is there for the next theme
-that wants it, not so that `plain` can be made to pass.
+that wants it, not so that `plain` can be made to pass -- and the theme it
+switches away from to empty the panel is picked from the page's own manifest,
+so it can never collide with the one under test.
 
 Driven through check_layout.py's Marionette plumbing -- same Firefox, same
 launcher -- so a fourth browser check is not a fourth browser harness.
@@ -70,12 +80,21 @@ PAYLOAD = ("window.onData({quotes:[{symbol:'AAA',price:%s,changePct:1}],"
            "weather:{tempC:21,minC:18,maxC:27,code:0,city:'A'},"
            "battery:{level:50,tempC:30,charging:false},stale:false%s});")
 
-# Any packaged theme that is not the one under test. Delivering a payload that
-# names it is how this file empties the panel: host.js clears the root on a
-# theme change, which is the one way from outside the page to reach the state
-# a fresh page load is in. mock.js renders the moment the page opens, so there
-# is no other window in which the panel has never shown anything.
-FOIL_THEME = "plain"
+# Every theme the page carries, read off index.html's own manifest rather than
+# written down here. One of them that is *not* the theme under test is how this
+# file empties the panel: host.js clears the root on a theme change, which is
+# the one way from outside the page to reach the state a fresh page load is in.
+# mock.js renders the moment the page opens, so there is no other window in
+# which the panel has never shown anything.
+#
+# Read rather than hard-coded because the first cut said "plain", and with
+# `--theme plain` the foil and the theme under test were the same name:
+# useTheme returns early, the root is never cleared, and "a freshly mounted
+# panel does not pulse" was asserted against a panel that was never freshly
+# mounted. An assertion that cannot fail is the hazard this repo has now met
+# five times.
+PACKAGED = ("return Array.from(document.querySelectorAll('link[rel=\"stylesheet\"][data-theme]'))"
+            ".map((link) => link.dataset.theme);")
 
 # Everything on the panel that is running an animation, by what it does and
 # never by a class: a theme may call its pulsing element whatever it likes, and
@@ -111,7 +130,18 @@ def check(m, fails, theme):
     # 1. Away to another theme and back, which empties the root, and back with
     #    every value different from the one it left. A fresh panel has nothing
     #    to compare against and must pulse nothing at all.
-    js(PAYLOAD % ("10.00", ",theme:'%s'" % FOIL_THEME))
+    #
+    # `theme` is None for the default, which host.js resolves to its fallback --
+    # so the foil has to differ from the *resolved* name, not from the flag.
+    packaged = js(PACKAGED)
+    live = js("return document.querySelector('link[rel=\"stylesheet\"][data-theme]"
+              "[media=\"all\"]').dataset.theme;")
+    foils = [name for name in packaged if name != live]
+    if not foils:
+        fails.append("the page packages only one theme, so there is no way to empty the "
+                     "root from out here and question 1 cannot be asked at all")
+        return
+    js(PAYLOAD % ("10.00", ",theme:'%s'" % foils[0]))
     js(payload("11.00"))
     first = js(PULSING)
     if first:
@@ -156,6 +186,25 @@ def check(m, fails, theme):
             "like with the upstream down: every number flashing once a minute while "
             "STALE sits in the corner saying nothing has moved."
             % ", ".join(repr(p["text"]) for p in again))
+
+    # 4. A night with the PC off, in four calls. The panel goes dark, a payload
+    #    with every value different arrives while nobody can see it, and the PC
+    #    comes back. The blackout leaves the old rows mounted, so this is the
+    #    one render where everything on screen looks like it just changed.
+    js("window.onPcState(false);")
+    js(payload("99.00"))
+    js("window.onPcState(true);")
+    woke = js(PULSING)
+    if woke:
+        fails.append(
+            "the panel pulsed %s on the way back from the blackout. Every row was "
+            "still mounted and hidden, so every value looks new -- and this is nine "
+            "in the morning with the PC just switched on, which is the one moment the "
+            "whole panel flashing is least useful. Core says which render this is "
+            "(context.resumed, js/host.js)." % ", ".join(repr(p["text"]) for p in woke))
+    if "99.00" not in js("return document.getElementById('quotes').textContent;"):
+        fails.append("the payload held through the blackout was not drawn on the way "
+                     "back, so question 4 was asked of a panel that never woke")
 
 
 def main():

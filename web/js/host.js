@@ -146,12 +146,27 @@
     // asserted: a theme whose render() throws must not take the clock down
     // with it, because a panel showing a stale card is worth more than a
     // panel showing nothing.
-    function render(payload) {
+    // `context` is what the theme cannot work out for itself, and today it
+    // carries one thing: `resumed`, true when this is the first render after
+    // the panel has been dark.
+    //
+    // It exists because the blackout does not empty the DOM -- css/style.css
+    // hides `body` and the layout keeps its shape, so coming back is a repaint
+    // (T6.7) -- and a theme reading what it is showing in order to tell what
+    // changed would find last night's numbers sitting there this morning. neon
+    // does exactly that, to decide which value to pulse, and without this it
+    // flashed every number on the panel at 09:00 every day: the one outcome
+    // its own comment claimed the design avoided.
+    //
+    // docs/THEMING.md already told themes not to treat a render as "this is new
+    // since the last one" because they may have missed several. This is core
+    // saying which ones those were, rather than leaving every theme to guess.
+    function render(payload, context) {
         if (!current) {
             return;
         }
         try {
-            current.render(payload, root());
+            current.render(payload, root(), context || {});
         } catch (err) {
             console.error('desk-panel: theme "' + currentName + '" render failed', err);
         }

@@ -26,8 +26,8 @@ window.DeskPanel.defineTheme('<name>', { render, tick });
 Two functions, and that is the whole interface:
 
 ```js
-function render(payload, root)   // the data changed: rebuild what shows it
-function tick(now, root)         // one second passed: `now` is a Date
+function render(payload, root, context)   // the data changed: rebuild what shows it
+function tick(now, root)                  // one second passed: `now` is a Date
 ```
 
 `root` is `document.body`, and everything inside it is yours. Nothing in core
@@ -37,6 +37,11 @@ puts an element there.
 when the theme is first selected, and once at page load with `payload` set to
 **`null`** — there is no data yet and the clock is still worth showing. Handle
 that case; `neon` builds its skeleton and leaves the cards empty.
+
+`context` is what you cannot work out for yourself, and today it carries one
+key: **`context.resumed`** is true when this is the first render after the panel
+has been dark. Ignore it and nothing breaks — `plain` does — but see the pulse
+section below, which is the one place it matters and the place it was added for.
 
 `tick` is called once a second while the panel is lit, and once immediately
 after every `render`. Keep it cheap: it is the only thing that runs on a panel
@@ -270,8 +275,17 @@ is replaced, rather than keeping a table of its own: a symbol dropped from the P
 leaves nothing behind, and a theme switch — which empties the root — starts with no history
 instead of pulsing the whole panel at once.
 
-`check_pulse.py` asserts all three of those (nothing on a fresh mount, only the changed value
-on a refresh, nothing at all on an identical payload) and that the pass is over inside ~300ms.
+**And `context.resumed` is the other half of that, which is not optional if you read the DOM.**
+The blackout *hides* `body`; it does not empty it. So on the first render after the PC has been
+away all night, every row from last night is still mounted, every price in it differs from this
+morning's, and a theme comparing the two flashes the entire panel at nine in the morning — the
+one moment it is least useful. That render is the one core flags, and `neon` pulses nothing in
+it. The same applies to any conclusion you draw by reading your own markup, not just to a
+pulse: what is in there was not necessarily seen.
+
+`check_pulse.py` asserts all four of those (nothing on a fresh mount, only the changed value on
+a refresh, nothing at all on an identical payload, nothing on the way back from the blackout)
+and that the pass is over inside ~300ms.
 Run it for a theme that pulses; a theme that does not will fail its second question, which is
 the only way that file can still fail when the feature is deleted.
 

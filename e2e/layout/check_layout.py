@@ -423,13 +423,18 @@ def burn_in(result, viewport, already):
     moves = False
     for other in shifted:
         asked = [other["_offset"][i] - base_offset[i] for i in (0, 1)]
+        # Before the empty-panel branch below, not after it. A theme that
+        # rendered nothing would otherwise skip this and collect a second,
+        # wrong finding on the way out -- "the panel never moves ... see
+        # offsetFor" -- pointing the reader at the one part of this that was
+        # working.
+        if asked != [0, 0]:
+            moves = True
         if other["_anchor"][0] is None:
             bad.append("the panel was empty at burn-in offset (%d,%d)"
                        % (other["_offset"][0], other["_offset"][1]))
             continue
         went = [other["_anchor"][i] - base_anchor[i] for i in (0, 1)]
-        if asked != [0, 0]:
-            moves = True
         if any(abs(a - w) > 0.5 for a, w in zip(asked, went)):
             bad.append(
                 "the burn-in shift is not reaching the panel: core moved from %s to %s, "
