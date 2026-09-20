@@ -1,6 +1,7 @@
 package dev.bosco.deskpanel;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
@@ -31,6 +32,18 @@ public class MarkersTest {
     public void screenMarkers() {
         assertEquals("screen=wake", Markers.screen(true));
         assertEquals("screen=sleep", Markers.screen(false));
+    }
+
+    @Test
+    public void thermalMarkersAreNotTheScreenMarkers() {
+        assertEquals("screen=thermal", Markers.thermal(true));
+        assertEquals("screen=thermal-clear", Markers.thermal(false));
+        // Asserted rather than assumed: the E2E greps `screen=thermal`, and a
+        // substring collision with `screen=thermal-clear` would make the
+        // blanking assertion pass on a panel that had just come back. The suite
+        // has to match on the whole line for this pair, and this is where that
+        // requirement is visible.
+        assertTrue(Markers.thermal(false).startsWith(Markers.thermal(true)));
     }
 
     @Test

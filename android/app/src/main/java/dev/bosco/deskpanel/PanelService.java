@@ -84,6 +84,25 @@ public final class PanelService extends Service implements PcPoller.Listener {
         void onPcState(boolean online, boolean logTransition);
 
         /**
+         * One thermal verdict (T5.5, ADR 0012). Same shape as
+         * {@link #onPcState}, and for the same reason: the window is told what
+         * is true, plus whether this delivery is the transition that earns a
+         * marker.
+         *
+         * <p>Two authorities arrive as two calls rather than as one combined
+         * verdict on purpose. Each carries its own marker and its own
+         * mechanism — the PC releases {@code FLAG_KEEP_SCREEN_ON} and lets the
+         * display go, heat holds the window foreground at brightness zero — and
+         * only the window can apply them. What must not be duplicated is the
+         * <em>decision</em>, and that lives in exactly one expression, in
+         * {@code MainActivity.applyScreenState}.
+         *
+         * @param tooHot        whether the device is too hot to keep painting
+         * @param logTransition whether this delivery is a change of verdict
+         */
+        void onThermal(boolean tooHot, boolean logTransition);
+
+        /**
          * A fresh data payload for the page (T5.1).
          *
          * @param json a JSON object literal, already safe to interpolate
@@ -151,6 +170,28 @@ public final class PanelService extends Service implements PcPoller.Listener {
      * whole wave exists to enforce.
      */
     private static volatile Boolean lastOnline;
+
+    /**
+     * The thermal authority (T5.5), fed from the battery broadcast below.
+     *
+     * <p>Static, and therefore outliving a {@code START_STICKY} restart of this
+     * service, because the device does not cool down just because a process
+     * came back. A fresh instance would start at "not too hot" and paint into a
+     * phone that is still at 46 degrees, which is the state this class exists
+     * to leave.
+     */
+    private static final ThermalState thermal = new ThermalState();
+
+    /**
+     * The last thermal verdict, or null before the first usable temperature.
+     * Replayed to a window that registers late for exactly the reason
+     * {@link #lastOnline} is: the verdict is delivered as an edge, and a window
+     * that arrives between two edges would otherwise never hear it at all.
+     */
+    private static volatile Boolean lastTooHot;
+
+    /** The thermal twin of {@link #screenMarkerPending}. */
+    private static volatile boolean thermalMarkerPending;
 
     /**
      * Set when a transition was reported with no panel registered, so the replay
@@ -270,6 +311,12 @@ public final class PanelService extends Service implements PcPoller.Listener {
             screenMarkerPending = false;
             newPanel.onPcState(state, logIt);
         }
+        Boolean hot = lastTooHot;
+        if (newPanel != null && hot != null) {
+            boolean logIt = thermalMarkerPending;
+            thermalMarkerPending = false;
+            newPanel.onThermal(hot, logIt);
+        }
         String payload = lastPayload;
         if (newPanel != null && payload != null) {
             newPanel.onData(payload);
@@ -381,6 +428,38 @@ public final class PanelService extends Service implements PcPoller.Listener {
     }
 
     /**
+     * One temperature reading, from the battery broadcast (T5.5).
+     *
+     * <p>Push, never poll: {@code ACTION_BATTERY_CHANGED} arrives about every
+     * eight seconds on this device while charging, and asking for the
+     * temperature on a schedule of our own would spend exactly the power the
+     * reading exists to protect (T5.4 step 5). Invariant 3's "never by a
+     * timeout" is untouched — a temperature is a measured condition, not
+     * elapsed time.
+     *
+     * <p>The verdict is dispatched on every reading, not only on a change: a
+     * window that just registered needs to be told what is true, and
+     * {@code logTransition} is what keeps the <em>log</em> to one line per
+     * change. The same split {@link #onPcState} uses.
+     */
+    private void onThermalReading(double tempC) {
+        boolean changed = thermal.record(tempC, SystemClock.elapsedRealtime());
+        boolean tooHot = thermal.isTooHot();
+        lastTooHot = tooHot;
+
+        Panel target = panel;
+        if (target != null) {
+            target.onThermal(tooHot, changed);
+        } else if (changed) {
+            // No window to blank. The verdict still stands, and whoever
+            // registers next owns it, marker included — the same contract the
+            // PC transition keeps. Not overwritten by a later unchanged
+            // reading, because only a change sets it.
+            thermalMarkerPending = true;
+        }
+    }
+
+    /**
      * One {@code ACTION_BATTERY_CHANGED}, which Android sends rather than
      * letting anybody ask (T5.4 step 5: polling this would spend exactly the
      * power the reading exists to protect).
@@ -416,6 +495,15 @@ public final class PanelService extends Service implements PcPoller.Listener {
             // the poll loop may hold the CPU at all (T5.6), and it matters even
             // on a broadcast whose level is unusable and returns below.
             onPowerState(plugged);
+
+            // The temperature, for the same reason and with the same
+            // independence: a broadcast whose level extra is missing still
+            // carries a usable temperature, and a device at 46 degrees must
+            // blank the screen whether or not it can say what percentage it is
+            // at. Fed before the return below, never after it.
+            if (BatteryReading.plausible(tenths)) {
+                onThermalReading(BatteryReading.celsius(tenths));
+            }
 
             String reading = BatteryReading.json(level, scale, tenths, plugged);
             if (reading == null) {

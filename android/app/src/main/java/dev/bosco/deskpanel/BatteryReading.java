@@ -121,8 +121,13 @@ public final class BatteryReading {
      * Whether a temperature could have come from a battery rather than from a
      * missing extra. Wide on purpose — the job is to reject -1 tenths and a
      * zeroed struct, not to second-guess a phone in a hot car.
+     *
+     * <p>Package-visible rather than private since T5.5: the same question
+     * decides whether a reading may be fed to {@link ThermalState}, and that
+     * decision must not be a second, subtly different copy of this one. A
+     * reading good enough to render is a reading good enough to act on.
      */
-    private static boolean plausible(int tenthsC) {
+    static boolean plausible(int tenthsC) {
         return tenthsC > -500 && tenthsC < 1500;
     }
 }

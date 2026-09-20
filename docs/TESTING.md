@@ -67,7 +67,8 @@ that warns rather than fails. Full reasoning in [ADR 0009](adr/0009-testing-stra
 Those markers are a contract. Renaming one breaks the suite.
 
 Two kinds, defined in `Markers.java` (TT.6). **Transitions** — `state=online|offline`,
-`screen=wake|sleep`, `night=on|off`, `dormant=on|off` — fire only when something changes; a
+`screen=wake|sleep`, `screen=thermal|thermal-clear`, `night=on|off`, `dormant=on|off` — fire
+only when something changes; a
 steady state logs nothing, and T4.2 asserts exactly that. **Heartbeats** — `tick=`, `ping=`,
 `data=ok|err`, `battery=` — fire per cycle at a bounded rate, because "still running" and "at
 most four polls a minute" cannot be asserted any other way.
@@ -84,6 +85,8 @@ than restating it — three copies had already drifted apart on scenario 5.
 | 5 | Phone Wi-Fi off for 30s | No crash in logcat; recovers unaided |
 | 6 | `dumpsys battery unplug` while offline | `dormant=on`, then no `ping=` and no held wake lock |
 | 7 | `dumpsys battery reset` while dormant | `dormant=off` and a `ping=` within 10s |
+| 8 | `dumpsys battery set temp 460` while online | `screen=thermal` within 15s |
+| 9 | `dumpsys battery set temp 300` while blanked | `screen=thermal-clear` within 15s, `mWakefulness=Awake` |
 
 The 20s allowances exist because the offline backoff caps at 15s (T5.3). Tighter windows
 produce flaky failures that are not bugs.
@@ -111,6 +114,19 @@ them:
   **an assertion that counts `ping=` over a window has to know which power state it is in** —
   the same window is four lines on mains and zero on battery. `dumpsys battery unplug` and
   `reset` put the device in either state on demand, and fire the real power broadcasts.
+- **`screen=thermal` is a prefix of `screen=thermal-clear`**, so `grep -q 'screen=thermal'`
+  matches the line that says the panel came *back*. Every assertion about blanking anchors the
+  end of the line — `grep -qE 'screen=thermal$'` — and `MarkersTest` asserts the collision
+  exists so nobody rediscovers it from a test that passed for the wrong reason (T5.5).
+- `screen=thermal` is **not** `screen=sleep` with a different name. Sleep releases
+  `FLAG_KEEP_SCREEN_ON` and hands the display to Android, to be woken from outside; thermal
+  keeps the Activity foreground at `screenBrightness = 0f` precisely so it is still running to
+  notice the device cooling. A test that asserts `mWakefulness` went to `Dozing` is asserting
+  against the wrong mechanism — while blanked the device is `Awake` and that is correct
+  ([ADR 0012](adr/0012-thermal-screen-cutoff.md)).
+- `dumpsys battery set temp` **sticks until `reset`**, across app restarts and reboots. A
+  forgotten injection looks exactly like a real thermal problem, and the panel will sit black
+  with the PC plainly on.
 - `battery=` is one line per broadcast, which on this device is about every eight seconds while
   charging. It is **not** one line per render: the page is only re-rendered when the level or
   the temperature actually changes, so the marker count and the render count differ on purpose

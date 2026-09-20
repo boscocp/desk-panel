@@ -244,11 +244,36 @@ function formatBattery(battery) {
     return parts.join(' · ');
 }
 
-// tempC: number. Whether the battery is warm enough to deserve the warning
-// colour. Separate from formatBattery because the text and the colour are two
-// different jobs, and app.js is the only thing that owns classes.
-function batteryWarm(tempC) {
-    return typeof tempC === 'number' && Number.isFinite(tempC) && tempC > BATTERY_WARN_C;
+// Red, and the last colour before the screen goes out: ThermalState blanks the
+// panel at 45 (T5.5, ADR 0012), so this leaves two degrees of warning at the
+// rate a phone in a stand actually climbs -- minutes, not seconds.
+//
+// The ramp is the piece that makes the blanking legible. A black panel already
+// means one thing here, "the PC is off", and that is the whole product; a
+// second cause of black that arrived with no warning would be read as the PC
+// having died or the app having crashed. By the time the screen blanks it has
+// been visibly reddening, so the dark panel is never ambiguous.
+const BATTERY_HOT_C = 43;
+
+// tempC: number, or anything else. Returns which band the temperature is in:
+// 'normal', 'warm' at the T5.4 warning point, 'hot' approaching the thermal
+// cutoff. app.js turns that into a class; this file owns no DOM.
+//
+// A band rather than a boolean, which is what this replaced: two colours need
+// two thresholds, and a pair of booleans that must not both be true is a state
+// machine written in the wrong place.
+//
+// An absent or unusable temperature is 'normal', never 'hot'. A panel that
+// reddened because a sensor stopped answering would teach its owner to ignore
+// the colour, which costs more than the reading is worth.
+function tempClass(tempC) {
+    if (typeof tempC !== 'number' || !Number.isFinite(tempC)) {
+        return 'normal';
+    }
+    if (tempC >= BATTERY_HOT_C) {
+        return 'hot';
+    }
+    return tempC > BATTERY_WARN_C ? 'warm' : 'normal';
 }
 
 // now: Date. start/end: "HH:MM" as shipped in server/config.json
@@ -291,6 +316,6 @@ if (typeof module !== 'undefined' && module.exports) {
         formatPrice, formatRate, formatPair, formatTemp, formatChange, changeClass,
         weatherLabel, isNight,
         sparklinePath,
-        formatBattery, batteryWarm, BATTERY_WARN_C,
+        formatBattery, tempClass, BATTERY_WARN_C, BATTERY_HOT_C,
     };
 }
