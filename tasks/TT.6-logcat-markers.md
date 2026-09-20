@@ -73,11 +73,19 @@ and `screen=wake` in place of the offline pair. The count is the point: each mar
 once per transition, not on every poll.
 
 ```bash
-! grep -rn 'state=\|screen=' android/app/src/main/java --include=*.java | grep -v 'Markers.java'
+! grep -rnE '"[^"]*(state=|screen=|night=|dormant=|tick=|ping=|data=|battery=)' android/app/src/main/java --include=*.java | grep -v 'Markers.java'
 ```
 
 The strings live in exactly one place. This is what makes the E2E suite's assertions stable
 ([ADR 0009](../docs/adr/0009-testing-strategy.md)).
+
+**The pattern matches string literals, not prose, and it did not always.** The original was
+`grep -rn 'state=\|screen='`, which fires on any javadoc that *names* a marker — and the
+javadoc in this repo names them constantly, because explaining why one marker is not another is
+the whole reason a pair exists. It had three hits and was therefore **failing on `main` while
+protecting nothing**, found during T5.5's review. The property worth enforcing is that no marker
+string is *built* anywhere but `Markers.java`, which means a quoted string containing one, so
+that is what the pattern looks for. Prose may name them freely.
 
 ## Notes
 

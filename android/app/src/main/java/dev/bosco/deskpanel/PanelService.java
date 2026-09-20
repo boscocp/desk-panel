@@ -84,23 +84,26 @@ public final class PanelService extends Service implements PcPoller.Listener {
         void onPcState(boolean online, boolean logTransition);
 
         /**
-         * One thermal verdict (T5.5, ADR 0012). Same shape as
-         * {@link #onPcState}, and for the same reason: the window is told what
-         * is true, plus whether this delivery is the transition that earns a
-         * marker.
+         * One thermal verdict (T5.5, ADR 0012).
+         *
+         * <p>No {@code logTransition} twin of {@link #onPcState}'s, and the
+         * asymmetry is the point. A PC transition <em>is</em> the screen event,
+         * so the service knows when it is worth a marker. A thermal verdict is
+         * not: the device can cross 45 degrees while the panel is already dark
+         * because the PC is away, where nothing blanks and there is nothing to
+         * report. The window is the only thing that knows whether a verdict
+         * actually took the panel out, so the window logs it — see
+         * {@code MainActivity.setBlanked}.
          *
          * <p>Two authorities arrive as two calls rather than as one combined
-         * verdict on purpose. Each carries its own marker and its own
-         * mechanism — the PC releases {@code FLAG_KEEP_SCREEN_ON} and lets the
-         * display go, heat holds the window foreground at brightness zero — and
-         * only the window can apply them. What must not be duplicated is the
-         * <em>decision</em>, and that lives in exactly one expression, in
+         * verdict because each is applied by a different mechanism, and only
+         * the window can apply either. What must not be duplicated is the
+         * <em>decision</em>, and that lives in one place,
          * {@code MainActivity.applyScreenState}.
          *
-         * @param tooHot        whether the device is too hot to keep painting
-         * @param logTransition whether this delivery is a change of verdict
+         * @param tooHot whether the device is too hot to keep painting
          */
-        void onThermal(boolean tooHot, boolean logTransition);
+        void onThermal(boolean tooHot);
 
         /**
          * A fresh data payload for the page (T5.1).
@@ -189,9 +192,6 @@ public final class PanelService extends Service implements PcPoller.Listener {
      * that arrives between two edges would otherwise never hear it at all.
      */
     private static volatile Boolean lastTooHot;
-
-    /** The thermal twin of {@link #screenMarkerPending}. */
-    private static volatile boolean thermalMarkerPending;
 
     /**
      * Set when a transition was reported with no panel registered, so the replay
@@ -313,9 +313,7 @@ public final class PanelService extends Service implements PcPoller.Listener {
         }
         Boolean hot = lastTooHot;
         if (newPanel != null && hot != null) {
-            boolean logIt = thermalMarkerPending;
-            thermalMarkerPending = false;
-            newPanel.onThermal(hot, logIt);
+            newPanel.onThermal(hot);
         }
         String payload = lastPayload;
         if (newPanel != null && payload != null) {
@@ -437,26 +435,30 @@ public final class PanelService extends Service implements PcPoller.Listener {
      * timeout" is untouched — a temperature is a measured condition, not
      * elapsed time.
      *
-     * <p>The verdict is dispatched on every reading, not only on a change: a
-     * window that just registered needs to be told what is true, and
-     * {@code logTransition} is what keeps the <em>log</em> to one line per
-     * change. The same split {@link #onPcState} uses.
+     * <p><b>Edges only</b>, exactly like {@link #onPcState}. Dispatching every
+     * reading was the first cut and it was wrong: this broadcast arrives about
+     * every eight seconds on a charging phone, so it would have driven a window
+     * update seven times a minute for the life of the panel — including through
+     * the offline stretch that T5.6 exists to keep quiet — to re-apply a value
+     * that had not changed. A window that registers late is served by
+     * {@link #setPanel}'s replay instead, which is what that replay is for.
      */
     private void onThermalReading(double tempC) {
-        boolean changed = thermal.record(tempC, SystemClock.elapsedRealtime());
+        if (!thermal.record(tempC, SystemClock.elapsedRealtime())) {
+            return;
+        }
         boolean tooHot = thermal.isTooHot();
         lastTooHot = tooHot;
 
         Panel target = panel;
         if (target != null) {
-            target.onThermal(tooHot, changed);
-        } else if (changed) {
-            // No window to blank. The verdict still stands, and whoever
-            // registers next owns it, marker included — the same contract the
-            // PC transition keeps. Not overwritten by a later unchanged
-            // reading, because only a change sets it.
-            thermalMarkerPending = true;
+            target.onThermal(tooHot);
         }
+        // No else. A verdict with no window to apply it needs no bookkeeping:
+        // lastTooHot above is the whole record, and setPanel replays it to
+        // whoever registers next, which logs the marker if the blanking
+        // actually changes. The PC path needs its pending flag because its
+        // marker reports a transition; this one reports an effect.
     }
 
     /**

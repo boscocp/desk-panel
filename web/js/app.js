@@ -43,6 +43,7 @@ let clockTimer = setInterval(updateClock, 1000);
 
 window.onThermal = (tooHot) => {
     document.body.classList.toggle('too-hot', !!tooHot);
+    applyClock();
 };
 
 window.onPcState = (online) => {
@@ -51,18 +52,29 @@ window.onPcState = (online) => {
     // offline look is the cheapest thing the display can show while the
     // backlight is on its way out (ADR 0005).
     document.body.classList.toggle('pc-offline', !online);
+    applyClock();
+};
 
-    // Nothing is visible offline, so a per-second DOM write is pure cost, and
-    // it is cost paid in exactly the state the device holds a wake lock to
-    // survive (ADR 0014). Stopping the timer is worth more here than it looks.
-    if (online && clockTimer === null) {
+// The page's half of the arbitration, and the only place the timer is touched:
+// the clock runs when the panel is actually visible, which is neither cause of
+// black being in force.
+//
+// Nothing is visible under either, so a per-second DOM write is pure cost - and
+// under the thermal one it is cost paid by a device that is being blanked
+// *because* it is working too hard (ADR 0012), which is the worse of the two
+// bargains. Offline it is cost paid in exactly the state the device holds a
+// wake lock to survive (ADR 0014).
+function applyClock() {
+    const visible = !document.body.classList.contains('pc-offline')
+        && !document.body.classList.contains('too-hot');
+    if (visible && clockTimer === null) {
         updateClock();
         clockTimer = setInterval(updateClock, 1000);
-    } else if (!online && clockTimer !== null) {
+    } else if (!visible && clockTimer !== null) {
         clearInterval(clockTimer);
         clockTimer = null;
     }
-};
+}
 
 // --- Data rendering --------------------------------------------------------
 // window.onData(payload) is the one entry point for quotes, fx, crypto,

@@ -38,6 +38,15 @@ public final class ThermalState {
      */
     public static final double BLANK_AT_C = 45.0;
 
+    /*
+     * The twin of this constant is BATTERY_HOT_C in web/js/format.js, which
+     * opens the red band two degrees below it. Nothing in the build ties them
+     * together — web/ has no build step and no code path from Java (ADR 0006) —
+     * so lowering this below that one silently removes the warning the ramp
+     * exists to give: the panel would blank before it had ever turned red, with
+     * every test still green. Change one, change the other.
+     */
+
     /**
      * Come back at or below this.
      *
@@ -73,6 +82,18 @@ public final class ThermalState {
      *              one plausible future rule here — would otherwise have to
      *              change this signature at every call site. Taking it now
      *              costs a parameter; adding it later costs an API change
+     * <p><b>No debounce, deliberately.</b> One reading at or above the
+     * threshold blanks the panel, and a review asked whether a spurious sample
+     * could therefore produce an eight-second black flash and a marker pair
+     * that reads like a real thermal event. It could, and the answer is still
+     * no rule: a battery thermistor is a slow, heavily damped sensor reporting
+     * a cell's temperature, not a CPU's, and this device's readings move by
+     * tenths between broadcasts. A dwell rule would be policy invented past
+     * ADR 0012 to fix something nobody has observed, and it would delay the one
+     * case that matters — a device genuinely climbing — by the length of the
+     * dwell. If a flash is ever seen on the panel, {@code nowMs} above is where
+     * the rule goes.
+     *
      * @return true if this reading changed the verdict — i.e. exactly the
      *         readings on which a marker should be logged and the window
      *         retoggled

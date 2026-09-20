@@ -61,6 +61,15 @@ public class MainActivity extends Activity implements PanelService.Panel {
     private boolean tooHot;
 
     /**
+     * Whether the window is currently held at brightness zero. Kept rather than
+     * read back off the layout params: this is what makes the marker fire once
+     * per change, and the two are not the same question — the window manager
+     * may round or clamp a brightness, and a comparison against what it stored
+     * would eventually disagree with what was asked for.
+     */
+    private boolean blanked;
+
+    /**
      * The last payload handed to the page, for the same reason
      * {@link #lastOnline} is kept: the WebView reloads on a wake, and a
      * reloaded page knows nothing until the next refresh a minute later.
@@ -204,22 +213,18 @@ public class MainActivity extends Activity implements PanelService.Panel {
      * One thermal verdict, on the main thread, from {@link PanelService}
      * (T5.5, ADR 0012).
      *
-     * <p>Shaped exactly like {@link #onPcState}: record it, tell the page, apply
-     * the window, and log only if this was the change. The marker is
-     * {@code screen=thermal}, never {@code screen=sleep} — a panel that is dark
-     * because the PC went away and a panel that is dark because the device is
-     * cooking are the project's most expensive confusion, and the log is the
-     * only place they can be told apart.
+     * <p>Nothing is logged here, unlike {@link #onPcState}. The marker belongs
+     * to the moment the panel actually goes dark, and that is
+     * {@link #setBlanked}: a verdict that crosses 45 degrees while the PC is
+     * already away blanks nothing — the display is out under the PC's mechanism
+     * — and a marker there would claim an event that did not happen, while the
+     * black panel the owner eventually sees would have gone unreported.
      */
     @Override
-    public void onThermal(boolean hot, boolean logTransition) {
+    public void onThermal(boolean hot) {
         tooHot = hot;
         pushThermalToPage();
         applyScreenState();
-
-        if (logTransition) {
-            Log.i(Markers.TAG, Markers.thermal(hot));
-        }
     }
 
     /**
@@ -249,13 +254,23 @@ public class MainActivity extends Activity implements PanelService.Panel {
         // unconditionally. Heat can still veto that, and should — a phone that
         // is at 46 degrees when the panel starts must not start by painting.
         boolean online = lastOnline == null || lastOnline;
-        boolean lit = online && !tooHot;
 
-        // The PC's mechanism, and only once the PC has actually been heard
-        // from. A thermal reading can arrive first — ACTION_BATTERY_CHANGED is
-        // sticky and lands within milliseconds, while the first probe takes up
-        // to the connect timeout — and it must not be what latches the keyguard
-        // flags on for a state nobody has reported yet.
+        // The arbitration, and the invariant the two calls below add up to:
+        //
+        //     lit == online && !tooHot
+        //
+        // It is enforced as two vetoes rather than as one assignment because a
+        // veto is all either authority can express in its own mechanism, and
+        // the mechanisms are not interchangeable (see this method's javadoc).
+        // Written as a comment rather than as a variable because a variable
+        // that nothing reads is not the decision being in one place, it is dead
+        // code sitting next to the decision.
+
+        // The PC's veto, and only once the PC has actually been heard from. A
+        // thermal reading can arrive first — ACTION_BATTERY_CHANGED is sticky
+        // and lands within milliseconds, while the first probe takes up to the
+        // connect timeout — and it must not be what latches the keyguard flags
+        // on for a state nobody has reported yet.
         if (lastOnline != null) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
                 // Paired with the state rather than latched on. Both are sticky
@@ -270,11 +285,17 @@ public class MainActivity extends Activity implements PanelService.Panel {
             setKeepScreenOn(lastOnline);
         }
 
-        // Heat's mechanism, and only where it can mean anything: while the PC
-        // is offline the display is already on its way out under the PC's
-        // mechanism, and a window left at zero would hand the next wake a black
-        // panel with no reading due for up to eight seconds to undo it.
-        setBlanked(online && !lit);
+        // Heat's veto, and it does not consult the PC. ADR 0012 says either
+        // condition alone puts the panel out and both must hold to keep it on,
+        // so a device that crossed 45 while the PC was away must still be
+        // blanked when the PC comes back — the login turns the display on, and
+        // it has to come up dark. Making this one conditional on `online` was
+        // the first cut, and it handed exactly that morning a lit panel on a
+        // phone at 46 degrees. Nothing is stranded by the stricter version: the
+        // receiver is service-scoped, so the verdict keeps updating with the
+        // Activity destroyed and the screen out, and cooling clears the
+        // override on its own.
+        setBlanked(tooHot);
     }
 
     @Override
@@ -317,21 +338,32 @@ public class MainActivity extends Activity implements PanelService.Panel {
     }
 
     /**
-     * The one place that touches {@code screenBrightness}: zero while blanked,
-     * and back to {@code BRIGHTNESS_OVERRIDE_NONE} — the window default, which
-     * is -1f and means "whatever the system says" — when not.
+     * The one place that touches {@code screenBrightness}, and the one place
+     * the thermal marker is emitted: zero while blanked, and back to
+     * {@code BRIGHTNESS_OVERRIDE_NONE} — the window default, which is -1f and
+     * means "whatever the system says" — when not.
      *
-     * <p>Written only on a change. Every {@code setAttributes} is a round trip
-     * to the window manager and a relayout, and this is driven by a broadcast
-     * that fires every eight seconds on a charging phone.
+     * <p>A no-op unless the state actually changes. Every {@code setAttributes}
+     * is a round trip to the window manager and a relayout, and keeping the
+     * marker on the same guard is what makes it one line per event rather than
+     * one per battery broadcast.
      */
-    private void setBlanked(boolean blanked) {
-        WindowManager.LayoutParams params = getWindow().getAttributes();
-        float wanted = blanked ? 0f : WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
-        if (params.screenBrightness != wanted) {
-            params.screenBrightness = wanted;
-            getWindow().setAttributes(params);
+    private void setBlanked(boolean blank) {
+        if (blank == blanked) {
+            return;
         }
+        blanked = blank;
+
+        WindowManager.LayoutParams params = getWindow().getAttributes();
+        params.screenBrightness = blank ? 0f : WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+        getWindow().setAttributes(params);
+
+        // Logged here rather than at the verdict, because here is where the
+        // panel's appearance actually changes and that is what the marker
+        // claims. The E2E suite and any future diagnosis read this line as "the
+        // panel went dark because the device is hot", as distinct from
+        // screen=sleep's "the PC went away" (ADR 0012, ADR 0009).
+        Log.i(Markers.TAG, Markers.thermal(blank));
     }
 
     @Override

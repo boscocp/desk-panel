@@ -244,9 +244,18 @@ function formatBattery(battery) {
     return parts.join(' · ');
 }
 
-// Red, and the last colour before the screen goes out: ThermalState blanks the
-// panel at 45 (T5.5, ADR 0012), so this leaves two degrees of warning at the
-// rate a phone in a stand actually climbs -- minutes, not seconds.
+// Red, and the last colour before the screen goes out: ThermalState.BLANK_AT_C
+// blanks the panel at 45 (T5.5, ADR 0012), so this leaves two degrees of
+// warning at the rate a phone in a stand actually climbs -- minutes, not
+// seconds.
+//
+// **This number and BLANK_AT_C are one decision spread across two languages,
+// with nothing in the build to tie them together.** There is no code path from
+// Java into these files -- web/ has no build step, by design (ADR 0006) -- so
+// the link is this comment and its twin in ThermalState.java. Lower BLANK_AT_C
+// below this without changing this, and the panel blanks before it has ever
+// turned red: the ramp that ADR 0012 calls its decisive piece stops existing,
+// and every test in the repo stays green.
 //
 // The ramp is the piece that makes the blanking legible. A black panel already
 // means one thing here, "the PC is off", and that is the whole product; a
