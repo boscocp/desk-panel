@@ -79,12 +79,14 @@ DEFAULT_CONFIG = {
     "history_days": 30,
     "night_start": "22:00",
     "night_end": "07:00",
-    # Reserved for T6.7, which turns rendering into web/themes/<name>/ and
-    # selects between them from here. Defaulted rather than left absent so
-    # that the key is already in the example file, already documented, and
-    # already merged into every config by the time anything reads it --
-    # selecting a theme must never need a rebuild, which is the whole reason
-    # it is runtime config and not .env (ADR 0013).
+    # Which theme renders the panel. Read by T6.7: it rides the /quotes
+    # response into the payload, and the page picks the matching
+    # web/themes/<name>/ out of the set the APK already carries. Selecting a
+    # theme must never need a rebuild, which is the whole reason it is runtime
+    # config and not .env (ADR 0013). A name no theme answers to falls back to
+    # "neon" in the page, not here: the server has no idea which themes the
+    # installed APK was built with, and guessing would turn a cosmetic typo
+    # into a blank panel.
     "theme": "neon",
     "actions": {},
 }
@@ -482,6 +484,13 @@ class App:
             ]
             stale = stale or market_stale
         payload["stale"] = stale
+        # Not a market fact, and it rides here anyway: /quotes and /weather are
+        # the only two things the phone asks for, DataPoller merges them into
+        # the one payload the page gets, and a third endpoint would be a third
+        # request per cycle for a string that changes when a human edits a file.
+        # /quotes rather than /weather because /quotes is already the payload's
+        # carrier -- it is where `stale` is decided for the whole panel.
+        payload["theme"] = config.get("theme", "")
         return payload
 
     def _history(self, now):

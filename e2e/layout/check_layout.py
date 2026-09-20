@@ -25,6 +25,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PANEL = os.path.join(os.path.dirname(HERE), os.pardir, "web", "index.html")
@@ -249,6 +250,10 @@ def main():
                          "without editing web/")
     ap.add_argument("--screenshots", metavar="DIR",
                     help="also save a PNG per pass")
+    ap.add_argument("--theme", metavar="NAME",
+                    help="measure web/themes/NAME instead of the default; passed to the "
+                         "page as ?theme=NAME, which mock.js and stress.js put in the "
+                         "payload exactly as the server's config key does (T6.7)")
     args = ap.parse_args()
 
     width, height = (int(n) for n in args.viewport.lower().split("x"))
@@ -260,6 +265,8 @@ def main():
         os.makedirs(args.screenshots, exist_ok=True)
 
     url = "file://" + os.path.abspath(PANEL)
+    if args.theme:
+        url += "?theme=" + urllib.parse.quote(args.theme)
 
     # Two passes, and the second is not decoration. A typical tick never breaks
     # a layout; the widest case does. mock.js already ships the long symbol, the

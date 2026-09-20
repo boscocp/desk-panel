@@ -298,16 +298,38 @@ class AppPayloadTests(unittest.TestCase):
             crypto=[{"symbol": "BTC", "price": 81470.0, "changePct": 1.01}],
         )
         payload = self.app.quotes()
-        self.assertEqual(set(payload), {"quotes", "fx", "crypto", "stale"})
+        self.assertEqual(set(payload), {"quotes", "fx", "crypto", "stale", "theme"})
         self.assertFalse(payload["stale"])
         self.assertEqual(payload["quotes"][0]["symbol"], "PETR4")
+
+    def test_quotes_carries_the_configured_theme(self):
+        """T6.7: the theme rides /quotes, because DataPoller merges this
+        response and /weather into the one payload the page gets -- a third
+        endpoint would be a third request per cycle for a string a human
+        changes by hand.
+
+        A real name rather than the default, so the assertion can fail: with
+        "neon" on both sides this would pass against a hard-coded literal."""
+        app = App(dict(CONFIG, theme="plain"), clock=self.clock)
+        self._stub_providers(quotes=[], fx=[], crypto=[])
+        self.assertEqual(app.quotes()["theme"], "plain")
+
+    def test_quotes_theme_is_empty_when_config_omits_it(self):
+        """An absent key is an empty string, never a missing one: DataPayload
+        drops it from the payload on empty, and the page then falls back to
+        neon -- the same path a typo takes. A missing key here would make the
+        Java side's optString return the default anyway, but the contract
+        shape is asserted elsewhere and it must not depend on config."""
+        app = App({k: v for k, v in CONFIG.items() if k != "theme"}, clock=self.clock)
+        self._stub_providers(quotes=[], fx=[], crypto=[])
+        self.assertEqual(app.quotes()["theme"], "")
 
     def test_every_upstream_failing_still_returns_the_contract_shape(self):
         self._stub_providers(fail="everything down")
         payload = self.app.quotes()
         self.assertTrue(payload["stale"])
         self.assertEqual(payload["quotes"], [])
-        self.assertEqual(set(payload), {"quotes", "fx", "crypto", "stale"})
+        self.assertEqual(set(payload), {"quotes", "fx", "crypto", "stale", "theme"})
 
     def test_one_market_failing_does_not_empty_the_other_two(self):
         # Found on the desk, by changing a ticker to one that needs a token:
