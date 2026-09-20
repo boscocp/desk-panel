@@ -43,12 +43,54 @@ matched `--expect`, 1 when it did not, 2 when the probe itself could not tell.
 powershell -ExecutionPolicy Bypass -File server\install_task.ps1
 ```
 
+`config.json` has to exist first: the installer runs `server.py --check-only` before it
+registers anything, and stops with the copy command if it is missing.
+
 This registers a task with an **"At log on" trigger**, scoped to your user.
 
 That trigger is the whole point: the task runs inside your session, so the server answering
 means you are logged in. **Do not convert this into a Windows Service.** A service has the same
-uptime and the wrong meaning — it would answer at the lock screen and before anyone logs in,
-and the panel would light up for nobody.
+uptime and the wrong meaning — it would answer before anyone logs in, and the panel would light
+up for nobody.
+
+Four settings carry that meaning and all four have the wrong default. The script states them
+explicitly, then re-exports the task and asserts them, so a future PowerShell that changes one
+fails the install instead of the panel:
+
+| XML field | Value | What the default does instead |
+|---|---|---|
+| `LogonType` | `InteractiveToken` | `Password`/`S4U` run with no interactive session — a service in disguise |
+| `ExecutionTimeLimit` | `PT0S` | 72 h, so the server dies on day four of an uptime streak, mid-session |
+| `DisallowStartIfOnBatteries` | `false` | never starts on a laptop |
+| `StopIfGoingOnBatteries` | `false` | stops the moment you unplug |
+
+The cmdlets that produce them are spelled differently — `-LogonType Interactive`,
+`-AllowStartIfOnBatteries`, `-DontStopIfGoingOnBatteries` — which is why every assertion in the
+task file reads the exported XML rather than `Get-ScheduledTask`.
+
+**Which Python ends up in the task** is the other thing the script is careful about. It resolves
+the interpreter from the registry first, not from `PATH`: on a machine with any virtualenv
+active, `python` — and `py`, which honours `VIRTUAL_ENV` — resolve into that environment, and a
+task pointing there works until that unrelated project is deleted, then fails at the next login
+with no console to say so. A Microsoft Store alias is rejected outright, for the same class of
+reason: it opens the Store instead of starting the server. The script prints which source won.
+
+Other switches: `-Python <path>` to pin the interpreter, `-NoStart` to register without
+starting it, `-WhatIf` to see what it would do, and `-Uninstall` to remove the task — which
+leaves `config.json` and the logs alone. Relative `-Config` and `-LogFile` are resolved
+against your current directory and stored absolute, because the task itself runs with the
+repository root as its working directory.
+
+**Do not run the whole installer elevated to get the firewall rule.** It would re-register
+the task for whichever account elevated: where the desk user is a standard user and UAC asks
+for a separate administrator, the panel would then light when the admin logs in and never
+when you do. Use `-FirewallOnly` from an elevated shell, which creates the rule and does not
+touch the task at all. (`-Firewall` does both, and is only right when your own account is
+the administrator.)
+
+`pythonw` has no console, so the server's output goes to
+`%LOCALAPPDATA%\desk-panel\server.log`. Read that first when the panel says offline and the task
+says Running.
 
 ## Firewall
 
@@ -62,9 +104,31 @@ New-NetFirewallRule -DisplayName "desk-panel" -Direction Inbound -Action Allow `
 Never forward this port on the router. The server has no authentication because it is only ever
 reachable from the LAN, and that assumption has to hold.
 
+**A Private rule only admits anything if the adapter is classified Private.** Windows classifies
+unknown wired networks as Public, and then the rule above matches nothing: the phone reports
+"offline" and it looks exactly like a server bug. Check it, and fix it once, elevated:
+
+```powershell
+Get-NetConnectionProfile
+Set-NetConnectionProfile -InterfaceAlias "Ethernet" -NetworkCategory Private
+```
+
+Do not widen the rule to the Public profile instead. LAN-only is the assumption the missing
+authentication rests on. `install_task.ps1` reports both of these and creates neither on its
+own; `-FirewallOnly`, from an elevated shell, creates the rule and nothing else.
+
 ## Static IP
 
 Reserve a fixed DHCP lease for the PC on your router.
+
+On this installation the PC is **192.168.15.3** on the `Ethernet` adapter, handed out by DHCP.
+Until the router holds a reservation for it, that address is a loan, not a fact. The same value
+goes into `PC_IP` in the gitignored `.env`, which is what stamps both the cleartext pin and the
+dialled host into the APK at build time — the committed sources keep the placeholder
+`192.168.1.100` on purpose (T7.3). Changing the address means rebuilding and reinstalling the
+app, because cleartext permission is a property of the APK.
+
+Ignore `192.168.56.1` if you see it: that is a VirtualBox host-only adapter, not the LAN.
 
 `network_security_config.xml` in the app pins that address as the only one allowed to be
 contacted over cleartext. If DHCP hands the PC a different address, the app reports "offline"
@@ -90,7 +154,7 @@ python server/probe.py --host <pc-ip> --expect up
 
 A firewall prompt that never appears when testing locally will appear here. That is the point.
 
-Then lock the screen, or log out, and probe again from the same device:
+Then **log out** — not lock — and probe again from the same device:
 
 ```bash
 python server/probe.py --host <pc-ip> --expect down
@@ -98,6 +162,20 @@ python server/probe.py --host <pc-ip> --expect down
 
 Logging out must make it exit 0. If it does not, the launcher is of system scope and the panel
 will stay lit with nobody there.
+
+**Locked is not logged out.** An at-logon task keeps running while the screen is locked, and it
+is supposed to: you are still logged in, you are still at the desk, and the panel should still
+be lit. So locking must probe `--expect up`. The one that proves the invariant is the other
+end — reboot and do *not* log in:
+
+```bash
+# reboot, do not log in, wait 90s
+python server/probe.py --host <pc-ip> --expect down
+```
+
+Answering there is the failure that matters: it means the task has become a service. Run that
+across a Fast Startup shutdown as well as a real reboot — hiberboot hibernates the kernel but
+does log the user off, so the logon trigger still has to fire.
 
 ## Linux
 

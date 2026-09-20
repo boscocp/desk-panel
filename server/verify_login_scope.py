@@ -165,6 +165,14 @@ def parse_schtasks_xml(text):
             _text(root, "Settings/StopIfGoingOnBatteries")
         ),
         "enabled": _xml_bool(_text(root, "Settings/Enabled")),
+        # The raw text alongside the bool, because absent and unparsable are
+        # different answers and _xml_bool flattens both to None.
+        "enabled_raw": _text(root, "Settings/Enabled"),
+        # A trigger carries its own Enabled, independent of Settings/Enabled.
+        # Turning just the trigger off in the Task Scheduler UI leaves the task
+        # "enabled" and stops it ever firing at logon.
+        "trigger_enabled": _xml_bool(_text(root, "Triggers/LogonTrigger/Enabled")),
+        "trigger_enabled_raw": _text(root, "Triggers/LogonTrigger/Enabled"),
         "command": _text(root, "Actions/Exec/Command"),
     }
 
@@ -214,16 +222,59 @@ def check_windows_task(task):
         f", must be false",
     ))
 
-    enabled = task.get("enabled")
-    if enabled is None:
-        checks.append(Check("windows.task.enabled", UNKNOWN, "Settings/Enabled is absent"))
-    else:
-        checks.append(Check(
-            "windows.task.enabled",
-            PASS if enabled else FAIL,
-            f"Settings/Enabled={enabled}",
-        ))
+    # Same shape as the one above, and the same default: absent means true,
+    # which stops the server the moment a laptop leaves the mains. The panel
+    # reads that as a logout and sleeps while its owner is still sitting there.
+    stop_on_battery = task.get("stop_if_going_on_batteries")
+    checks.append(Check(
+        "windows.task.stop-on-battery",
+        PASS if stop_on_battery is False else FAIL,
+        f"StopIfGoingOnBatteries="
+        f"{'(absent, defaults to true)' if stop_on_battery is None else stop_on_battery}"
+        f", must be false",
+    ))
+
+    # Absent is an answer here, not an inability to tell, and it is the
+    # opposite of the two settings above: the Task Scheduler omits this element
+    # at its default, and the default is enabled. A task that really is
+    # disabled writes <Enabled>false</Enabled> -- checked against a live task
+    # on Windows 11, disabled and re-enabled, where the element appeared and
+    # vanished accordingly. Reporting absent as UNKNOWN made every correctly
+    # enabled task come back as exit 2.
+    #
+    # Text that is present and not a boolean is neither of those: it is this
+    # parser not understanding the task, which is what UNKNOWN is for.
+    checks.append(_enabled_check(
+        "windows.task.enabled", task.get("enabled"), task.get("enabled_raw"),
+        absent="Settings/Enabled=(absent, which the Task Scheduler writes for enabled)",
+        label="Settings/Enabled",
+        why="",
+    ))
+
+    # The trigger's own switch. Settings/Enabled says nothing about it, so a
+    # task can be enabled, correct in every other field, and still never fire.
+    checks.append(_enabled_check(
+        "windows.task.trigger-enabled",
+        task.get("trigger_enabled"), task.get("trigger_enabled_raw"),
+        absent="the LogonTrigger has no Enabled element, which is the enabled default",
+        label="LogonTrigger/Enabled",
+        why=" -- a disabled trigger never fires at logon, however healthy the rest is",
+    ))
     return checks
+
+
+def _enabled_check(name, value, raw, absent, label, why):
+    """Pure: the three-way answer an Enabled element can give.
+
+    Absent means the Task Scheduler's default, which is on. Present and
+    boolean means what it says. Present and anything else means this parser
+    does not understand the task, and saying so is the whole point of UNKNOWN.
+    """
+    if raw is None:
+        return Check(name, PASS, absent)
+    if value is None:
+        return Check(name, UNKNOWN, f"{label}={raw!r} is not a boolean")
+    return Check(name, PASS if value else FAIL, f"{label}={value}{'' if value else why}")
 
 
 # --------------------------------------------------------------------------
@@ -413,7 +464,12 @@ def check_macos_agent(plist, printed, plist_path):
 
     checks = [Check("macos.agent.exists", PASS, f"{plist_path}")]
 
-    path = str(plist_path)
+    # str() of a Path renders with the *host's* separator, so on Windows a
+    # perfectly good ~/Library/LaunchAgents path arrives with backslashes and
+    # this POSIX-shaped test fails. Normalising keeps TT.10's promise -- all
+    # three platforms' checks are exercised on any one machine -- true on the
+    # primary platform too.
+    path = str(plist_path).replace("\\", "/")
     in_user_agents = "/Library/LaunchAgents/" in path and not path.startswith("/Library/")
     checks.append(Check(
         "macos.agent.location",
@@ -524,9 +580,16 @@ def detect_autologin(platform, sources):
 
 def _autologin_windows(sources):
     capture = sources.get("winlogon")
-    if capture is None or capture.status != CAPTURED:
+    if capture is None:
+        return Check("autologin", UNKNOWN, "could not read the Winlogon key: not collected")
+    # MISSING is an answer, not an inability to look: the value genuinely is
+    # not there, which is exactly what "no auto-login" looks like in the
+    # registry. Only ERROR means we could not tell.
+    if capture.status == MISSING:
+        return Check("autologin", PASS, f"AutoAdminLogon is not set ({capture.text})")
+    if capture.status != CAPTURED:
         return Check("autologin", UNKNOWN,
-                     f"could not read the Winlogon key: {capture.text if capture else 'not collected'}")
+                     f"could not read the Winlogon key: {capture.text}")
     if "ERROR:" in capture.text:
         return Check("autologin", PASS, "AutoAdminLogon is not set")
     match = re.search(r"AutoAdminLogon\s+REG_[A-Z_]+\s+(\S+)", capture.text)
@@ -794,6 +857,38 @@ def run_command(command, timeout=15):
     return captured(_decode(completed.stdout))
 
 
+_WINLOGON_KEY = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
+
+
+def read_registry_autologin():
+    """Capture HKLM's AutoAdminLogon. Never raises. Windows only.
+
+    Not `reg query`: reg.exe localises its failure line, so on a pt-BR Windows
+    it prints "ERRO:" where the parser looked for "ERROR:" and a value that is
+    simply not set came back as "could not look" -- UNKNOWN, exit 2, on a
+    machine with nothing wrong with it. winreg raises instead of printing, and
+    the exception type is the same in every language.
+
+    The hit is rendered in reg.exe's shape so the committed fixtures stay the
+    contract for the pure function.
+    """
+    try:
+        import winreg
+    except ImportError:
+        # unreadable, not missing: MISSING now means "the value is definitely
+        # not set", and that passes. Having no way to look at all is the
+        # opposite of knowing, and this file fails closed.
+        return unreadable("winreg is unavailable, so the registry cannot be read")
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _WINLOGON_KEY) as key:
+            value, _ = winreg.QueryValueEx(key, "AutoAdminLogon")
+    except FileNotFoundError:
+        return missing(r"no AutoAdminLogon value under HKLM\...\Winlogon")
+    except OSError as exc:
+        return unreadable(f"cannot read AutoAdminLogon: {exc}")
+    return captured(f"    AutoAdminLogon    REG_SZ    {value}")
+
+
 def read_file(path):
     """Capture a file's text. Never raises."""
     candidate = Path(path)
@@ -917,13 +1012,7 @@ def run_windows_checks(environ=None):
     checks.append(detect_system_scope("win32", {
         "sc_query": run_command(["sc", "query", SERVICE_NAME]),
     }))
-    checks.append(detect_autologin("win32", {
-        "winlogon": run_command([
-            "reg", "query",
-            r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon",
-            "/v", "AutoAdminLogon",
-        ]),
-    }))
+    checks.append(detect_autologin("win32", {"winlogon": read_registry_autologin()}))
     checks.append(detect_wsl("win32", {}))
     checks.append(detect_container("win32", {
         "env_container": _environment_sources(environ)["container_env"],
@@ -1045,6 +1134,17 @@ def self_test_cases():
     cases.append(("schtasks good: user", good["user_id"], "DESK-PC\\bosco"))
     cases.append(("schtasks good: checks", set(statuses(check_windows_task(good)).values()), {PASS}))
 
+    # A real `schtasks /query /xml ONE` capture from the Windows box T3.8
+    # installed on, kept next to the hand-written shape above rather than
+    # replacing it: the two disagree in ways that are the point. Windows omits
+    # <Enabled> at its default and renders the principal as a SID, neither of
+    # which a fixture written from the documentation would have predicted.
+    real = parse_schtasks_xml(fixture("windows_schtasks_real_capture.xml"))
+    cases.append(("schtasks real capture: Enabled is omitted", real["enabled"], None))
+    cases.append(("schtasks real capture: one LogonTrigger", real["triggers"], ["LogonTrigger"]))
+    cases.append(("schtasks real capture: checks",
+                  set(statuses(check_windows_task(real)).values()), {PASS}))
+
     bad = parse_schtasks_xml(fixture("windows_schtasks_bad_boot_trigger.xml"))
     cases.append(("schtasks bad: checks", statuses(check_windows_task(bad)), {
         "windows.task.exists": PASS,
@@ -1052,8 +1152,35 @@ def self_test_cases():
         "windows.task.logon-type": FAIL,
         "windows.task.execution-time-limit": FAIL,
         "windows.task.batteries": FAIL,
+        "windows.task.stop-on-battery": FAIL,
         "windows.task.enabled": PASS,
+        # The bad fixture's trigger is a BootTrigger, so there is no
+        # LogonTrigger/Enabled to read -- absent, which is the default and a
+        # pass. The BootTrigger itself is what logon-trigger already fails on.
+        "windows.task.trigger-enabled": PASS,
     }))
+
+    cases.append(("schtasks enabled absent is a pass",
+                  statuses(check_windows_task(dict(good, enabled=None, enabled_raw=None)))
+                  ["windows.task.enabled"], PASS))
+    cases.append(("schtasks enabled false fails",
+                  statuses(check_windows_task(dict(good, enabled=False)))["windows.task.enabled"],
+                  FAIL))
+    cases.append(("schtasks enabled garbage is unknown, not a pass",
+                  statuses(check_windows_task(dict(good, enabled=None, enabled_raw="yes")))
+                  ["windows.task.enabled"], UNKNOWN))
+    # A task can be enabled and still never fire: the trigger has its own
+    # switch, and the Task Scheduler UI can turn off just that one.
+    cases.append(("schtasks good: trigger is enabled",
+                  statuses(check_windows_task(good))["windows.task.trigger-enabled"], PASS))
+    cases.append(("schtasks disabled trigger fails",
+                  statuses(check_windows_task(
+                      dict(good, trigger_enabled=False, trigger_enabled_raw="false")))
+                  ["windows.task.trigger-enabled"], FAIL))
+    cases.append(("schtasks absent trigger switch is a pass",
+                  statuses(check_windows_task(
+                      dict(good, trigger_enabled=None, trigger_enabled_raw=None)))
+                  ["windows.task.trigger-enabled"], PASS))
 
     absent = parse_schtasks_xml(fixture("windows_schtasks_absent.txt"))
     cases.append(("schtasks absent: found", absent["found"], False))
@@ -1080,6 +1207,12 @@ def self_test_cases():
         "winlogon": captured(fixture("windows_reg_autologin_unset.txt"))}).status, PASS))
     cases.append(("windows autologin unreadable fails closed", detect_autologin("win32", {
         "winlogon": unreadable("reg.exe missing")}).status, UNKNOWN))
+    # The locale-proof collector's two answers: absent is a pass, present is
+    # read on its value alone. Neither one goes through an error string.
+    cases.append(("windows autologin absent is a pass", detect_autologin("win32", {
+        "winlogon": missing("no AutoAdminLogon value")}).status, PASS))
+    cases.append(("windows autologin winreg shape parses", detect_autologin("win32", {
+        "winlogon": captured("    AutoAdminLogon    REG_SZ    1")}).status, FAIL))
 
     # -- Linux ------------------------------------------------------------
     unit_good = parse_systemctl_show(fixture("linux_systemctl_show_user_good.txt"))
