@@ -158,13 +158,25 @@
     }
 
     function tick(now) {
-        // Before the theme's own tick, and outside the try below: the shift is
-        // core's and must not be skipped because a theme's clock threw. It is
-        // also why it rides tick rather than having a timer of its own --
-        // js/app.js already runs this once a second while the panel is lit and
-        // stops it when the panel is dark, which is exactly the schedule a
-        // burn-in shift wants. A display that is off does not age.
-        shift(now);
+        // Before the theme's own tick, and in a try of its own rather than the
+        // theme's: the shift is core's and must not be skipped because a
+        // theme's clock threw, and the clock must not stop because the shift
+        // did. The second half is the one that is easy to get wrong -- `shift`
+        // calls `offsetFor`, which is a global out of js/format.js, so an
+        // unguarded call here makes the panel's clock depend on that file
+        // having loaded. It does load; a panel showing a clock and no numbers
+        // is still worth more than a panel showing nothing, which is the same
+        // bargain render() and tick() take below.
+        //
+        // It rides tick rather than having a timer of its own because js/app.js
+        // already runs this once a second while the panel is lit and stops it
+        // when the panel is dark, which is exactly the schedule a burn-in shift
+        // wants. A display that is off does not age.
+        try {
+            shift(now);
+        } catch (err) {
+            console.error('desk-panel: the burn-in shift failed', err);
+        }
         if (!current) {
             return;
         }

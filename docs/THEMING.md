@@ -237,6 +237,13 @@ things not to do:
   changes position relative to anything else, and `getBoundingClientRect` is 0–4px different
   from one minute to the next.
 
+One consequence that is not a rule but will surprise somebody: a `transform` makes an element
+the containing block for its absolutely positioned descendants. Every direct child of `body` is
+therefore one, whether or not you gave it `position: relative`. Neither theme notices — `neon`
+positions `#battery` and `#stale-badge` against `#panel`, which was already `relative` — but a
+theme that positioned something against the page itself would find it positioned against that
+child instead.
+
 The amplitude and the cycle are `offsetFor` in `js/format.js`, which is a pure function of the
 clock and tested as one. It is not in the list of formatters above because there is nothing for
 a theme to call: core applies it to whatever you put in the body.
