@@ -242,9 +242,96 @@ document.querySelectorAll('body *').forEach((el) => {
 // the T5.4 bug was in. So this compares what is actually drawn: the leaf
 // elements that carry text, and the <path> of each sparkline. Sharing empty
 // space is fine. Sharing a pixel that has a glyph or a line in it is not.
+// A ::before's ink, or null when the element has none.
+//
+// **The harness could not see a card title until T6.11**, and the gap is the
+// kind this file exists to close: the four card headings are pseudo elements,
+// pseudo elements have no DOM node, and `querySelectorAll('*')` below has
+// therefore never been shown one. It did not matter while the words were
+// written in the stylesheet and never changed. It matters the moment they
+// come from a language table -- DESATUALIZADO, the first pt-BR word tried for
+// the stale badge, landed squarely on top of TEMPO and this file reported the
+// pass as clean.
+//
+// There is no geometry API for a pseudo element, so the text is measured with
+// a probe: a span carrying the same computed font, size, weight, spacing and
+// transform, laid out absolutely so it disturbs nothing, measured, removed.
+// That gives the width exactly. The rest of the box is the element's own
+// content box -- the title is the first flex item in its card, so it starts at
+// the content top -- and the line height the pseudo computes.
+//
+// The probe is appended to the element it is measuring rather than to <body>,
+// because `font` and `letter-spacing` can be inherited and a probe elsewhere
+// in the tree would inherit somebody else's.
+function pseudoInk(el) {
+    const style = getComputedStyle(el, '::before');
+    const content = style.content;
+    if (!content || content === 'none' || content === 'normal') {
+        return null;
+    }
+    // The computed value of `content: attr(data-title)` is the resolved
+    // string, quoted. Anything else -- a counter, an image -- is not text this
+    // panel draws and is left alone.
+    const text = /^"([\s\S]*)"$/.test(content) ? content.slice(1, -1) : '';
+    if (!text.trim()) {
+        return null;
+    }
+
+    const probe = document.createElement('span');
+    probe.textContent = text;
+    probe.style.position = 'absolute';
+    probe.style.visibility = 'hidden';
+    probe.style.whiteSpace = 'pre';
+    // The longhands, not the `font` shorthand: Firefox computes `font` to the
+    // empty string on a pseudo element, so setting it copies nothing and the
+    // probe measures the text in whatever the document's default face is --
+    // which is a width, so nothing throws and the answer is quietly wrong.
+    probe.style.fontStyle = style.fontStyle;
+    probe.style.fontWeight = style.fontWeight;
+    probe.style.fontSize = style.fontSize;
+    probe.style.fontFamily = style.fontFamily;
+    probe.style.letterSpacing = style.letterSpacing;
+    probe.style.textTransform = style.textTransform;
+    el.appendChild(probe);
+    const width = probe.getBoundingClientRect().width;
+    probe.remove();
+    if (width < 0.5) {
+        return null;
+    }
+
+    const box = el.getBoundingClientRect();
+    const own = getComputedStyle(el);
+    const left = box.left + parseFloat(own.borderLeftWidth) + parseFloat(own.paddingLeft);
+    const top = box.top + parseFloat(own.borderTopWidth) + parseFloat(own.paddingTop);
+    const height = parseFloat(style.lineHeight) || parseFloat(style.fontSize);
+    return {
+        r: { left: left, top: top, right: left + width, bottom: top + height,
+             width: width, height: height },
+        what: text.slice(0, 24),
+    };
+}
+
 function ink(root) {
     const found = [];
-    root.querySelectorAll('*').forEach((el) => {
+    // **The root itself is in the list, and it was not until T6.11.** The
+    // walk below was `root.querySelectorAll('*')`, which is every *descendant*
+    // -- so a section whose text sits directly on the section element, with no
+    // child to carry it, contributed no ink at all. Three of the eight
+    // sections are like that: #clock, #date and #stale-badge. The overlap
+    // check has therefore never been able to see the clock, the date, or the
+    // badge collide with anything, in a file whose entire purpose is to catch
+    // exactly that -- and it was found by trying a thirteen-letter Portuguese
+    // word for STALE, watching it land on top of the weather card's title,
+    // and being told the pass was clean.
+    //
+    // Document order is kept, because the report reads better when a
+    // collision names the two things in the order somebody would look for
+    // them.
+    [root].concat(Array.from(root.querySelectorAll('*'))).forEach((el) => {
+        const pseudo = pseudoInk(el);
+        if (pseudo) {
+            found.push(pseudo);
+        }
         // Leaves only: a container's rect covers its children, which would
         // report every nesting as an overlap with itself.
         if (el.children.length) {

@@ -277,6 +277,40 @@ a theme to call: core applies it to whatever you put in the body.
 escapes the viewport at one of them is a certain failure rather than a check that fails on a
 Tuesday.
 
+## The words are not yours to choose
+
+Everything a person reads off the panel comes from a language table in `js/format.js`, and the
+language comes from the PC's config the same way the theme does (T6.11). `pt-BR` and `en` ship;
+`pt-BR` is what an unknown tag falls back to.
+
+```js
+const words = strings(payload && payload.language);
+words.titles.crypto   // 'CRIPTO'
+words.stale           // 'DEFASADO'
+words.weather[99]     // 'Trovoada com granizo forte'
+words.unplugged       // 'na bateria'
+words.tag             // 'pt-BR', for toLocaleDateString and anything else Intl
+```
+
+Read it once at the top of `render()` and keep it for that render. Both shipped themes do; both
+also re-apply their headings there rather than only in `mount()`, because the language can
+change under a running panel exactly as the theme can.
+
+- **Do not write a user-facing string in your theme.** Not in the JavaScript, and not in the
+  stylesheet either — `neon`'s card titles are `content: attr(data-title)` and the theme writes
+  the attribute. A literal is a word that only exists in one language, and nothing will tell
+  you.
+- **Do not read the device's locale.** `toLocaleDateString(undefined, …)` asks the WebView,
+  which on a phone in a stand says nothing about who is looking at the panel. `words.tag` is
+  the answer.
+- **Leave room for the other language.** The words are not the same length: `TEMPO` against
+  `WEATHER`, `DEFASADO` against `STALE`. If two of them share a strip — the stale badge and a
+  card title do, in `neon` — `check_layout.py --lang` is what tells you whether they still fit,
+  and it can see a `::before`'s ink since T6.11.
+
+Adding a language is a table in `format.js` and nothing else. A test asserts every table has
+every key the fallback has, so a half-translated one fails before it reaches a panel.
+
 ## The night profile is half yours
 
 Inside the window `server/config.toml` describes — `night_start` and `night_end`, 24-hour

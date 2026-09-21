@@ -7,7 +7,7 @@ const {
     formatPrice, formatRate, formatPair, formatChange, changeClass, weatherLabel, isNight,
     sparklinePath, formatTemp, formatBattery, batteryFields, tempClass,
     BATTERY_WARN_C, BATTERY_HOT_C,
-    formatRange, weatherGlyph, WEATHER_LABELS,
+    formatRange, weatherGlyph, strings, LANGUAGES, FALLBACK_LANGUAGE,
     overflowsBy, scrollPlan, worthScrolling,
     SCROLL_SECONDS_PER_ROW, SCROLL_MIN_TRAVEL_PX,
     offsetFor, burnInSchedule,
@@ -45,12 +45,80 @@ test('changeClass buckets positive, negative and zero', () => {
     assert.equal(changeClass(0), 'flat');
 });
 
-test('weatherLabel maps a known WMO code', () => {
-    assert.equal(weatherLabel(95), 'Thunderstorm');
+test('weatherLabel maps a known WMO code, in the panel\'s own language', () => {
+    assert.equal(weatherLabel(95), 'Trovoada');
+    assert.equal(weatherLabel(95, 'en'), 'Thunderstorm');
 });
 
-test('weatherLabel falls back to Unknown for an unmapped code', () => {
-    assert.equal(weatherLabel(9999), 'Unknown');
+test('weatherLabel falls back to a named condition for an unmapped code', () => {
+    assert.equal(weatherLabel(9999), 'Desconhecido');
+    assert.equal(weatherLabel(9999, 'en'), 'Unknown');
+});
+
+// --- T6.11: every word the panel shows -------------------------------------
+
+test('the panel speaks pt-BR unless the PC says otherwise', () => {
+    // The default is where the panel stands, not the language this repository
+    // is written in. Everything else here -- code, comments, docs, commits --
+    // is English; what a person reads from a chair is not code.
+    assert.equal(FALLBACK_LANGUAGE, 'pt-BR');
+    assert.equal(strings(undefined), LANGUAGES['pt-BR']);
+    assert.equal(strings(''), LANGUAGES['pt-BR']);
+});
+
+test('an unknown language falls back to the panel\'s own, not to English', () => {
+    // The same decision host.useTheme makes about an unknown theme name: a
+    // typo in a file on the PC must cost nothing anybody can see, rather than
+    // turning the whole panel into a language its owner did not ask for.
+    assert.equal(strings('klingon'), LANGUAGES['pt-BR']);
+    assert.equal(strings(42), LANGUAGES['pt-BR']);
+    assert.equal(strings(null), LANGUAGES['pt-BR']);
+});
+
+test('a bare or regional tag lands on the language it names', () => {
+    // A config that says "pt" is not wrong enough to ignore, and neither is
+    // one that says "en-GB" on a panel that only ships "en".
+    assert.equal(strings('pt'), LANGUAGES['pt-BR']);
+    assert.equal(strings('pt-PT'), LANGUAGES['pt-BR']);
+    assert.equal(strings('en-GB'), LANGUAGES.en);
+    assert.equal(strings('EN'), LANGUAGES.en);
+});
+
+test('each table answers to the tag it is filed under', () => {
+    // `words.tag` is what reaches Intl for the date, so a table filed under
+    // one tag and carrying another would render the panel's words in one
+    // language and its date in the other -- which is exactly the split T6.11
+    // exists to close.
+    for (const [tag, table] of Object.entries(LANGUAGES)) {
+        assert.equal(table.tag, tag);
+    }
+});
+
+test('every language says every word the panel needs', () => {
+    // The whole reason the strings are tables and not scattered lookups: a
+    // missing key would render as `undefined` in a corner of somebody's
+    // panel, and nothing else in this repo would notice. Compared against the
+    // fallback rather than against a hand-written list, so adding a word to
+    // the panel adds it to this check for free.
+    const reference = LANGUAGES[FALLBACK_LANGUAGE];
+    for (const [tag, table] of Object.entries(LANGUAGES)) {
+        assert.deepEqual(Object.keys(table).sort(), Object.keys(reference).sort(),
+                         `${tag} does not have the same keys as ${FALLBACK_LANGUAGE}`);
+        assert.deepEqual(Object.keys(table.weather).sort(),
+                         Object.keys(reference.weather).sort(),
+                         `${tag} does not name every WMO code`);
+        assert.deepEqual(Object.keys(table.titles).sort(),
+                         Object.keys(reference.titles).sort(),
+                         `${tag} does not name every card`);
+        for (const [key, value] of Object.entries(table)) {
+            if (typeof value === 'string') {
+                assert.ok(value.length > 0, `${tag}.${key} is empty`);
+            }
+        }
+        for (const [code, value] of Object.entries(table.weather)) {
+            assert.ok(value && value.length > 0, `${tag}.weather.${code} is empty`);
+        }
+    }
 });
 
 test('isNight is true well inside a night window that does not wrap midnight', () => {
@@ -283,8 +351,10 @@ test('formatBattery writes the level, the temperature and its own label', () => 
 test('formatBattery spells out only the interesting half of charging', () => {
     // Charging is the resting state on a desk powered from the PC's USB, so it
     // costs the line no width; running on the battery is the condition worth a
-    // word.
+    // word -- in the panel's language, which is the point of T6.11.
     assert.equal(formatBattery({ level: 64, tempC: 29, charging: false }),
+                 'BAT 64% \u00B7 29\u00B0C \u00B7 na bateria');
+    assert.equal(formatBattery({ level: 64, tempC: 29, charging: false }, 'en'),
                  'BAT 64% \u00B7 29\u00B0C \u00B7 unplugged');
 });
 
@@ -472,10 +542,11 @@ test('weatherGlyph names a picture for every code the panel can label', () => {
     // that fell through to 'unknown' here would be a condition the card can
     // name in words and cannot draw, which is a gap worth failing on.
     const NAMES = new Set(['clear', 'cloudy', 'rain', 'snow', 'storm', 'fog']);
-    for (const code of Object.keys(WEATHER_LABELS)) {
+    const labels = LANGUAGES[FALLBACK_LANGUAGE].weather;
+    for (const code of Object.keys(labels)) {
         const name = weatherGlyph(Number(code));
         assert.ok(NAMES.has(name),
-                  `code ${code} (${WEATHER_LABELS[code]}) mapped to ${name}`);
+                  `code ${code} (${labels[code]}) mapped to ${name}`);
     }
 });
 

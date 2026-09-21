@@ -86,6 +86,39 @@ public class DataPayloadTest {
     }
 
     @Test
+    public void theLanguageRidesQuotesThroughUntouched() throws Exception {
+        // T6.11, and this test exists because T6.4 shipped without its
+        // equivalent: merge() rebuilds the payload key by key, so a key
+        // nobody names there never reaches the phone. The failure is silent
+        // in every layer -- the server sends it, the page asks for one and
+        // finds none, and the panel speaks its default for ever.
+        String tagged = QUOTES.replace("\"stale\":false",
+                                       "\"stale\":false,\"language\":\"en\"");
+        assertEquals("en",
+                new JSONObject(DataPayload.merge(tagged, WEATHER)).getString("language"));
+
+        // And it survives withBattery, which re-parses and re-serialises the
+        // whole payload: a key that reached the page on a cold start could
+        // still be lost the moment a battery broadcast arrived.
+        String folded = DataPayload.withBattery(
+                DataPayload.merge(tagged, WEATHER),
+                "{\"level\":50,\"tempC\":30,\"charging\":true}");
+        assertEquals("en", new JSONObject(folded).getString("language"));
+    }
+
+    @Test
+    public void anAbsentOrEmptyLanguageLeavesTheKeyOutAltogether() throws Exception {
+        // The page reads a falsy tag as "use the panel's own language", so an
+        // empty string that survived would be a tag nothing answers to --
+        // the same outcome by a longer road.
+        assertFalse("no language key in, no language key out",
+                new JSONObject(DataPayload.merge(QUOTES, WEATHER)).has("language"));
+
+        String empty = QUOTES.replace("\"stale\":false", "\"stale\":false,\"language\":\"\"");
+        assertFalse(new JSONObject(DataPayload.merge(empty, WEATHER)).has("language"));
+    }
+
+    @Test
     public void theNightWindowRidesQuotesThroughUntouched() throws Exception {
         // T6.4, and this test exists because the feature shipped without it
         // once. The payload is rebuilt key by key rather than patched, so a

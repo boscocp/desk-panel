@@ -380,10 +380,18 @@ body {
     }
 }
 
-/* Card titles come from CSS, not markup: app.js clears each section with
- * textContent = '' on every update, which would take a real element with it. */
+/* Card titles are still drawn by ::before, and since T6.11 the *word* is not
+ * in this file. renderWeather empties #weather on every payload, so a real
+ * <h2> in there would go with it -- which is why the title was a pseudo
+ * element in the first place -- and `attr()` keeps that while letting the word
+ * be data. theme.js writes data-title from the language table in format.js.
+ *
+ * A missing attribute renders as nothing rather than as the string "attr(...)",
+ * so a card whose title theme.js forgot loses its heading and keeps its box.
+ * That is the right failure: the panel stays readable and the gap is obvious. */
 .card-list::before,
 .card::before {
+    content: attr(data-title);
     flex: 0 0 auto;
     font-size: 20px;
     line-height: 1.2;
@@ -394,12 +402,11 @@ body {
     margin-bottom: 3px;
 }
 
-#quotes::before  { content: 'B3'; }
-#fx::before      { content: 'FX'; }
-#crypto::before  { content: 'CRYPTO'; }
-#weather::before { content: 'WEATHER'; }
-/* No DEVICE title: the battery is no longer a card, and formatBattery writes
- * its own three-character prefix instead. */
+/* The four words used to be here. They are in the language tables in
+ * web/js/format.js now (T6.11) and reach this file as data-title.
+ *
+ * No DEVICE title: the battery is no longer a card, and since T6.10 it draws
+ * a battery and a thermometer instead of labelling itself at all. */
 
 .row {
     display: flex;
@@ -839,10 +846,23 @@ body {
     right: 0;
     background: var(--down);
     color: var(--ground);
-    font-size: 20px;
+    /* 17px, down from 20, and the tracking and padding with it (T6.11).
+     *
+     * The badge shares its strip with the weather card's title, and neither
+     * word is fixed any more: STALE and WEATHER fit side by side and
+     * DEFASADO and TEMPO did not, by four pixels. Shrinking the badge is the
+     * right side to give, because the title is read every minute of every day
+     * and the badge is on screen for minutes a month -- and at 17px bold on a
+     * red fill it is still the loudest thing on the panel.
+     *
+     * The constraint this leaves behind is real and is worth knowing before
+     * adding a third language: the badge and the longest card title have to
+     * fit the weather card's width between them, and `check_layout.py` is
+     * what says whether they do -- it can see a ::before's ink since T6.11. */
+    font-size: 17px;
     font-weight: 700;
-    letter-spacing: 0.1em;
-    padding: 0 7px;
+    letter-spacing: 0.08em;
+    padding: 0 6px;
     border-radius: 0 3px 0 3px;
     /* The one glow meant to be noticed rather than felt. STALE is the only
      * thing on this panel that says something is wrong, and it appears in the

@@ -43,6 +43,12 @@
     // arrangement is the same one the neon theme uses -- it has to be, because
     // the rule it obeys is "a card must not eat a row in silence", and that is
     // a rule about the panel and not about a look.
+    // The words this render is drawing in (T6.11). Set at the top of render()
+    // from the payload's `language`, exactly as the neon theme does it: a
+    // field rather than an argument threaded through every function, because
+    // most of them would take it and not use it.
+    let words = strings(null);
+
     function column(id, title) {
         const section = el('section', id, 'col');
         const heading = el('h2', null, 'col-title');
@@ -60,7 +66,7 @@
         const clock = el('div', 'clock');
         const date = el('div', 'date');
         const stale = el('div', 'stale-badge');
-        stale.textContent = 'STALE';
+        stale.textContent = words.stale;
         stale.hidden = true;
 
         const header = el('header', null, 'header');
@@ -70,10 +76,10 @@
         // before the buttons do.
         const shortcuts = el('div', 'shortcuts');
 
-        const quotes = column('quotes', 'B3');
-        const fx = column('fx', 'FX');
-        const crypto = column('crypto', 'Crypto');
-        const weather = column('weather', 'Weather');
+        const quotes = column('quotes', words.titles.quotes);
+        const fx = column('fx', words.titles.fx);
+        const crypto = column('crypto', words.titles.crypto);
+        const weather = column('weather', words.titles.weather);
 
         const grid = el('div', null, 'grid');
         grid.append(quotes.section, fx.section, crypto.section, weather.section);
@@ -190,13 +196,13 @@
         const range = el('div', null, 'w-range');
         range.textContent = formatRange(weather.minC, weather.maxC);
         const cond = el('div', null, 'w-cond');
-        cond.textContent = weatherLabel(weather.code);
+        cond.textContent = words.weather[weather.code] || words.unknown;
         els.weather.append(city, temp, range, cond);
     }
 
     function renderBattery(battery) {
         els.battery.textContent = '';
-        const text = formatBattery(battery);
+        const text = formatBattery(battery, words.tag);
         if (!text) {
             return;
         }
@@ -206,7 +212,23 @@
     }
 
     function render(payload, root) {
+        // Before ensure(), which may mount and which reads `words` for the
+        // column headings and the badge (T6.11).
+        words = strings(payload && payload.language);
         ensure(root);
+        // The headings are built by mount() and the language can change under
+        // a running panel, so they are refreshed here as well -- the same
+        // thing the neon theme does with its data-title attributes. Found by
+        // the id the column was built with rather than kept in `els`, which
+        // would be a fifth reference to the same four sections for the sake
+        // of four querySelector calls a minute.
+        for (const id of Object.keys(words.titles)) {
+            const heading = root.querySelector(`#${id} .col-title`);
+            if (heading) {
+                heading.textContent = words.titles[id];
+            }
+        }
+        els.stale.textContent = words.stale;
         if (!payload) {
             return;
         }
@@ -226,7 +248,13 @@
         // HH:MM:SS, like every theme: native reads this string by id to prove
         // the page rendered (docs/THEMING.md).
         els.clock.textContent = `${hours}:${minutes}:${seconds}`;
-        els.date.textContent = now.toLocaleDateString(undefined, {
+        // The language the PC asked for, not the host's (T6.11). `undefined`
+        // means "whatever this runtime thinks", which on the device is the
+        // phone's system locale and in a browser is the developer's -- so the
+        // panel used to say MONDAY, FEBRUARY 23 on a desk in Brazil whose
+        // every other word was Portuguese, and the two would drift apart
+        // again the moment somebody changed one of them.
+        els.date.textContent = now.toLocaleDateString(words.tag, {
             weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
         });
     }
