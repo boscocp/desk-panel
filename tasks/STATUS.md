@@ -5,6 +5,13 @@ run its acceptance command, then come back and update this table.
 
 A coding task is not `done` until its paired test task is green.
 
+**"Execute the next wave" is a standing instruction**, not a question: take what the latest
+`## Resuming after (wave N)` section recommends, run it to the merge, and stop only for
+something critical. The protocol is in [`CLAUDE.md`](../CLAUDE.md); what this loop has cost and
+caught, wave by wave, is in [`docs/LEARNING-REPORT.md`](../docs/LEARNING-REPORT.md), and each
+wave leaves a note in [`docs/harness-notes/`](../docs/harness-notes/) that `make lint-notes`
+requires.
+
 Legend: `todo` · `wip` · `blocked` · `done`
 
 Two conventions the task files now carry, both enforced by `make lint-tasks`:
