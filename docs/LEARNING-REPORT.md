@@ -74,9 +74,11 @@ Everything else in this report is about what happens when part of that structure
 because that is when the human has to type again.
 
 The remaining prompts in the execution window were not wave commands at all: a brapi token, a
-question about Bluetooth and battery, a cable reconnected, two feature requests that became task
-files (T6.8, T8.1, T8.2). **Feature requests arrive as task files, not as instructions inside a
-wave** — that is why they cost one prompt each and nothing afterwards.
+question about Bluetooth and battery, a cable reconnected, and feature requests that became task
+files (T6.8, T8.1, T8.2, and later T6.9–T6.11). **Feature requests arrive as task files, not as
+instructions inside a wave** — that is why they cost one prompt each and nothing afterwards, and
+wave 17 is the first wave built entirely from them rather than from the backlog: asked for from
+the chair, in Portuguese, while the panel was on.
 
 ## 1. The finding
 
@@ -170,6 +172,14 @@ most expensive class in the record, and it has five distinct shapes:
    comment. Replaced with a parse.
 5. **The criterion invalidated by a later move.** Wave 13 repaired four, and one of them —
    T6.1's — **had been failing on `main` since T6.5, five waves earlier, with nobody looking.**
+6. **The measurement that is blind where the feature lives.** `e2e/layout/measure.js` compares
+   ink against ink, deliberately, because two sections are allowed to share a rectangle. Wave 17
+   found it had never been able to see two whole categories of ink: a `::before` has **no DOM
+   node**, so card titles were never measured, and the walk started at a section's *descendants*,
+   so `#clock`, `#date` and `#stale-badge` — **three of the eight sections** — contributed
+   nothing at all. The overlap check had never been able to see the clock collide with anything.
+   It surfaced only because somebody typed a thirteen-letter Portuguese word for STALE, watched
+   it land squarely on another label, and was told the pass was clean.
 
 **The rule that is not enough, and the rule that follows.** "Every acceptance criterion is a
 command with an exit code" is load-bearing: T0.5 found **28 of 36 blocks were not commands**, and
@@ -231,7 +241,7 @@ Only what is cited. `—` means not recorded, which is itself a finding.
 | 14 | #19 | overflow + weather | +1,806 / −68 | **7** | T6.6's criterion could not fail, and asked for the wrong thing |
 | 15 | #20 | glow, burn-in shift | +1,977 / −33 | two rounds: **4, then 7** | a test that passed only in some timezones; a table whose comment claimed a property it did not have |
 | 16 | #21 | night profile, login-scope tests | +2,372 / −50 | **4, all real** | T6.4's acceptance could never have passed |
-| 17 | open | scroll goes round, battery icons | — | — | — |
+| 17 | #22 | scroll loop, icons, localisation | +1,898 / −194 | in review at the time of writing | `measure.js` had never measured three of the panel's eight sections |
 
 There is no wave 3 or 5 in the record; the numbering has gaps, and the "Resuming after"
 sections in `STATUS.md` are the authority. Diffs are `gh pr list --json additions,deletions`,
@@ -329,6 +339,13 @@ available in this loop — a confirmation round costs more than the step it guar
 - the recommendation itself turns out to be wrong. Then fix the task file, say so in one line,
   and keep going — that correction *is* the work, and §3.1 is the record of how often it is
   needed.
+
+**When the record genuinely has no answer, ask once and ask batched.** Wave 17 put three
+decisions to the human as a single question each — where the language lives, how the scroll loop
+closes its seam, whether the icons are SVG or emoji — because none of them was in any file. All
+three came back as the recommended option, which is the argument for recommending rather than
+enumerating: the cost of asking is one round trip, and the cost of asking about something the
+record already settles is the same round trip for nothing.
 
 **The corollary is the one worth internalising.** If a wave's result is decided by the previous
 wave's "Resuming after" section rather than by the prompt, then the last act of every wave —
