@@ -5,10 +5,11 @@ const assert = require('node:assert/strict');
 
 const {
     formatPrice, formatRate, formatPair, formatChange, changeClass, weatherLabel, isNight,
-    sparklinePath, formatTemp, formatBattery, tempClass, BATTERY_WARN_C, BATTERY_HOT_C,
-    formatRange, weatherGlyph, WEATHER_LABELS,
+    sparklinePath, formatTemp, formatBattery, batteryFields, tempClass,
+    BATTERY_WARN_C, BATTERY_HOT_C,
+    formatRange, weatherGlyph, strings, LANGUAGES, FALLBACK_LANGUAGE,
     overflowsBy, scrollPlan, worthScrolling,
-    SCROLL_SECONDS_PER_ROW, SCROLL_MOVING_FRACTION, SCROLL_MIN_TRAVEL_PX,
+    SCROLL_SECONDS_PER_ROW, SCROLL_MIN_TRAVEL_PX, SCROLL_MIN_HIDDEN_ROWS,
     offsetFor, burnInSchedule,
     BURN_IN_OFFSETS, BURN_IN_STEP_MINUTES, BURN_IN_AMPLITUDE_PX,
 } = require('../js/format.js');
@@ -44,12 +45,80 @@ test('changeClass buckets positive, negative and zero', () => {
     assert.equal(changeClass(0), 'flat');
 });
 
-test('weatherLabel maps a known WMO code', () => {
-    assert.equal(weatherLabel(95), 'Thunderstorm');
+test('weatherLabel maps a known WMO code, in the panel\'s own language', () => {
+    assert.equal(weatherLabel(95), 'Trovoada');
+    assert.equal(weatherLabel(95, 'en'), 'Thunderstorm');
 });
 
-test('weatherLabel falls back to Unknown for an unmapped code', () => {
-    assert.equal(weatherLabel(9999), 'Unknown');
+test('weatherLabel falls back to a named condition for an unmapped code', () => {
+    assert.equal(weatherLabel(9999), 'Desconhecido');
+    assert.equal(weatherLabel(9999, 'en'), 'Unknown');
+});
+
+// --- T6.11: every word the panel shows -------------------------------------
+
+test('the panel speaks pt-BR unless the PC says otherwise', () => {
+    // The default is where the panel stands, not the language this repository
+    // is written in. Everything else here -- code, comments, docs, commits --
+    // is English; what a person reads from a chair is not code.
+    assert.equal(FALLBACK_LANGUAGE, 'pt-BR');
+    assert.equal(strings(undefined), LANGUAGES['pt-BR']);
+    assert.equal(strings(''), LANGUAGES['pt-BR']);
+});
+
+test('an unknown language falls back to the panel\'s own, not to English', () => {
+    // The same decision host.useTheme makes about an unknown theme name: a
+    // typo in a file on the PC must cost nothing anybody can see, rather than
+    // turning the whole panel into a language its owner did not ask for.
+    assert.equal(strings('klingon'), LANGUAGES['pt-BR']);
+    assert.equal(strings(42), LANGUAGES['pt-BR']);
+    assert.equal(strings(null), LANGUAGES['pt-BR']);
+});
+
+test('a bare or regional tag lands on the language it names', () => {
+    // A config that says "pt" is not wrong enough to ignore, and neither is
+    // one that says "en-GB" on a panel that only ships "en".
+    assert.equal(strings('pt'), LANGUAGES['pt-BR']);
+    assert.equal(strings('pt-PT'), LANGUAGES['pt-BR']);
+    assert.equal(strings('en-GB'), LANGUAGES.en);
+    assert.equal(strings('EN'), LANGUAGES.en);
+});
+
+test('each table answers to the tag it is filed under', () => {
+    // `words.tag` is what reaches Intl for the date, so a table filed under
+    // one tag and carrying another would render the panel's words in one
+    // language and its date in the other -- which is exactly the split T6.11
+    // exists to close.
+    for (const [tag, table] of Object.entries(LANGUAGES)) {
+        assert.equal(table.tag, tag);
+    }
+});
+
+test('every language says every word the panel needs', () => {
+    // The whole reason the strings are tables and not scattered lookups: a
+    // missing key would render as `undefined` in a corner of somebody's
+    // panel, and nothing else in this repo would notice. Compared against the
+    // fallback rather than against a hand-written list, so adding a word to
+    // the panel adds it to this check for free.
+    const reference = LANGUAGES[FALLBACK_LANGUAGE];
+    for (const [tag, table] of Object.entries(LANGUAGES)) {
+        assert.deepEqual(Object.keys(table).sort(), Object.keys(reference).sort(),
+                         `${tag} does not have the same keys as ${FALLBACK_LANGUAGE}`);
+        assert.deepEqual(Object.keys(table.weather).sort(),
+                         Object.keys(reference.weather).sort(),
+                         `${tag} does not name every WMO code`);
+        assert.deepEqual(Object.keys(table.titles).sort(),
+                         Object.keys(reference.titles).sort(),
+                         `${tag} does not name every card`);
+        for (const [key, value] of Object.entries(table)) {
+            if (typeof value === 'string') {
+                assert.ok(value.length > 0, `${tag}.${key} is empty`);
+            }
+        }
+        for (const [code, value] of Object.entries(table.weather)) {
+            assert.ok(value && value.length > 0, `${tag}.weather.${code} is empty`);
+        }
+    }
 });
 
 test('isNight is true well inside a night window that does not wrap midnight', () => {
@@ -234,6 +303,46 @@ test('formatTemp keeps one decimal and does not round a real zero away', () => {
 // something confidently wrong: a missing reading has to read as missing, and
 // the temperature has to keep the tenth the broadcast carries.
 
+// T6.10: the corner draws a battery and a thermometer instead of writing BAT
+// and a degree sign, so the theme needs the pieces rather than the sentence.
+// formatBattery composes its string out of these, which is what stops the two
+// disagreeing about what the line says.
+test('batteryFields hands a theme the three pieces of the line', () => {
+    assert.deepEqual(batteryFields({ level: 87, tempC: 31.5, charging: true }),
+                     { level: '87%', temp: '31.5\u00B0C', unplugged: false });
+});
+
+test('batteryFields reports unplugged only when the phone said so', () => {
+    // `=== false`, not `!charging`: a payload with no charging key has not
+    // said the phone is on battery, and the corner must not claim it has.
+    assert.equal(batteryFields({ level: 50, tempC: 30, charging: false }).unplugged, true);
+    assert.equal(batteryFields({ level: 50, tempC: 30, charging: true }).unplugged, false);
+    assert.equal(batteryFields({ level: 50, tempC: 30 }).unplugged, false);
+});
+
+test('batteryFields says null when there is nothing worth a corner', () => {
+    // Distinct from a row of absences: the panel shows an empty corner before
+    // the first battery broadcast, not a battery icon beside a dash.
+    assert.equal(batteryFields(null), null);
+    assert.equal(batteryFields({}), null);
+    assert.equal(batteryFields({ level: NaN }), null);
+    assert.equal(batteryFields({ level: '87' }), null);
+});
+
+test('batteryFields separates an absent temperature from a zero one', () => {
+    assert.equal(batteryFields({ level: 87, charging: true }).temp, null);
+    // Zero is a temperature and not an absence -- a phone outdoors in winter.
+    assert.equal(batteryFields({ level: 87, tempC: 0, charging: true }).temp, '0\u00B0C');
+});
+
+test('formatBattery is built from the same fields, so the two cannot drift', () => {
+    const battery = { level: 64, tempC: 29, charging: false };
+    const fields = batteryFields(battery);
+    const text = formatBattery(battery);
+    assert.ok(text.includes(fields.level), text);
+    assert.ok(text.includes(fields.temp), text);
+});
+
 test('formatBattery writes the level, the temperature and its own label', () => {
     assert.equal(formatBattery({ level: 87, tempC: 31.5, charging: true }),
                  'BAT 87% \u00B7 31.5\u00B0C');
@@ -242,8 +351,10 @@ test('formatBattery writes the level, the temperature and its own label', () => 
 test('formatBattery spells out only the interesting half of charging', () => {
     // Charging is the resting state on a desk powered from the PC's USB, so it
     // costs the line no width; running on the battery is the condition worth a
-    // word.
+    // word -- in the panel's language, which is the point of T6.11.
     assert.equal(formatBattery({ level: 64, tempC: 29, charging: false }),
+                 'BAT 64% \u00B7 29\u00B0C \u00B7 na bateria');
+    assert.equal(formatBattery({ level: 64, tempC: 29, charging: false }, 'en'),
                  'BAT 64% \u00B7 29\u00B0C \u00B7 unplugged');
 });
 
@@ -332,35 +443,46 @@ test('overflowsBy treats an unusable measurement as no overflow', () => {
 });
 
 test('scrollPlan says do not scroll at the boundary, and does one row past it', () => {
-    assert.equal(scrollPlan(5, 5, 4, 0.7), null);
-    const plan = scrollPlan(6, 5, 4, 0.7);
+    assert.equal(scrollPlan(5, 5, 16), null);
+    const plan = scrollPlan(6, 5, 16);
     assert.equal(plan.hidden, 1);
-    // One hidden row travels for one row's worth of seconds; the cycle is
-    // longer than the travel by whatever the keyframes hold at the two ends.
-    assert.equal(plan.seconds, Math.round((4 / 0.7) * 100) / 100);
 });
 
-test('scrollPlan spends the theme seconds per hidden row', () => {
-    // Six rows hidden at four seconds each is 24 seconds of travel, in a cycle
-    // that also holds at both ends.
-    const plan = scrollPlan(9, 3, 4, 0.7);
-    assert.equal(plan.hidden, 6);
-    assert.ok(Math.abs(plan.seconds * 0.7 - 24) < 0.05,
-              `expected ~24s of travel, got ${plan.seconds * 0.7}`);
+test('a pass is the whole list, not the hidden part of it', () => {
+    // T6.9 turned the card round: it used to walk down as far as the hidden
+    // rows and come back, and it now goes round and round past a seam the
+    // theme has made invisible by drawing the list twice. So the pass is the
+    // list, and two cards showing nine rows move at the same speed whether
+    // one row is hidden or five -- which is what somebody watching the panel
+    // would expect, and was not true before.
+    assert.equal(scrollPlan(9, 3, 16).seconds, 9 * 16);
+    assert.equal(scrollPlan(9, 8, 16).seconds, 9 * 16);
+    // And the hidden count is still what decides whether to move at all.
+    assert.equal(scrollPlan(9, 3, 16).hidden, 6);
+    assert.equal(scrollPlan(9, 8, 16).hidden, 1);
 });
 
-test('scrollPlan falls back to its own numbers when the theme sets none', () => {
+test('the shipped speed is a quarter of what T6.6 scrolled at', () => {
+    // The one number this change is actually about, pinned so that "a quarter"
+    // is a claim with a check under it rather than a sentence in a commit
+    // message. Speed in pixels per second is rowHeight / secondsPerRow on
+    // either design -- T6.6 spent 4s of *travel* per hidden row, and this
+    // spends 16s per row of a pass that travels the whole list -- so the two
+    // are comparable by this constant alone.
+    assert.equal(SCROLL_SECONDS_PER_ROW, 16);
+});
+
+test('scrollPlan falls back to its own number when the theme sets none', () => {
     // getComputedStyle on a custom property a theme never declared parses to
     // NaN, which must not become a NaN-second animation.
-    const plan = scrollPlan(6, 5, NaN, NaN);
-    assert.equal(plan.seconds,
-                 Math.round((SCROLL_SECONDS_PER_ROW / SCROLL_MOVING_FRACTION) * 100) / 100);
-    assert.deepEqual(scrollPlan(6, 5, 0, 0), plan);
-    assert.deepEqual(scrollPlan(6, 5, -4, 2), plan);
+    const plan = scrollPlan(6, 5, NaN);
+    assert.equal(plan.seconds, 6 * SCROLL_SECONDS_PER_ROW);
+    assert.deepEqual(scrollPlan(6, 5, 0), plan);
+    assert.deepEqual(scrollPlan(6, 5, -4), plan);
 });
 
 test('a refresh that changes no rows produces the identical plan, so the scroll is not reset', () => {
-    // This is step 4 of the task, stated where it can be tested. window.onData
+    // This is step 4 of T6.6, stated where it can be tested. window.onData
     // replaces every row in the card every 60s; the scroll survives that for
     // two reasons, and this is the second of them.
     //
@@ -375,12 +497,12 @@ test('a refresh that changes no rows produces the identical plan, so the scroll 
     // no clock, no random, no accumulating state. A plan that drifted by a
     // hundredth of a second per refresh would rewrite the declaration once a
     // minute, for ever.
-    const before = scrollPlan(9, 3.4, 4, 0.7);
-    const after = scrollPlan(9, 3.4, 4, 0.7);
+    const before = scrollPlan(9, 3.4, 16);
+    const after = scrollPlan(9, 3.4, 16);
     assert.deepEqual(after, before);
     // And the card that stopped overflowing stops moving, rather than keeping
     // an animation with a stale distance.
-    assert.equal(scrollPlan(3, 3.4, 4, 0.7), null);
+    assert.equal(scrollPlan(3, 3.4, 16), null);
 });
 
 // --- T6.8: the weather card -------------------------------------------------
@@ -420,10 +542,11 @@ test('weatherGlyph names a picture for every code the panel can label', () => {
     // that fell through to 'unknown' here would be a condition the card can
     // name in words and cannot draw, which is a gap worth failing on.
     const NAMES = new Set(['clear', 'cloudy', 'rain', 'snow', 'storm', 'fog']);
-    for (const code of Object.keys(WEATHER_LABELS)) {
+    const labels = LANGUAGES[FALLBACK_LANGUAGE].weather;
+    for (const code of Object.keys(labels)) {
         const name = weatherGlyph(Number(code));
         assert.ok(NAMES.has(name),
-                  `code ${code} (${WEATHER_LABELS[code]}) mapped to ${name}`);
+                  `code ${code} (${labels[code]}) mapped to ${name}`);
     }
 });
 
@@ -441,29 +564,59 @@ test('worthScrolling refuses a travel a pair of roundings could have invented', 
     // The device lays out at dpr 2.75 and clientHeight/scrollHeight are
     // integers, so a card whose rows exactly fill it can measure a pixel over.
     // A card that declared a scroll for that would hold a compositor layer and
-    // twitch one pixel every seventeen seconds for as long as the panel is on,
-    // and every check in e2e/layout would pass it: 1px is a real overflow as
-    // far as a measurement can tell.
-    assert.equal(worthScrolling(1), false);
-    assert.equal(worthScrolling(2), false);
-    assert.equal(worthScrolling(0), false);
+    // move for as long as the panel is on to reveal a pixel, and every check
+    // in e2e/layout would pass it: 1px is a real overflow as far as a
+    // measurement can tell.
+    assert.equal(worthScrolling(1, 26), false);
+    assert.equal(worthScrolling(2, 26), false);
+    assert.equal(worthScrolling(0, 26), false);
+});
+
+test('worthScrolling refuses a few pixels of phantom overflow on a real row', () => {
+    // **The case the review of T6.9 found**, and it is the same case as above
+    // with the price raised. The old design walked as far as the hidden pixels
+    // and came back, so five pixels of phantom overflow bought five pixels of
+    // twitch and a flat four-pixel floor was generous enough. The card goes
+    // round now: any overflow at all walks the whole list past the window for
+    // ever, so five pixels buys a card in permanent motion to reveal five
+    // pixels. Half a row is the floor, and 5 over a 26px row is under it.
+    assert.equal(worthScrolling(5, 26), false);
+    assert.equal(worthScrolling(12, 26), false);
+    assert.equal(worthScrolling(13, 26), true);
 });
 
 test('worthScrolling allows anything a genuinely hidden row could be', () => {
-    // A row is twenty-odd pixels tall on either theme, so the floor is nowhere
-    // near a real overflow.
-    assert.equal(worthScrolling(SCROLL_MIN_TRAVEL_PX), true);
-    assert.equal(worthScrolling(20), true);
-    assert.equal(worthScrolling(184), true);
+    assert.equal(worthScrolling(26, 26), true);
+    assert.equal(worthScrolling(184, 26), true);
+    // Two lines a row, as the plain theme draws them.
+    assert.equal(worthScrolling(48, 48), true);
+});
+
+test('worthScrolling falls back to the flat floor when a row cannot be measured', () => {
+    // rowHeight is 0 when there are no rows to divide by, and the themes hand
+    // that through rather than guarding at the call site. A bare pixel count
+    // is then the best answer available, which is what this used to be.
+    assert.equal(worthScrolling(SCROLL_MIN_TRAVEL_PX, 0), true);
+    assert.equal(worthScrolling(SCROLL_MIN_TRAVEL_PX - 1, 0), false);
+    assert.equal(worthScrolling(20, NaN), true);
+    assert.equal(worthScrolling(20, undefined), true);
+});
+
+test('the floor is half a row, stated where it can fail', () => {
+    // Half rather than a whole one, because the count that decides *whether*
+    // to scroll is already rows (overflowsBy): this is the second question,
+    // and refusing a card that really is hiding most of a row would be the
+    // opposite mistake.
+    assert.equal(SCROLL_MIN_HIDDEN_ROWS, 0.5);
 });
 
 test('worthScrolling treats an unusable measurement as not worth moving for', () => {
-    assert.equal(worthScrolling(NaN), false);
-    assert.equal(worthScrolling(undefined), false);
+    assert.equal(worthScrolling(NaN, 26), false);
+    assert.equal(worthScrolling(undefined, 26), false);
     // Infinity too: a measurement that came back unbounded is a broken
     // measurement, and the panel's answer to one is to stay still (the same
     // bargain overflowsBy takes with NaN).
-    assert.equal(worthScrolling(Infinity), false);
+    assert.equal(worthScrolling(Infinity, 26), false);
 });
 
 // --- The burn-in shift (T6.2) ----------------------------------------------

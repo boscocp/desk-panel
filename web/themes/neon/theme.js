@@ -26,6 +26,17 @@
     // The skeleton's elements, cached between renders. Null until mount().
     let els = null;
 
+    // The words this render is drawing in (T6.11). Set at the top of render()
+    // from the payload's `language`, which comes from the PC's config the same
+    // way `theme` does -- so it is never read before it has been set, and a
+    // panel that has not heard from the PC yet draws the panel's own default.
+    //
+    // A field rather than an argument threaded through nine functions: every
+    // one of them would take it and three would use it, which is the shape
+    // that gets a parameter quietly dropped in six months. `resumed` above is
+    // kept for the same reason and set in the same place.
+    let words = strings(null);
+
     // True for the length of one render: the panel has been dark, so the values
     // it is still showing are not evidence of anything and nothing may pulse
     // (T6.2). Core sets it -- see `context.resumed` in js/host.js -- because it
@@ -73,6 +84,14 @@
         const fx = el('section', 'fx', 'card-list');
         const crypto = el('section', 'crypto', 'card-list');
         const weather = el('section', 'weather', 'card');
+        // The titles are still drawn by ::before and they are no longer
+        // written there (T6.11). `content: attr(data-title)` lets the word be
+        // data while the box stays the stylesheet's, which is what keeps the
+        // original reason for using ::before at all: renderWeather empties
+        // #weather on every payload, and a real <h2> in there would go with
+        // it. Set here and refreshed in render(), because the language can
+        // change under a running panel exactly as the theme can.
+        applyTitles({ quotes, fx, crypto, weather });
 
         // Each list is three elements, not one, and the nesting is what makes
         // T6.6's scroll possible at all:
@@ -101,7 +120,7 @@
         // is what carried the border, the padding and the DEVICE label.
         const battery = el('section', 'battery');
         const stale = el('div', 'stale-badge');
-        stale.textContent = 'STALE';
+        stale.textContent = words.stale;
         stale.hidden = true;
 
         const panel = el('div', 'panel');
@@ -109,6 +128,16 @@
 
         root.append(sidebar, panel);
         els = { root, clock, date, lists, weather, battery, stale };
+    }
+
+    // The four card titles, as data on the sections ::before reads them from.
+    // Called from mount() and again from every render, because `language` is
+    // config on the PC and a human editing that file must not have to restart
+    // anything — the same promise `theme` makes (T3.12, ADR 0013).
+    function applyTitles(sections) {
+        for (const [id, section] of Object.entries(sections)) {
+            section.setAttribute('data-title', words.titles[id]);
+        }
     }
 
     // Cheap, and called on every render and tick. `root.contains` rather than
@@ -258,8 +287,7 @@
 
         const style = getComputedStyle(list.section);
         const plan = scrollPlan(rowCount, visibleRows,
-                                cssNumber(style, '--scroll-seconds-per-row'),
-                                cssNumber(style, '--scroll-moving-fraction'));
+                                cssNumber(style, '--scroll-seconds-per-row'));
 
         // Two questions, and the second is not the first one restated.
         // scrollPlan counts rows and says whether any are hidden;
@@ -273,7 +301,7 @@
         // card twitching in the corner of someone's eye every seventeen
         // seconds -- with every check in e2e/layout passing, because a pixel of
         // overflow is a real overflow as far as a measurement can tell.
-        if (!plan || !worthScrolling(content - available)) {
+        if (!plan || !worthScrolling(content - available, rowHeight)) {
             // Both halves matter. The attribute is what the stylesheet keys the
             // animation off, so a card that stopped overflowing stops moving;
             // the property is removed with it so nothing is left pointing at a
@@ -284,13 +312,48 @@
             return;
         }
 
+        // --- The seam (T6.9) ------------------------------------------------
+        //
+        // The card goes round now rather than walking down and back, and the
+        // way it does that is the oldest trick there is: the list is drawn
+        // twice and the box is moved by exactly one copy. When the first copy
+        // has left the top, the second is sitting precisely where it started,
+        // the animation restarts, and nothing on screen moved -- so the rows
+        // appear to rise for ever out of a card three rows tall.
+        //
+        // Cloned here rather than in renderList, and only once the plan says
+        // the card is actually going to move: a card that fits must not carry
+        // a second invisible copy of itself, and applyScroll is the only place
+        // that knows which is which. The clones are thrown away with the rest
+        // of the rows on the next refresh, because renderList empties the
+        // scroller before it rebuilds.
+        //
+        // They are also clones of rows that already carry their pulse class,
+        // so a value that just changed flashes in both copies -- which is
+        // what it must do, since either copy may be the one on screen.
+        const rows = Array.from(list.scroller.children);
+        for (const row of rows) {
+            list.scroller.appendChild(row.cloneNode(true));
+        }
+
+        // Measured, not computed, and that is the difference between a seam
+        // nobody can see and a one-pixel jolt every couple of minutes. The
+        // distance wanted is the *pitch* of one copy: the rows carry a border
+        // between them and not after the last one, so a copy inside a pair is
+        // one border taller than a copy on its own, and `scrollHeight` before
+        // cloning would be short by exactly that. The offset between a row and
+        // its clone is the pitch by construction, whatever the borders,
+        // margins and sub-pixel rounding happen to be.
+        const pitch = rows.length
+            ? list.scroller.children[rows.length].offsetTop - rows[0].offsetTop
+            : 0;
+
         // Written on every refresh, and on a refresh that changed no rows these
         // are the same two strings as last time -- so the declaration does not
         // change, and a CSS animation whose declaration does not change is not
         // restarted. That, plus a scroller element mount() never replaces, is
         // the whole of step 4.
-        list.scroller.style.setProperty('--scroll-distance',
-                                        `${Math.round(content - available)}px`);
+        list.scroller.style.setProperty('--scroll-distance', `${Math.round(pitch)}px`);
         list.scroller.style.setProperty('--scroll-seconds', `${plan.seconds}s`);
         // On the section rather than on the scroller, because it says something
         // about the card and not about the moving box: e2e/layout/measure.js
@@ -336,20 +399,155 @@
     // member of the set and lands here: a code open-meteo adds next year is
     // still named in full by the label underneath, and a made-up picture would
     // be the only thing on this panel that was not true.
-    function renderGlyph(name) {
-        const d = GLYPHS[name];
+    // The panel's second icon set (T6.10). The battery line used to label its
+    // two numbers with the word BAT and a degree sign, which is four
+    // characters of the widest thing in the corner spent saying what a
+    // fourteen-pixel picture says at a glance from across the room.
+    //
+    // Same 24-unit box and same stroke-only construction as the weather
+    // glyphs above, so they take the card's ink and never need a palette --
+    // which is what makes the battery line's three temperature colours
+    // (T5.4) colour the icons too, for free.
+    const ICONS = {
+        // A cell lying on its side, drawn as an outline with a solid terminal
+        // standing clear of it on the right.
+        //
+        // **Second cut**, because the first was reported as hard to read from
+        // the chair and it is worth saying exactly why. The body ran from 2.4
+        // to 16.8 and the charge was drawn to its inner edge, so above about
+        // 60% the fill met the outline and the whole thing read as one solid
+        // lozenge -- a pill, not a battery. The terminal was a 2.8-unit stroke
+        // one and a half pixels off the body, which at this size disappeared
+        // into it.
+        //
+        // So: the charge keeps a visible gap inside the outline at every level
+        // (see renderBatteryIcon), and the terminal is a filled rounded
+        // rectangle with real air around it rather than a tick. A battery is
+        // recognised by its silhouette -- a long box with a small nub -- and
+        // the nub is the half that was missing.
+        battery: 'M3.6 7.6h11.8a1.8 1.8 0 0 1 1.8 1.8v5.2a1.8 1.8 0 0 1-1.8 1.8H3.6'
+               + 'a1.8 1.8 0 0 1-1.8-1.8V9.4a1.8 1.8 0 0 1 1.8-1.8z',
+        batteryCap: 'M19.2 10.2h1.2a.8.8 0 0 1 .8.8v2a.8.8 0 0 1-.8.8h-1.2z',
+
+        // Bulb, column and three scale marks.
+        //
+        // **Second cut**, for the same reason. The first was an outline bulb
+        // with a hairline stem through it, which at this size is a keyhole or
+        // a lowercase i -- there was nothing in it that says *thermometer*
+        // except the proportion. What says it is the silhouette plus two
+        // things the outline did not have: a **filled** bulb and column, which
+        // is what mercury looks like, and a scale down one side, which nothing
+        // else on a panel has.
+        thermometer: 'M12 3a2.4 2.4 0 0 1 2.4 2.4v7.4a4.4 4.4 0 1 1-4.8 0V5.4A2.4 2.4 0 0 1 12 3z',
+        thermometerTicks: ['M15.6 7.4h2.2', 'M15.6 10.2h1.5', 'M15.6 13h2.2'],
+    };
+
+    // One <svg> with one path in it. Both icon sets go through this: the only
+    // things that differ are the drawing and the class, and a second copy of
+    // the namespace incantation is how the two sets start drifting.
+    function svgIcon(d, className) {
         if (!d) {
             return null;
         }
         const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.setAttribute('class', 'w-glyph');
+        svg.setAttribute('class', className);
         svg.setAttribute('viewBox', '0 0 24 24');
-        // The label beside it says the same thing in words, so the picture is
+        // The value beside it says the same thing, so the picture is
         // decoration to anything that reads the DOM aloud.
         svg.setAttribute('aria-hidden', 'true');
+        svg.appendChild(svgPath(d, null));
+        return svg;
+    }
+
+    // Shared by the icon builders below, which add a second and a third path
+    // to an <svg> svgIcon has already made -- a filled terminal, a scale.
+    function svgPath(d, className) {
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path.setAttribute('d', d);
-        svg.appendChild(path);
+        if (className) {
+            path.setAttribute('class', className);
+        }
+        return path;
+    }
+
+    // A <rect> in the SVG namespace, which `document.createElement` cannot
+    // make: an HTML <rect> inside an <svg> is parsed, kept, and never drawn.
+    function svgRect(x, y, width, height, rx, className) {
+        const r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        r.setAttribute('x', String(x));
+        r.setAttribute('y', String(y));
+        r.setAttribute('width', String(width));
+        r.setAttribute('height', String(height));
+        r.setAttribute('rx', String(rx));
+        r.setAttribute('class', className);
+        return r;
+    }
+
+    function renderGlyph(name) {
+        return svgIcon(GLYPHS[name], 'w-glyph');
+    }
+
+    // The battery icon, with its charge drawn inside it (T6.10).
+    //
+    // The bar is the one place this set departs from the weather glyphs, and
+    // it is the reason the icon is worth more than the word it replaced: a
+    // filled outline is read before a two-digit number is, from the distance
+    // this panel is actually looked at. It says the same thing the number
+    // says, which is exactly what the sparkline does beside a price.
+    //
+    // **The gap is the second cut, and it is the whole of the fix.** The bar
+    // used to run to the outline's inner edge, so above about 60% it met the
+    // outline and the icon became one solid lozenge -- which is what got it
+    // reported as unreadable from the chair. It is inset on every side now, so
+    // there is always a line of unlit ground between the charge and the wall
+    // holding it, at 1% and at 100% alike. That gap is what makes the shape a
+    // container with something in it rather than a filled pill.
+    //
+    // Clamped, because a level over 100 arrives from a phone that has just
+    // been plugged in and a bar sticking out of its own battery looks like a
+    // rendering bug rather than a full charge.
+    function renderBatteryIcon(level) {
+        const svg = svgIcon(ICONS.battery, 'b-icon');
+        if (!svg) {
+            return null;
+        }
+        // The terminal, drawn rather than stroked: a nub is what a battery is
+        // recognised by, and a 2.8-unit hairline standing a pixel and a half
+        // off the body was invisible at this size.
+        svg.appendChild(svgPath(ICONS.batteryCap, 'b-solid'));
+
+        const fraction = Math.max(0, Math.min(1, level / 100));
+        if (fraction > 0) {
+            // The body's inner edge is not the path's coordinates -- a
+            // 1.8-unit stroke sits half outside the line it is drawn on --
+            // and the gap comes off that again. Inside runs 4.5..14.5 across
+            // and 10.3..13.7 down.
+            svg.appendChild(svgRect(4.5, 10.3,
+                                    Math.round(10 * fraction * 100) / 100,
+                                    3.4, 0.6, 'b-fill'));
+        }
+        return svg;
+    }
+
+    // The thermometer (T6.10): an outline, a filled bulb and column, and a
+    // scale down one side. The fill is what says mercury and the scale is
+    // what says instrument -- without either, an outline this size is a
+    // keyhole or a lowercase i, which is what the first cut was read as.
+    function renderThermometerIcon() {
+        const svg = svgIcon(ICONS.thermometer, 'b-icon');
+        if (!svg) {
+            return null;
+        }
+        svg.appendChild(svgRect(11.2, 7.5, 1.6, 8.5, 0.8, 'b-solid'));
+        const bulb = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        bulb.setAttribute('cx', '12');
+        bulb.setAttribute('cy', '16.6');
+        bulb.setAttribute('r', '2.5');
+        bulb.setAttribute('class', 'b-solid');
+        svg.appendChild(bulb);
+        for (const d of ICONS.thermometerTicks) {
+            svg.appendChild(svgPath(d, null));
+        }
         return svg;
     }
 
@@ -396,11 +594,11 @@
         const range = el('div', null, 'w-range');
         range.textContent = formatRange(weather.minC, weather.maxC);
 
-        // Kept, not replaced. Seven glyphs cannot say "Thunderstorm, heavy
-        // hail", and the label is what makes the card readable when the
+        // Kept, not replaced. Seven glyphs cannot say "Trovoada com granizo
+        // forte", and the label is what makes the card readable when the
         // picture is ambiguous -- rain and showers share one.
         const cond = el('div', null, 'w-cond');
-        cond.textContent = weatherLabel(weather.code);
+        cond.textContent = words.weather[weather.code] || words.unknown;
 
         body.append(city, main, range, cond);
         els.weather.appendChild(body);
@@ -413,19 +611,42 @@
     // broadcast arrives.
     function renderBattery(battery) {
         els.battery.textContent = '';
-        const text = formatBattery(battery);
-        if (!text) {
+        const fields = batteryFields(battery);
+        if (!fields) {
             return;
         }
         const line = el('div');
         // The whole line takes the colour, not just the number: at 20px in a
         // corner, a single re-coloured word is easy to miss and the
-        // temperature is right there to explain it.
+        // temperature is right there to explain it. The icons are stroked in
+        // currentColor, so they take the band's colour with the text.
         //
         // 'normal' is set as a class rather than left empty so the three bands
         // read as three states in the DOM; the stylesheet gives it nothing.
         line.className = tempClass(battery.tempC);
-        line.textContent = text;
+
+        // Icon, value, icon, value (T6.10). The word BAT and the ° are gone;
+        // what is left in the corner is two pictures and two numbers, which
+        // is the least this line can be and still say what it says.
+        const level = el('span', null, 'b-value');
+        level.textContent = fields.level;
+        line.append(...[renderBatteryIcon(battery.level)].filter(Boolean), level);
+
+        if (fields.temp) {
+            const temp = el('span', null, 'b-value');
+            temp.textContent = fields.temp;
+            line.append(...[renderThermometerIcon()].filter(Boolean), temp);
+        }
+
+        // Still a word, and deliberately: there is no picture for "this phone
+        // is now running its own battery down" that a stranger would read the
+        // way they read a battery outline, and getting it wrong is the one
+        // thing in this corner that matters (ADR 0014).
+        if (fields.unplugged) {
+            const note = el('span', null, 'b-note');
+            note.textContent = words.unplugged;
+            line.appendChild(note);
+        }
         els.battery.appendChild(line);
     }
 
@@ -433,8 +654,23 @@
     // built and the cards are empty, which is what the panel looked like in
     // that state before T6.7 too.
     function render(payload, root, context) {
+        // Before ensure(), which may mount and which reads `words` for the
+        // titles and the badge. Unconditional and before the early return, so
+        // a payload-less render still draws the skeleton in the right
+        // language and a render that throws halfway cannot leave the panel
+        // speaking the last payload's.
+        words = strings(payload && payload.language);
         ensure(root);
         resumed = !!(context && context.resumed);
+        // The language is the one thing here that can change without the
+        // markup changing, so it is reapplied rather than left to mount().
+        applyTitles({
+            quotes: els.lists.quotes.section,
+            fx: els.lists.fx.section,
+            crypto: els.lists.crypto.section,
+            weather: els.weather,
+        });
+        els.stale.textContent = words.stale;
         if (!payload) {
             return;
         }
@@ -457,7 +693,13 @@
         // rendered, and e2e/layout/measure.js asserts its shape.
         els.clock.textContent = `${hours}:${minutes}:${seconds}`;
 
-        els.date.textContent = now.toLocaleDateString(undefined, {
+        // The language the PC asked for, not the host's (T6.11). `undefined`
+        // means "whatever this runtime thinks", which on the device is the
+        // phone's system locale and in a browser is the developer's -- so the
+        // panel used to say MONDAY, FEBRUARY 23 on a desk in Brazil whose
+        // every other word was Portuguese, and the two would drift apart
+        // again the moment somebody changed one of them.
+        els.date.textContent = now.toLocaleDateString(words.tag, {
             weekday: 'long',
             year: 'numeric',
             month: 'long',

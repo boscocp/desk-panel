@@ -83,23 +83,25 @@
     --font: 'sans-serif-condensed', 'Roboto Condensed', 'Liberation Sans Narrow',
             'DejaVu Sans Condensed', 'Arial Narrow', system-ui, sans-serif;
 
-    /* --- How fast an overflowing card gives up its hidden rows (T6.6) -------
+    /* --- How fast an overflowing card gives up its hidden rows (T6.6, T6.9) --
      *
-     * Four seconds a row, and the number is here rather than in format.js
-     * because it is taste and a theme is where taste lives. This panel sits in
-     * someone's peripheral vision all day: at four seconds a row the movement
-     * is not noticeable unless it is looked at, and a card with three rows
-     * hidden still gives up all three inside a minute.
+     * Sixteen seconds a row, and the number is here rather than in format.js
+     * because it is taste and a theme is where taste lives. It is **a quarter
+     * of the speed this shipped at** (T6.9), and the reason is what T6.9
+     * changed underneath it: the card used to walk down as far as its hidden
+     * rows and come back, and it now goes round in one direction for as long
+     * as the panel is on. A movement with ends is one the eye stops watching;
+     * a movement that never ends is one it keeps returning to, and four
+     * seconds a row was chosen against the first.
      *
-     * The fraction is the part of one pass @keyframes card-scroll spends
-     * moving -- 70%, because it holds for 15% at each end so the top and the
-     * bottom of the card can actually be read. The two numbers are one
-     * decision and they are deliberately in the same file: theme.js reads both
-     * off this block and hands them to scrollPlan, which does the arithmetic
-     * and knows nothing about either. Change the keyframes below and this
-     * number changes with them. */
-    --scroll-seconds-per-row: 4;
-    --scroll-moving-fraction: 0.7;
+     * At sixteen it is slow enough to read as scenery from a chair two feet
+     * away, and a nine-row card still shows all nine inside two and a half
+     * minutes.
+     *
+     * There is no companion fraction any more. It described how much of a pass
+     * @keyframes card-scroll spent holding at the two ends so they could be
+     * read; a loop has no ends. */
+    --scroll-seconds-per-row: 16;
 }
 
 /* html's height, its black ground and the text-size-adjust guard are core
@@ -288,7 +290,19 @@ body {
  * it is motion for its own sake, and the clock and the weather card -- neither
  * of which is a .card-list -- can never acquire it from this rule. */
 .card-list[data-scroll] .scroller {
-    animation: card-scroll var(--scroll-seconds, 20s) ease-in-out infinite alternate;
+    /* `linear infinite`, and both words are the change T6.9 made.
+     *
+     * `linear` because a loop has no ends to ease into: an ease-in-out curve
+     * on a cycle that restarts where it began is a card that visibly slows
+     * down and speeds up at an arbitrary row, which is worse than not easing
+     * at all. Constant speed is also the only thing that makes the seam
+     * invisible -- the frame after the restart has to be indistinguishable
+     * from the frame before it, and that is only true if the velocity matches.
+     *
+     * No `alternate`. The card no longer comes back: theme.js has drawn the
+     * list twice and --scroll-distance is exactly one copy, so at the end of a
+     * pass the second copy is sitting where the first started. */
+    animation: card-scroll var(--scroll-seconds, 20s) linear infinite;
     /* Under the attribute, not on `.scroller` at large. `will-change` asks for
      * a compositor layer and keeps it, so declaring it unconditionally would
      * hold three layers open on a 3GB phone for three cards that are usually
@@ -298,13 +312,20 @@ body {
     will-change: transform;
 }
 
-/* `alternate`, so the card walks back up rather than snapping: a jump is the
- * one motion the eye cannot ignore. The holds at 0-15% and 85-100% are the
- * pause at each end -- long enough to read the row that just arrived -- and
- * they are what --scroll-moving-fraction above describes. */
+/* One copy of the list, travelled at a constant speed, for ever.
+ *
+ * --scroll-distance is the *pitch* of one copy and theme.js measures it rather
+ * than computing it: the rows carry a border between them and none after the
+ * last, so a copy sitting inside a pair is one border taller than a copy on
+ * its own. Being wrong by that one pixel would be a jolt every couple of
+ * minutes, which is exactly the motion this design exists to avoid.
+ *
+ * There is nothing here to hold at. T6.6's keyframes paused at 0-15% and
+ * 85-100% so the top and the bottom of the card could be read; a loop reaches
+ * every row on every pass, so the reading time is the pass itself. */
 @keyframes card-scroll {
-    0%, 15%   { transform: translateY(0); }
-    85%, 100% { transform: translateY(calc(-1 * var(--scroll-distance, 0px))); }
+    from { transform: translateY(0); }
+    to   { transform: translateY(calc(-1 * var(--scroll-distance, 0px))); }
 }
 
 /* --- A value that changed says so, once, briefly (T6.2 step 2) ------------
@@ -359,10 +380,18 @@ body {
     }
 }
 
-/* Card titles come from CSS, not markup: app.js clears each section with
- * textContent = '' on every update, which would take a real element with it. */
+/* Card titles are still drawn by ::before, and since T6.11 the *word* is not
+ * in this file. renderWeather empties #weather on every payload, so a real
+ * <h2> in there would go with it -- which is why the title was a pseudo
+ * element in the first place -- and `attr()` keeps that while letting the word
+ * be data. theme.js writes data-title from the language table in format.js.
+ *
+ * A missing attribute renders as nothing rather than as the string "attr(...)",
+ * so a card whose title theme.js forgot loses its heading and keeps its box.
+ * That is the right failure: the panel stays readable and the gap is obvious. */
 .card-list::before,
 .card::before {
+    content: attr(data-title);
     flex: 0 0 auto;
     font-size: 20px;
     line-height: 1.2;
@@ -373,12 +402,11 @@ body {
     margin-bottom: 3px;
 }
 
-#quotes::before  { content: 'B3'; }
-#fx::before      { content: 'FX'; }
-#crypto::before  { content: 'CRYPTO'; }
-#weather::before { content: 'WEATHER'; }
-/* No DEVICE title: the battery is no longer a card, and formatBattery writes
- * its own three-character prefix instead. */
+/* The four words used to be here. They are in the language tables in
+ * web/js/format.js now (T6.11) and reach this file as data-title.
+ *
+ * No DEVICE title: the battery is no longer a card, and since T6.10 it draws
+ * a battery and a thermometer instead of labelling itself at all. */
 
 .row {
     display: flex;
@@ -723,6 +751,87 @@ body {
 /* Above 40 degrees. Visible from across the room and still not an alarm: the
  * colour changes, nothing flashes, nothing moves, and the number that earned it
  * is right there in the same line. */
+/* --- The battery line's two icons (T6.10) -------------------------------- *
+ *
+ * The line was `BAT 87% · 31°C`; it is now two pictures and two numbers. Four
+ * characters of the widest thing in this corner were spent saying what a
+ * fourteen-pixel drawing says at a glance from across the room.
+ *
+ * Laid out as a flex row rather than left to the inline flow, because an
+ * inline <svg> sits on the text baseline and a 14px box hanging off a 20px
+ * line leaves the icons a pixel or two low with no way to say so. `center`
+ * puts each icon against the middle of the digits beside it.
+ */
+#battery > div {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+
+    /* Wrapping, and right-aligned, because the rule above this one depends on
+     * it: #battery is capped at 222px and its overflow story is that the line
+     * *wraps* into the two-line foot #weather reserves for it, rather than
+     * running out of the box to the left over the CRYPTO card's prices. A
+     * flex row does not wrap by default, so turning this div into one took
+     * that away -- and check_layout.py caught it immediately, at 289px of
+     * content in a 222px box with `unplugged` 52px outside the viewport.
+     *
+     * flex-end rather than the inherited `text-align: right`, which a flex
+     * container does not pass to its items: without it the second line would
+     * start at the left edge of a right-aligned box. */
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+/* 22px against the line's 20px type, which is smaller than the floor T6.3 sets
+ * for text and is allowed to be: that floor is about resolving letterforms,
+ * and there is nothing inside a battery outline to resolve.
+ *
+ * It took three goes. 14px read as a tick rather than an object; 18px put the
+ * icons at the cap height of the digits beside them, which is where the eye
+ * expects a *label* to sit and is still too small for a drawing with an inside
+ * to it. 22 is slightly taller than the digits, which is the point: these are
+ * pictures, and a picture that has to be resolved rather than recognised needs
+ * more room than a letter of the same nominal size. */
+.b-icon {
+    flex: 0 0 auto;
+    width: 22px;
+    height: 22px;
+    fill: none;
+    /* currentColor, which is what makes the icons take the temperature band's
+     * colour with the text (T5.4): the whole line is coloured, so a hot phone
+     * turns its thermometer red without this file knowing the bands exist. */
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+/* Everything in these two icons that is solid rather than drawn: the charge
+ * inside the battery, the battery's terminal, the thermometer's bulb and
+ * column. Filled shapes are what separate an icon from a diagram at this size
+ * -- the outline gives the silhouette and the fill gives it a substance the
+ * eye recognises before it resolves anything. `currentColor` throughout, so
+ * all of it takes the temperature band's colour with the text (T5.4). */
+.b-fill,
+.b-solid {
+    fill: currentColor;
+    stroke: none;
+}
+
+/* A little air after each value, so the next icon does not crowd the digits
+ * it is not labelling. The gap above handles the icon-to-value side. */
+.b-value + .b-icon {
+    margin-left: 5px;
+}
+
+/* The one word left in the corner. Dimmer than the numbers and never
+ * coloured by the temperature bands: it is about the charger, not the heat,
+ * and a red "unplugged" would read as a second alarm (ADR 0014). */
+.b-note {
+    color: var(--accent-dim);
+    letter-spacing: 0.06em;
+}
+
 #battery .warm {
     color: var(--warn);
 }
@@ -744,10 +853,23 @@ body {
     right: 0;
     background: var(--down);
     color: var(--ground);
-    font-size: 20px;
+    /* 17px, down from 20, and the tracking and padding with it (T6.11).
+     *
+     * The badge shares its strip with the weather card's title, and neither
+     * word is fixed any more: STALE and WEATHER fit side by side and
+     * DEFASADO and TEMPO did not, by four pixels. Shrinking the badge is the
+     * right side to give, because the title is read every minute of every day
+     * and the badge is on screen for minutes a month -- and at 17px bold on a
+     * red fill it is still the loudest thing on the panel.
+     *
+     * The constraint this leaves behind is real and is worth knowing before
+     * adding a third language: the badge and the longest card title have to
+     * fit the weather card's width between them, and `check_layout.py` is
+     * what says whether they do -- it can see a ::before's ink since T6.11. */
+    font-size: 17px;
     font-weight: 700;
-    letter-spacing: 0.1em;
-    padding: 0 7px;
+    letter-spacing: 0.08em;
+    padding: 0 6px;
     border-radius: 0 3px 0 3px;
     /* The one glow meant to be noticed rather than felt. STALE is the only
      * thing on this panel that says something is wrong, and it appears in the

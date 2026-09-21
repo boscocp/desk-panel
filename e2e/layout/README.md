@@ -31,6 +31,22 @@ python e2e/layout/check_layout.py --extra-css bigger.css     # try a size change
 `--extra-css` injects a stylesheet before measuring, so you can answer "would 24px type still
 fit?" without editing `web/` and without a rebuild.
 
+## One at a time, and that is not a suggestion
+
+Every check in this directory launches its own Firefox on a **fixed** Marionette port (2829,
+chosen so it does not collide with a browser the developer already has open). Fixed means two
+of them cannot run at once: the second Firefox cannot bind the port, and the second run's
+`connect()` attaches to the **first run's browser** instead of failing.
+
+What that looks like is not an error. It looks like one of the two runs quietly producing no
+output and no screenshots, and it reads exactly like a flake. Seen on 2026-09-21, when a second
+`check_layout.py` was started while the first was still sweeping; the first wrote nothing at
+all and the only visible symptom was a `magick` call three shell operators later complaining
+that a PNG did not exist.
+
+So: run them in sequence, including across terminals and agents. If a check produces nothing,
+look for another Firefox before looking at the page.
+
 ## What it measures
 
 Four things, because "it rendered" answers none of them and a screenshot only answers the

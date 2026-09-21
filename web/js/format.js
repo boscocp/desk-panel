@@ -177,17 +177,27 @@ function overflowsBy(rowCount, visibleRows) {
     return Math.max(0, Math.ceil(rowCount) - Math.floor(visibleRows));
 }
 
-// How long one pass takes, given the seconds a theme wants to spend per hidden
-// row and the fraction of the cycle its @keyframes block spends moving.
+// How long the card takes to walk past one row.
 //
-// The fraction is a parameter rather than a constant because it is a property
-// of CSS this file cannot see: the keyframes hold at each end so the top and
-// the bottom of the card can actually be read, and how long they hold is the
-// theme's taste. Passing it in keeps the two numbers in one file -- the
-// theme's stylesheet -- instead of splitting one decision across two languages
-// the way BATTERY_HOT_C and BLANK_AT_C are split.
-const SCROLL_SECONDS_PER_ROW = 4;
-const SCROLL_MOVING_FRACTION = 0.7;
+// **Sixteen, which is a quarter of the speed T6.6 shipped** (T6.9). Four
+// seconds a row was chosen against a card that walked down and came back; the
+// card now goes round and round in one direction for as long as the panel is
+// on, and a movement that never ends is a movement the eye keeps returning to
+// at four times that speed. At sixteen it is slow enough to be scenery and
+// still gives up a row every sixteen seconds, so the whole of a nine-row card
+// is on screen inside two and a half minutes.
+//
+// It is the *whole* list that moves now, not just the hidden part, so a pass
+// is rowCount * this rather than hidden * this. The two agree about speed in
+// pixels per second, which is the thing a reader actually experiences, and
+// that is why the number could be compared with the old one at all.
+//
+// There is no companion fraction any more. T6.6's keyframes held at each end
+// so the top and bottom of the card could be read, so the cycle was longer
+// than the travel and format.js had to be told by how much; a loop has no
+// ends to hold at. `--scroll-moving-fraction` is gone from both themes with
+// it.
+const SCROLL_SECONDS_PER_ROW = 16;
 
 // Below this, a card does not move however the row arithmetic came out.
 //
@@ -195,40 +205,68 @@ const SCROLL_MOVING_FRACTION = 0.7;
 // phone. `clientHeight` and `scrollHeight` are integers; the device lays out at
 // a device pixel ratio of 2.75, so a card whose rows exactly fill it can report
 // 102px of content in a 101px window. That is one hidden row by every count
-// above, and a travel of one pixel: the card would declare a scroll, hold a
-// compositor layer, and twitch a pixel back and forth every seventeen seconds
-// for as long as the panel is on. Nothing in e2e/layout would fail -- 1px is a
-// real overflow as far as the harness can tell -- so it would have shipped and
-// been visible only from the chair.
+// above, and the card would declare a scroll, hold a compositor layer, and move
+// for as long as the panel is on -- to reveal a pixel. Nothing in e2e/layout
+// would fail, because 1px is a real overflow as far as a measurement can tell,
+// so it would have shipped and been visible only from the chair.
 //
-// Four pixels, which is comfortably above the two a pair of integer roundings
-// can invent and far below the twenty-odd a genuinely hidden row is worth.
+// **T6.9 made the price of getting this wrong much higher, and the review of
+// T6.9 is what noticed.** Under T6.6 a card walked as far as its hidden pixels
+// and came back, so five pixels of phantom overflow bought five pixels of
+// twitch. The card now goes round: any overflow at all, however small, walks
+// the *entire list* past the window for ever. Four pixels was chosen as
+// "comfortably above the two a pair of integer roundings can invent and far
+// below the twenty-odd a genuinely hidden row is worth" -- deliberately letting
+// 5-20px through, because under the old design they were cheap. They are not
+// cheap any more.
+//
+// So the floor is a fraction of a row rather than a flat count of pixels, which
+// is what the sentence above was reaching for all along. Half a row is past
+// anything two integer roundings can invent at any dpr, and well under one
+// genuinely hidden row. The flat four stays as the floor for a caller that
+// cannot measure a row, which is the only case where a bare pixel count is
+// still the best available answer.
 const SCROLL_MIN_TRAVEL_PX = 4;
+const SCROLL_MIN_HIDDEN_ROWS = 0.5;
 
-// travelPx: how far the card would actually move, which only the theme can
-// measure. Pure and separate from scrollPlan because it is a different
-// question -- scrollPlan counts rows, this one asks whether the pixels those
-// rows came out to are worth moving for.
-function worthScrolling(travelPx) {
-    return Number.isFinite(travelPx) && travelPx >= SCROLL_MIN_TRAVEL_PX;
+// hiddenPx: how much of the list is out of sight, which only the theme can
+// measure. rowHeightPx: what one row of it is worth, for turning that into a
+// judgement rather than a number.
+//
+// Pure and separate from scrollPlan because it is a different question --
+// scrollPlan counts rows and says whether any are hidden, and this asks whether
+// what they came out to in pixels is worth putting a card in permanent motion
+// for.
+function worthScrolling(hiddenPx, rowHeightPx) {
+    if (!Number.isFinite(hiddenPx) || hiddenPx < SCROLL_MIN_TRAVEL_PX) {
+        return false;
+    }
+    if (!Number.isFinite(rowHeightPx) || rowHeightPx <= 0) {
+        return true;
+    }
+    return hiddenPx >= rowHeightPx * SCROLL_MIN_HIDDEN_ROWS;
 }
 
 // Returns null when nothing should move, or {hidden, seconds} when it should.
 // null rather than {hidden: 0}: "do not scroll" is a different answer from
 // "scroll by nothing", and a caller that has to check a field to tell them
 // apart eventually forgets to.
-function scrollPlan(rowCount, visibleRows, secondsPerRow, movingFraction) {
+//
+// `hidden` is still what decides *whether* to move -- a card showing every row
+// it has must not -- and it no longer decides how far or how long. The card
+// goes round: it walks the full list once per pass and the seam is invisible
+// because the theme has drawn the list twice (T6.9). So the pass is rowCount
+// long, and a card with one row hidden out of nine takes the same two and a
+// half minutes as one with five hidden, because both are showing the same
+// nine rows at the same speed.
+function scrollPlan(rowCount, visibleRows, secondsPerRow) {
     const hidden = overflowsBy(rowCount, visibleRows);
     if (hidden === 0) {
         return null;
     }
     const perRow = Number.isFinite(secondsPerRow) && secondsPerRow > 0
         ? secondsPerRow : SCROLL_SECONDS_PER_ROW;
-    const moving = Number.isFinite(movingFraction) && movingFraction > 0 && movingFraction <= 1
-        ? movingFraction : SCROLL_MOVING_FRACTION;
-    // The travel itself is hidden * perRow; the cycle is longer than the
-    // travel by whatever the keyframes hold at the two ends.
-    return { hidden: hidden, seconds: Math.round((hidden * perRow / moving) * 100) / 100 };
+    return { hidden: hidden, seconds: Math.round(rowCount * perRow * 100) / 100 };
 }
 
 // pct: number (e.g. 1.23 for +1.23%). Sign, one decimal, percent sign.
@@ -252,34 +290,136 @@ function changeClass(pct) {
     return pct > 0 ? 'up' : 'down';
 }
 
-// WMO weather interpretation codes (open-meteo, same table brapi's weather
-// proxy will pass through) mapped to a short human label.
-const WEATHER_LABELS = {
-    0: 'Clear sky',
-    1: 'Mainly clear',
-    2: 'Partly cloudy',
-    3: 'Overcast',
-    45: 'Fog',
-    48: 'Rime fog',
-    51: 'Light drizzle',
-    53: 'Drizzle',
-    55: 'Dense drizzle',
-    61: 'Light rain',
-    63: 'Rain',
-    65: 'Heavy rain',
-    71: 'Light snow',
-    73: 'Snow',
-    75: 'Heavy snow',
-    80: 'Light showers',
-    81: 'Showers',
-    82: 'Violent showers',
-    95: 'Thunderstorm',
-    96: 'Thunderstorm, hail',
-    99: 'Thunderstorm, heavy hail',
+// --- Every word the panel shows (T6.11) -------------------------------------
+//
+// The panel stands on a desk in Brazil and said "Light drizzle". The rule for
+// the rest of this repository is English everywhere -- code, comments, docs,
+// commit messages -- and none of that is what a person reads from a chair two
+// feet away, which is the one category that has to be in their language.
+//
+// **The language is config, exactly like the theme** (T3.12, ADR 0013). It
+// rides the payload from `server/config.toml` and defaults to pt-BR, so
+// changing it is editing a file on the PC and never a rebuild of the APK. The
+// device's own locale is deliberately *not* what decides: a phone in a stand
+// running the system in one language is not evidence about who is looking at
+// the panel, and there would be no way to ask for the other one.
+//
+// A table per language rather than a lookup per string. Two reasons, and the
+// second is the one that matters: a missing key in a table is visible the
+// moment the table is read next to its neighbour, and a table is the shape a
+// third language is added in without touching a single call site.
+//
+// WMO weather interpretation codes (open-meteo, the same table brapi's
+// weather proxy passes through) mapped to a short human label. Short is the
+// constraint: the weather card gives the condition one line at 20px, and
+// "Trovoada com granizo forte" is already the widest thing on the panel.
+const LANGUAGES = {
+    'pt-BR': {
+        // The tag the table answers to, carried inside it so that a caller
+        // holding the table can hand it to Intl -- `toLocaleDateString` takes
+        // a tag and not a vocabulary, and the resolved tag is the one thing
+        // `strings` knows that its caller does not.
+        tag: 'pt-BR',
+        unknown: 'Desconhecido',
+        // "DEFASADO", not "DESATUALIZADO", and the difference is five
+        // characters the badge does not have. It is drawn in the top corner
+        // of the weather card, where the card's own title already is: at
+        // thirteen characters the badge lands on top of TEMPO and both words
+        // become unreadable. Defasado is what a quote that is behind the
+        // market is called in Portuguese anyway, which is exactly what this
+        // badge means.
+        stale: 'DEFASADO',
+        // "na bateria" rather than "desconectado", which in Portuguese reads
+        // first as a network having dropped -- the wrong alarm entirely on a
+        // panel whose other states are about the PC being away.
+        unplugged: 'na bateria',
+        titles: { quotes: 'B3', fx: 'CÂMBIO', crypto: 'CRIPTO', weather: 'TEMPO' },
+        weather: {
+            0: 'Céu limpo',
+            1: 'Predominantemente limpo',
+            2: 'Parcialmente nublado',
+            3: 'Encoberto',
+            45: 'Neblina',
+            48: 'Neblina congelante',
+            51: 'Garoa fraca',
+            53: 'Garoa',
+            55: 'Garoa forte',
+            61: 'Chuva fraca',
+            63: 'Chuva',
+            65: 'Chuva forte',
+            71: 'Neve fraca',
+            73: 'Neve',
+            75: 'Neve forte',
+            80: 'Pancadas fracas',
+            81: 'Pancadas',
+            82: 'Pancadas violentas',
+            95: 'Trovoada',
+            96: 'Trovoada com granizo',
+            99: 'Trovoada com granizo forte',
+        },
+    },
+    en: {
+        tag: 'en',
+        unknown: 'Unknown',
+        stale: 'STALE',
+        unplugged: 'unplugged',
+        titles: { quotes: 'B3', fx: 'FX', crypto: 'CRYPTO', weather: 'WEATHER' },
+        weather: {
+            0: 'Clear sky',
+            1: 'Mainly clear',
+            2: 'Partly cloudy',
+            3: 'Overcast',
+            45: 'Fog',
+            48: 'Rime fog',
+            51: 'Light drizzle',
+            53: 'Drizzle',
+            55: 'Dense drizzle',
+            61: 'Light rain',
+            63: 'Rain',
+            65: 'Heavy rain',
+            71: 'Light snow',
+            73: 'Snow',
+            75: 'Heavy snow',
+            80: 'Light showers',
+            81: 'Showers',
+            82: 'Violent showers',
+            95: 'Thunderstorm',
+            96: 'Thunderstorm, hail',
+            99: 'Thunderstorm, heavy hail',
+        },
+    },
 };
 
-function weatherLabel(code) {
-    return WEATHER_LABELS[code] || 'Unknown';
+// The panel's language when the config says nothing, which is where it stands.
+const FALLBACK_LANGUAGE = 'pt-BR';
+
+// The vocabulary for one language tag, never null.
+//
+// The fallback is the panel's own language and not English, and it is the same
+// decision `host.useTheme` makes about an unknown theme name: a typo in a file
+// on the PC costs nothing anybody can see, rather than turning the whole panel
+// into a language its owner did not ask for. Matched on the tag's primary
+// subtag as well, so "pt", "pt-PT" and "en-GB" all land somewhere sensible --
+// a config that says "pt" is not wrong enough to ignore.
+function strings(language) {
+    if (typeof language !== 'string' || !language) {
+        return LANGUAGES[FALLBACK_LANGUAGE];
+    }
+    if (LANGUAGES[language]) {
+        return LANGUAGES[language];
+    }
+    const primary = language.split('-')[0].toLowerCase();
+    for (const tag of Object.keys(LANGUAGES)) {
+        if (tag.split('-')[0].toLowerCase() === primary) {
+            return LANGUAGES[tag];
+        }
+    }
+    return LANGUAGES[FALLBACK_LANGUAGE];
+}
+
+function weatherLabel(code, language) {
+    const table = strings(language);
+    return table.weather[code] || table.unknown;
 }
 
 // minC/maxC: the day's low and high, or null when the upstream had none.
@@ -347,27 +487,56 @@ const BATTERY_WARN_C = 40;
 // "BAT" rather than a card title: T5.4 demotes this from a card to a line, so
 // the line has to say what it is on its own. Three characters is the cheapest
 // way to do that.
-function formatBattery(battery) {
+// The battery line taken apart, so a theme can decide what to draw beside each
+// piece (T6.10). null when there is nothing worth a corner at all.
+//
+// Split out of formatBattery, which now composes its string from this, so the
+// two can never disagree about what the line says. The reason a theme needs
+// the pieces is that `neon` draws an icon in front of two of them and a bare
+// string cannot be taken apart afterwards -- not reliably, and not at all once
+// the separator is a character somebody's locale also uses.
+//
+//   level      "87%", always present
+//   temp       "31°C", or null when the phone sent no usable temperature
+//   unplugged  true only when the phone said so
+function batteryFields(battery) {
     if (!battery || typeof battery.level !== 'number' || !Number.isFinite(battery.level)) {
-        return '';
+        return null;
     }
-    const parts = [`BAT ${Math.round(battery.level)}%`];
-
     // Reuses formatTemp, so an absent temperature is drawn as an absence here
     // exactly as it is in the weather line. The native side leaves the key out
     // rather than sending a zero, for the same reason the server does.
     const temp = formatTemp(battery.tempC);
-    if (temp !== '--') {
-        parts.push(`${temp}°C`);
-    }
+    return {
+        level: `${Math.round(battery.level)}%`,
+        temp: temp === '--' ? null : `${temp}°C`,
+        // Only the interesting half is worth saying. On this desk the phone is
+        // powered from the PC's USB, so charging is the resting state and
+        // saying so every second of every day would spend the line's width on
+        // no information; unplugged is the condition worth a word, because it
+        // means the panel is now running the battery down (ADR 0014).
+        //
+        // `=== false` and not `!charging`: a payload with no `charging` key at
+        // all has not said the phone is on battery, and the corner must not
+        // claim it has.
+        unplugged: battery.charging === false,
+    };
+}
 
-    // Only the interesting half is spelled out. On this desk the phone is
-    // powered from the PC's USB, so charging is the resting state and saying so
-    // every second of every day would spend the line's width on no information;
-    // "unplugged" is the condition that is worth a word, because it means the
-    // panel is now running the battery down (ADR 0014).
-    if (battery.charging === false) {
-        parts.push('unplugged');
+// The whole line as one string, for a theme that draws no icons. `BAT` stays
+// English-shaped because it is the same abbreviation in both languages the
+// panel ships; the one real word in the line comes from the table.
+function formatBattery(battery, language) {
+    const fields = batteryFields(battery);
+    if (!fields) {
+        return '';
+    }
+    const parts = [`BAT ${fields.level}`];
+    if (fields.temp) {
+        parts.push(fields.temp);
+    }
+    if (fields.unplugged) {
+        parts.push(strings(language).unplugged);
     }
     return parts.join(' · ');
 }
@@ -594,13 +763,14 @@ function burnInSchedule() {
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         formatPrice, formatRate, formatPair, formatTemp, formatChange, changeClass,
-        weatherLabel, weatherGlyph, formatRange, WEATHER_LABELS,
+        weatherLabel, weatherGlyph, formatRange,
+        strings, LANGUAGES, FALLBACK_LANGUAGE,
         isNight,
         offsetFor, burnInSchedule,
         BURN_IN_OFFSETS, BURN_IN_STEP_MINUTES, BURN_IN_AMPLITUDE_PX,
         overflowsBy, scrollPlan, worthScrolling,
-        SCROLL_SECONDS_PER_ROW, SCROLL_MOVING_FRACTION, SCROLL_MIN_TRAVEL_PX,
+        SCROLL_SECONDS_PER_ROW, SCROLL_MIN_TRAVEL_PX, SCROLL_MIN_HIDDEN_ROWS,
         sparklinePath,
-        formatBattery, tempClass, BATTERY_WARN_C, BATTERY_HOT_C,
+        formatBattery, batteryFields, tempClass, BATTERY_WARN_C, BATTERY_HOT_C,
     };
 }

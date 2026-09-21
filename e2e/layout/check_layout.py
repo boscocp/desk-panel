@@ -492,6 +492,12 @@ def main():
                     help="measure web/themes/NAME instead of the default; passed to the "
                          "page as ?theme=NAME, which mock.js and stress.js put in the "
                          "payload exactly as the server's config key does (T6.7)")
+    ap.add_argument("--lang", metavar="TAG",
+                    help="measure the panel in this language instead of the default; "
+                         "passed as ?lang=TAG, the same way --theme is (T6.11). Worth "
+                         "running for every language that ships: the words are not the "
+                         "same length, and the widest card title and the stale badge "
+                         "share a strip")
     args = ap.parse_args()
 
     width, height = (int(n) for n in args.viewport.lower().split("x"))
@@ -503,16 +509,21 @@ def main():
         os.makedirs(args.screenshots, exist_ok=True)
 
     url = "file://" + os.path.abspath(PANEL)
+    query = {}
     if args.theme:
-        url += "?theme=" + urllib.parse.quote(args.theme)
+        query["theme"] = args.theme
+    if args.lang:
+        query["lang"] = args.lang
+    if query:
+        url += "?" + urllib.parse.urlencode(query)
 
     # Three passes, and only the first is the ordinary case. A typical tick
     # never breaks a layout; the widest case does. mock.js already ships the
     # long symbol, the six-figure price, the sub-1 price and the zero change
     # (that is what those fixtures are for -- see web/js/mock.js). stress.js
     # adds what it cannot: the longest city, the longest label in format.js, a
-    # negative temperature, a pt-BR date as the device actually renders it, and
-    # the STALE badge shown.
+    # negative temperature, the date as the panel's language renders it, and
+    # the stale badge shown.
     #
     # overflow.js is the third, and it is the one pass that asserts something
     # must happen rather than that nothing must: more rows than any card can
@@ -525,7 +536,8 @@ def main():
     print("desk-panel layout check -- %s" % url)
     results = run(url, [(name, prelude) for name, prelude, _ in passes],
                   (width, height), extra_css, args.screenshots,
-                  shot_tag=("%s-" % args.theme) if args.theme else "")
+                  shot_tag="".join("%s-" % v for v in
+                                   (args.theme, args.lang) if v))
 
     broken = False
     for name, _, expect_scroll in passes:
