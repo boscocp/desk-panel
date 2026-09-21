@@ -241,7 +241,7 @@ Only what is cited. `—` means not recorded, which is itself a finding.
 | 14 | #19 | overflow + weather | +1,806 / −68 | **7** | T6.6's criterion could not fail, and asked for the wrong thing |
 | 15 | #20 | glow, burn-in shift | +1,977 / −33 | two rounds: **4, then 7** | a test that passed only in some timezones; a table whose comment claimed a property it did not have |
 | 16 | #21 | night profile, login-scope tests | +2,372 / −50 | **4, all real** | T6.4's acceptance could never have passed |
-| 17 | #22 | scroll loop, icons, localisation | +1,898 / −194 | in review at the time of writing | `measure.js` had never measured three of the panel's eight sections |
+| 17 | #22 | scroll loop, icons, localisation | +1,898 / −194 | **5, two of which changed behaviour** | `measure.js` had never measured three of the panel's eight sections; `pseudoInk` then measured a wrapping title as one line |
 
 There is no wave 3 or 5 in the record; the numbering has gaps, and the "Resuming after"
 sections in `STATUS.md` are the authority. Diffs are `gh pr list --json additions,deletions`,
