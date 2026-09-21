@@ -275,7 +275,15 @@ the least — it runs against a finished diff, in one pass, with no device.
    did not have; `THEMING.md` promising coverage the harness does not measure. In a repo where
    comments are the design record, that is a licence to do the thing the design forbids. Wave 15
    is the first time such a claim was **turned into a test in the same wave that wrote it**.
-5. **Statements true on the happy path and false as installed.** Three of wave 12's four
+5. **A constant or a measurement left behind when the thing it describes changed.** Wave 17's
+   two behaviour-changing findings are both this: a twitch guard calibrated for a card that
+   walks and stops, still in place after the card became a loop — so any overflow at all would
+   have walked the whole list, permanently, to reveal five pixels; and an ink probe correct for
+   a title that fits on one line, reporting a wrapping heading as one rect as wide as the whole
+   string, i.e. **a collision that does not exist on screen**. Neither failed. Each answered
+   confidently about a panel that no longer existed. The fix's own commit names the rule:
+   *changing what a quantity means obliges you to go back and ask who depended on the old one.*
+6. **Statements true on the happy path and false as installed.** Three of wave 12's four
    findings: a migration notice printed to the one audience for whom following it changes
    nothing, and a doc step that would have left the phone reporting offline forever.
 
