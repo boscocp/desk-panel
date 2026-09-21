@@ -9,7 +9,7 @@ const {
     BATTERY_WARN_C, BATTERY_HOT_C,
     formatRange, weatherGlyph, strings, LANGUAGES, FALLBACK_LANGUAGE,
     overflowsBy, scrollPlan, worthScrolling,
-    SCROLL_SECONDS_PER_ROW, SCROLL_MIN_TRAVEL_PX,
+    SCROLL_SECONDS_PER_ROW, SCROLL_MIN_TRAVEL_PX, SCROLL_MIN_HIDDEN_ROWS,
     offsetFor, burnInSchedule,
     BURN_IN_OFFSETS, BURN_IN_STEP_MINUTES, BURN_IN_AMPLITUDE_PX,
 } = require('../js/format.js');
@@ -564,29 +564,59 @@ test('worthScrolling refuses a travel a pair of roundings could have invented', 
     // The device lays out at dpr 2.75 and clientHeight/scrollHeight are
     // integers, so a card whose rows exactly fill it can measure a pixel over.
     // A card that declared a scroll for that would hold a compositor layer and
-    // twitch one pixel every seventeen seconds for as long as the panel is on,
-    // and every check in e2e/layout would pass it: 1px is a real overflow as
-    // far as a measurement can tell.
-    assert.equal(worthScrolling(1), false);
-    assert.equal(worthScrolling(2), false);
-    assert.equal(worthScrolling(0), false);
+    // move for as long as the panel is on to reveal a pixel, and every check
+    // in e2e/layout would pass it: 1px is a real overflow as far as a
+    // measurement can tell.
+    assert.equal(worthScrolling(1, 26), false);
+    assert.equal(worthScrolling(2, 26), false);
+    assert.equal(worthScrolling(0, 26), false);
+});
+
+test('worthScrolling refuses a few pixels of phantom overflow on a real row', () => {
+    // **The case the review of T6.9 found**, and it is the same case as above
+    // with the price raised. The old design walked as far as the hidden pixels
+    // and came back, so five pixels of phantom overflow bought five pixels of
+    // twitch and a flat four-pixel floor was generous enough. The card goes
+    // round now: any overflow at all walks the whole list past the window for
+    // ever, so five pixels buys a card in permanent motion to reveal five
+    // pixels. Half a row is the floor, and 5 over a 26px row is under it.
+    assert.equal(worthScrolling(5, 26), false);
+    assert.equal(worthScrolling(12, 26), false);
+    assert.equal(worthScrolling(13, 26), true);
 });
 
 test('worthScrolling allows anything a genuinely hidden row could be', () => {
-    // A row is twenty-odd pixels tall on either theme, so the floor is nowhere
-    // near a real overflow.
-    assert.equal(worthScrolling(SCROLL_MIN_TRAVEL_PX), true);
-    assert.equal(worthScrolling(20), true);
-    assert.equal(worthScrolling(184), true);
+    assert.equal(worthScrolling(26, 26), true);
+    assert.equal(worthScrolling(184, 26), true);
+    // Two lines a row, as the plain theme draws them.
+    assert.equal(worthScrolling(48, 48), true);
+});
+
+test('worthScrolling falls back to the flat floor when a row cannot be measured', () => {
+    // rowHeight is 0 when there are no rows to divide by, and the themes hand
+    // that through rather than guarding at the call site. A bare pixel count
+    // is then the best answer available, which is what this used to be.
+    assert.equal(worthScrolling(SCROLL_MIN_TRAVEL_PX, 0), true);
+    assert.equal(worthScrolling(SCROLL_MIN_TRAVEL_PX - 1, 0), false);
+    assert.equal(worthScrolling(20, NaN), true);
+    assert.equal(worthScrolling(20, undefined), true);
+});
+
+test('the floor is half a row, stated where it can fail', () => {
+    // Half rather than a whole one, because the count that decides *whether*
+    // to scroll is already rows (overflowsBy): this is the second question,
+    // and refusing a card that really is hiding most of a row would be the
+    // opposite mistake.
+    assert.equal(SCROLL_MIN_HIDDEN_ROWS, 0.5);
 });
 
 test('worthScrolling treats an unusable measurement as not worth moving for', () => {
-    assert.equal(worthScrolling(NaN), false);
-    assert.equal(worthScrolling(undefined), false);
+    assert.equal(worthScrolling(NaN, 26), false);
+    assert.equal(worthScrolling(undefined, 26), false);
     // Infinity too: a measurement that came back unbounded is a broken
     // measurement, and the panel's answer to one is to stay still (the same
     // bargain overflowsBy takes with NaN).
-    assert.equal(worthScrolling(Infinity), false);
+    assert.equal(worthScrolling(Infinity, 26), false);
 });
 
 // --- The burn-in shift (T6.2) ----------------------------------------------

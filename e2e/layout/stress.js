@@ -64,15 +64,22 @@ document.getElementById('clock').textContent = '23:59:59';
 // to the longest pt-BR date of the year before running this
 // (check_layout.py, PINNED), and this is what reads it.
 //
-// The tag is the one the payload above carried, not a literal: since T6.11 the
-// panel's language is config, and a fixture that wrote a pt-BR date onto an
-// English panel would be measuring a page that cannot exist. pt-BR is still
-// the default, and still the longer of the two -- "segunda-feira, 23 de
-// fevereiro de 2026" is 38 characters against 25 for en-US -- so the widest
-// case is what an unqualified run measures.
+// The tag is **the one the panel resolves to**, not the one the query string
+// asked for, and the difference is not pedantry. Since T6.11 the language is
+// config and `strings()` matches on the primary subtag, so `?lang=en-GB` is an
+// `en` panel -- and a fixture writing `en-GB` here would render
+// "Monday 23 February 2026" where the panel renders "Monday, February 23,
+// 2026". The harness would then be measuring a string the page cannot produce,
+// which is the same class of infidelity this file's own comment above warns
+// about for `theme`. Asking `strings` is the only way to be sure; it is the
+// page's own function and it is already loaded.
+//
+// pt-BR is still the default and still the longer of the two -- "segunda-feira,
+// 23 de fevereiro de 2026" is 38 characters against 25 for en-US -- so the
+// widest case is what an unqualified run measures.
 document.getElementById('date').textContent =
     new window.Date().toLocaleDateString(
-        new URLSearchParams(location.search).get('lang') || 'pt-BR', {
+        strings(new URLSearchParams(location.search).get('lang')).tag, {
             weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
         });
 

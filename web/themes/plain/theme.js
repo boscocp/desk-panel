@@ -34,6 +34,12 @@
         return node;
     }
 
+    // The words this render is drawing in (T6.11). Set at the top of render()
+    // from the payload's `language`, exactly as the neon theme does it: a
+    // field rather than an argument threaded through every function, because
+    // most of them would take it and not use it.
+    let words = strings(null);
+
     // A section is a heading plus a body the renderers refill. Two elements
     // rather than one because the heading is markup here, which is half of
     // what this theme is demonstrating.
@@ -43,12 +49,6 @@
     // arrangement is the same one the neon theme uses -- it has to be, because
     // the rule it obeys is "a card must not eat a row in silence", and that is
     // a rule about the panel and not about a look.
-    // The words this render is drawing in (T6.11). Set at the top of render()
-    // from the payload's `language`, exactly as the neon theme does it: a
-    // field rather than an argument threaded through every function, because
-    // most of them would take it and not use it.
-    let words = strings(null);
-
     function column(id, title) {
         const section = el('section', id, 'col');
         const heading = el('h2', null, 'col-title');
@@ -149,7 +149,7 @@
         // explains at length: integer box metrics at dpr 2.75 can invent a
         // hidden row that is one pixel tall, and a card that moved for it would
         // twitch on the device and pass every check here.
-        if (!plan || !worthScrolling(content - available)) {
+        if (!plan || !worthScrolling(content - available, rowHeight)) {
             list.section.removeAttribute('data-scroll');
             list.scroller.style.removeProperty('--scroll-distance');
             list.scroller.style.removeProperty('--scroll-seconds');

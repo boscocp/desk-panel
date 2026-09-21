@@ -108,6 +108,18 @@ public final class DataPayload {
             String theme = quotes.optString("theme", "");
             payload.put("theme", theme.isEmpty() ? null : theme);
 
+            // Which language the panel speaks (T6.11), passed straight through
+            // for the same reason `theme` is: the set of packaged languages
+            // lives in the APK, the page owns the fallback, and a tag this
+            // class did not recognise would be a tag it had no business
+            // rejecting.
+            //
+            // Absent rather than empty, so an older server leaves it
+            // undefined and the page uses the panel's own language -- the
+            // same path a typo takes.
+            String language = quotes.optString("language", "");
+            payload.put("language", language.isEmpty() ? null : language);
+
             // The night profile's window (T6.4), and like `theme` it is
             // passed straight through and never interpreted here. Two
             // readers take it from the payload and both are elsewhere:
@@ -123,24 +135,13 @@ public final class DataPayload {
             // a key, which is exactly what is wanted here.
             //
             // **This copy is the whole of the wiring, and forgetting it is
-            // silent.** The payload is rebuilt key by key rather than
-            // patched, so a key nobody names here simply does not reach the
-            // phone: the page stays in its day profile for ever and the
-            // backlight never dims, with a correct server, a correct page
-            // and a correct predicate. That is how T6.4 shipped its first
-            // build, and `e2e/check_night_marker.py` is what caught it.
-            // Which language the panel speaks (T6.11), passed straight through
-            // for the same reason `theme` is: the set of packaged languages
-            // lives in the APK, the page owns the fallback, and a tag this
-            // class did not recognise would be a tag it had no business
-            // rejecting.
-            //
-            // Absent rather than empty, so an older server leaves it
-            // undefined and the page uses the panel's own language -- the
-            // same path a typo takes.
-            String language = quotes.optString("language", "");
-            payload.put("language", language.isEmpty() ? null : language);
-
+            // silent, and it is true of every line above it as well.** The
+            // payload is rebuilt key by key rather than patched, so a key
+            // nobody names here simply does not reach the phone: the page
+            // stays in its day profile for ever and the backlight never dims,
+            // with a correct server, a correct page and a correct predicate.
+            // That is how T6.4 shipped its first build, and
+            // `e2e/check_night_marker.py` is what caught it.
             payload.put("night", quotes.optJSONObject("night"));
 
             return escapeForScript(payload.toString());
