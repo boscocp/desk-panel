@@ -13,16 +13,24 @@ ever. Nothing about that is visible in a screenshot, in a measurement, or in a
 unit test: `format.js` is pure and cannot see an animation, and the layout
 harness measures one frame.
 
-So this drives the real thing over time. Four questions:
+So this drives the real thing over time. Five questions:
 
   1. does an overflowing card animate at all,
   2. does it actually move (a declaration is not a movement),
   3. does re-delivering the same rows leave it where it was,
-  4. does a payload that fits take the scroll away again.
+  4. does a payload that fits take the scroll away again,
+  5. is the loop seamless (T6.9).
 
 Question 3 is the one this file exists for. Questions 1 and 4 duplicate
 `check_layout.py` cheaply and are worth having here anyway, because a failure of
 3 would otherwise be indistinguishable from the card never having moved.
+
+Question 5 is T6.9's. The card no longer walks down and back; it goes round,
+and it does that because the theme draws the list twice and moves the box by
+exactly one copy. Exactly: a pitch that is one pixel out is a jolt every
+couple of minutes, which is the one motion this whole design is trying not to
+make, and nothing about it is visible in a single frame -- the seam is
+correct or not depending on a number nobody can see.
 
 Driven through check_layout.py's Marionette plumbing -- same Firefox, same
 launcher -- so there is one browser harness in this repo and not three.
@@ -134,16 +142,19 @@ def check(m, fails, theme):
 
     # Question 2, and the sample question 3 is measured against.
     #
-    # Just under halfway through a pass: past the hold at the top -- 15% of the
-    # cycle, seconds at these durations, and sampling inside it would call a
-    # working card stationary -- and well short of the far end, where the card
-    # turns around and starts back. Both ends matter. A fixed five seconds was
-    # the first cut and it landed a couple of hundred milliseconds past the hold
-    # on a slow run, where the card had moved 7px: enough to prove it moves, not
-    # enough for any threshold to separate "carried across the refresh" from
-    # "restarted at zero" while also tolerating the card still moving between
-    # two samples taken milliseconds apart. Halfway in, the two outcomes are
-    # ~50px and 0.
+    # Just under halfway through a pass, and it is still the right sample after
+    # T6.9 turned the pass into a loop -- for a simpler reason than before.
+    # There are no holds to sample inside any more and no far end to overshoot;
+    # the card moves at a constant speed from the first frame to the last, so
+    # anywhere but the two edges of the cycle would do. Halfway is the furthest
+    # from both.
+    #
+    # A fraction of the duration rather than a fixed number of seconds, because
+    # a fixed number is a fixed number against *these two themes' current
+    # taste*: the seconds per row is a custom property a theme sets, and T6.9
+    # has already multiplied it by four once. The cap keeps the wait bearable
+    # on a ninety-six second pass; at that length, 20s is a fifth of a pass and
+    # tens of pixels.
     duration = js(DURATION)
     wait = max(3.0, min(20.0, (duration or 17.0) * 0.45))
     time.sleep(wait)
@@ -157,8 +168,7 @@ def check(m, fails, theme):
         return
     if abs(moved - first) < 8.0:
         fails.append("the card declared a scroll and barely moved: %.2fpx after %.1fs of a "
-                     "%.1fs pass (the keyframes' hold is meant to be a pause, not the whole "
-                     "pass)" % (abs(moved - first), wait, duration or 0.0))
+                     "%.1fs pass" % (abs(moved - first), wait, duration or 0.0))
         return
 
     # Question 3, and the reason this file exists. The same six symbols
@@ -180,6 +190,58 @@ def check(m, fails, theme):
             "after. The animated element is being replaced by render(), or its "
             "declaration is being rewritten with different values -- see T6.6 step 4 "
             "and docs/THEMING.md." % (moved, after))
+
+    # Question 5 (T6.9). The seam, which is the only part of this design that
+    # can be wrong by one pixel and look right in every frame but two.
+    #
+    # Three things, and they are the whole of the trick: the card holds the
+    # list twice, the second copy says the same thing as the first, and the
+    # distance the animation travels is exactly the offset between them. Get
+    # the third wrong and the card jolts once a pass -- which is the motion
+    # T6.6's notes ask this panel never to make, arriving by the back door.
+    #
+    # Asked before question 4, because question 4 takes the scroll away.
+    js(payload)
+    seam = js("""
+        const moving = Array.from(document.querySelectorAll('#quotes *'))
+            .filter((el) => getComputedStyle(el).animationName !== 'none')[0];
+        if (!moving) {
+            return null;
+        }
+        const rows = Array.from(moving.children);
+        // The distance the keyframes actually spend, read off the element the
+        // animation is on -- not off the theme's stylesheet, which is where it
+        // was asked for rather than where it landed.
+        const declared = parseFloat(
+            getComputedStyle(moving).getPropertyValue('--scroll-distance'));
+        return {
+            rows: rows.length,
+            declared: declared,
+            texts: rows.map((r) => r.textContent),
+            tops: rows.map((r) => r.offsetTop),
+        };
+    """)
+    if seam is None:
+        fails.append("nothing is animating in #quotes by the time the seam is measured")
+    else:
+        rows = seam["rows"]
+        half = rows // 2
+        if rows < 2 or rows % 2 != 0:
+            fails.append("a looping card holds %d rows, which is not two copies of "
+                         "anything: the seam cannot be seamless" % rows)
+        elif seam["texts"][:half] != seam["texts"][half:]:
+            fails.append("the card's second copy is not a copy of its first, so the "
+                         "loop shows different rows on alternate passes")
+        else:
+            pitch = seam["tops"][half] - seam["tops"][0]
+            # Exact to the pixel the theme rounded to. A tolerance here would
+            # be a tolerance on the jolt itself, and one pixel is what the
+            # border between rows is worth -- which is precisely the mistake
+            # computing the pitch instead of measuring it would make.
+            if abs(seam["declared"] - pitch) > 1.01:
+                fails.append("the loop travels %.1fpx where one copy of the list is "
+                             "%.1fpx: the card jolts by the difference once a pass"
+                             % (seam["declared"], pitch))
 
     # Question 4. Fewer rows than the card holds: no attribute, and nothing left
     # transformed. A card frozen at the offset it happened to reach, with its

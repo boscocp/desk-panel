@@ -138,8 +138,7 @@
         const visibleRows = rowHeight > 0 ? available / rowHeight : rowCount;
         const style = getComputedStyle(list.section);
         const plan = scrollPlan(rowCount, visibleRows,
-                                parseFloat(style.getPropertyValue('--scroll-seconds-per-row')),
-                                parseFloat(style.getPropertyValue('--scroll-moving-fraction')));
+                                parseFloat(style.getPropertyValue('--scroll-seconds-per-row')));
         // The second half is the twitch guard the neon theme's copy of this
         // explains at length: integer box metrics at dpr 2.75 can invent a
         // hidden row that is one pixel tall, and a card that moved for it would
@@ -150,8 +149,20 @@
             list.scroller.style.removeProperty('--scroll-seconds');
             return;
         }
-        list.scroller.style.setProperty('--scroll-distance',
-                                        `${Math.round(content - available)}px`);
+        // The list drawn twice and moved by exactly one copy (T6.9), which is
+        // the same seam the neon theme makes and for the same reason. The
+        // pitch is measured off the clone rather than computed from
+        // scrollHeight: this theme's rows are two lines tall with a rule
+        // between them and none after the last, so a copy inside a pair is
+        // one rule taller than a copy on its own.
+        const rows = Array.from(list.scroller.children);
+        for (const row of rows) {
+            list.scroller.appendChild(row.cloneNode(true));
+        }
+        const pitch = rows.length
+            ? list.scroller.children[rows.length].offsetTop - rows[0].offsetTop
+            : 0;
+        list.scroller.style.setProperty('--scroll-distance', `${Math.round(pitch)}px`);
         list.scroller.style.setProperty('--scroll-seconds', `${plan.seconds}s`);
         list.section.setAttribute('data-scroll', '');
     }

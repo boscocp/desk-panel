@@ -258,8 +258,7 @@
 
         const style = getComputedStyle(list.section);
         const plan = scrollPlan(rowCount, visibleRows,
-                                cssNumber(style, '--scroll-seconds-per-row'),
-                                cssNumber(style, '--scroll-moving-fraction'));
+                                cssNumber(style, '--scroll-seconds-per-row'));
 
         // Two questions, and the second is not the first one restated.
         // scrollPlan counts rows and says whether any are hidden;
@@ -284,13 +283,48 @@
             return;
         }
 
+        // --- The seam (T6.9) ------------------------------------------------
+        //
+        // The card goes round now rather than walking down and back, and the
+        // way it does that is the oldest trick there is: the list is drawn
+        // twice and the box is moved by exactly one copy. When the first copy
+        // has left the top, the second is sitting precisely where it started,
+        // the animation restarts, and nothing on screen moved -- so the rows
+        // appear to rise for ever out of a card three rows tall.
+        //
+        // Cloned here rather than in renderList, and only once the plan says
+        // the card is actually going to move: a card that fits must not carry
+        // a second invisible copy of itself, and applyScroll is the only place
+        // that knows which is which. The clones are thrown away with the rest
+        // of the rows on the next refresh, because renderList empties the
+        // scroller before it rebuilds.
+        //
+        // They are also clones of rows that already carry their pulse class,
+        // so a value that just changed flashes in both copies -- which is
+        // what it must do, since either copy may be the one on screen.
+        const rows = Array.from(list.scroller.children);
+        for (const row of rows) {
+            list.scroller.appendChild(row.cloneNode(true));
+        }
+
+        // Measured, not computed, and that is the difference between a seam
+        // nobody can see and a one-pixel jolt every couple of minutes. The
+        // distance wanted is the *pitch* of one copy: the rows carry a border
+        // between them and not after the last one, so a copy inside a pair is
+        // one border taller than a copy on its own, and `scrollHeight` before
+        // cloning would be short by exactly that. The offset between a row and
+        // its clone is the pitch by construction, whatever the borders,
+        // margins and sub-pixel rounding happen to be.
+        const pitch = rows.length
+            ? list.scroller.children[rows.length].offsetTop - rows[0].offsetTop
+            : 0;
+
         // Written on every refresh, and on a refresh that changed no rows these
         // are the same two strings as last time -- so the declaration does not
         // change, and a CSS animation whose declaration does not change is not
         // restarted. That, plus a scroller element mount() never replaces, is
         // the whole of step 4.
-        list.scroller.style.setProperty('--scroll-distance',
-                                        `${Math.round(content - available)}px`);
+        list.scroller.style.setProperty('--scroll-distance', `${Math.round(pitch)}px`);
         list.scroller.style.setProperty('--scroll-seconds', `${plan.seconds}s`);
         // On the section rather than on the scroller, because it says something
         // about the card and not about the moving box: e2e/layout/measure.js
