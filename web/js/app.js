@@ -67,6 +67,7 @@
 
     function applyScreen() {
         host.blackout(!visible());
+        applyNight();
         // Whatever arrived while nobody could see it, drawn now that somebody
         // can. Before applyClock, so the clock the timer starts painting is
         // already sitting in the markup this payload produced.
@@ -79,6 +80,47 @@
             paintData({ resumed: true });
         }
         applyClock();
+    }
+
+    // --- The night profile (T6.4) ------------------------------------------
+    // The panel dims inside a window the PC's config describes, and the
+    // comparison is against *this device's* clock: the panel is what sits on
+    // the desk, so a phone carried to another timezone dims at the local
+    // hour and not at the PC's. The server sends the two bounds rather than a
+    // boolean for exactly that reason (server/server.py).
+    //
+    // Core's, like the blackout and the burn-in shift beside it, and for the
+    // same reason: at night the page's half of the profile is that nothing
+    // moves (css/style.css), which is a promise about the room rather than a
+    // matter of taste. What *is* taste -- how much glow is left -- is the
+    // theme's, and it reads the same attribute.
+    //
+    // Re-evaluated on every payload and on every screen transition, and on no
+    // timer of its own (T6.4 step 4): a refresh arrives once a minute while
+    // the panel is lit, which is the resolution a schedule written in whole
+    // minutes is specified at, and a timer would be one more thing running on
+    // a device whose whole power story is that it does as little as possible.
+    //
+    // Only while the panel is visible. Offline the screen is asleep and none
+    // of this is on show; under the thermal cutoff the panel is already
+    // black. There is also a concrete reason not to let the two overlap: the
+    // blackout *pauses* animations so a card resumes where it left off, and
+    // night *removes* them, so a panel that was both would come back from a
+    // night blackout with its scroll snapped to the top.
+    function applyNight() {
+        let night = false;
+        try {
+            const window_ = (payload && payload.night) || {};
+            night = visible() && isNight(new Date(), window_.start, window_.end);
+        } catch (err) {
+            // Guarded for the reason host.js guards the burn-in shift: isNight
+            // is a global out of js/format.js, and an unguarded call here
+            // would make the panel's clock -- the one thing it owes
+            // MainActivity (ADR 0009) -- depend on that file having loaded.
+            // A panel with a clock and no dimming is worth more than no panel.
+            console.error('desk-panel: the night profile failed', err);
+        }
+        host.night(night);
     }
 
     // --- The native bridge -------------------------------------------------
@@ -115,6 +157,9 @@
     // would read values nobody has looked at for twelve hours as "current".
     function paintData(context) {
         host.useTheme(payload && payload.theme);
+        // Before the render, so a theme's first paint is already in the right
+        // profile rather than a frame of full glow followed by a dim one.
+        applyNight();
         host.render(payload, context);
         // Straight after the render, because a theme that rebuilt its clock
         // element would otherwise show an empty one for up to a second -- and

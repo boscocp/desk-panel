@@ -124,3 +124,44 @@ body {
 body > * {
     transform: translate(var(--burn-in-x, 0px), var(--burn-in-y, 0px));
 }
+
+/* --- The night profile: nothing moves in a dark room (T6.4) ---------------
+ *
+ * Set by js/app.js through host.night() whenever the device's own clock is
+ * inside the window server/config.toml describes. The attribute means "the
+ * panel is running its night profile"; this file owns one half of what that
+ * costs and the live theme owns the other.
+ *
+ * This half is core's for the reason the two rules above it are: it is a
+ * promise about the room the panel is in rather than a matter of taste, and a
+ * theme that forgot it would look perfectly fine in a screenshot while walking
+ * a card across a dark bedroom all night. Peripheral vision is more sensitive
+ * to motion than to detail and more sensitive still in the dark, so at 03:00 a
+ * card giving up its hidden rows is the one thing on this panel that can
+ * actually wake somebody -- and the panel at that hour is a clock first.
+ *
+ * `animation: none`, not `animation-play-state: paused`, and the difference
+ * from the blackout rule above is the whole reason this is a second rule
+ * rather than another selector on that one:
+ *
+ *   - The panel is *visible* here. A paused animation holds whatever frame it
+ *     was on, so T6.2's value pulse -- 280ms of colour, fired the moment a
+ *     price changes -- would be frozen mid-flash and leave one number sitting
+ *     at --accent-hi until morning. Under the blackout nobody can see that;
+ *     here it is the brightest thing on a dimmed panel.
+ *   - `none` also returns the scroller to the top of its card, which is the
+ *     readable position to spend a night in rather than whatever row the
+ *     animation happened to be halfway through.
+ *
+ * The two rules never apply at once. js/app.js only sets the night attribute
+ * while the panel is visible, so a card blacked out at night is paused and
+ * comes back where it was, and is not reset by this.
+ *
+ * A theme owes this rule nothing except not overriding `animation` on
+ * something inside a panel at night (docs/THEMING.md).
+ */
+:root[data-night] body *,
+:root[data-night] body *::before,
+:root[data-night] body *::after {
+    animation: none !important;
+}
