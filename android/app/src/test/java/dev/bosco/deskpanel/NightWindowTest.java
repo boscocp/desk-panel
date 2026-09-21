@@ -102,6 +102,22 @@ public class NightWindowTest {
         assertFalse(night.covers(at(6, 0)));
     }
 
+    /**
+     * The one input where the two readers could disagree, and the review of
+     * T6.4 is what found it. {@code night_start = 22.5} is legal TOML and
+     * reaches the payload as 22.5; {@code isNight} guards with
+     * {@code Number.isInteger} and stays in the day profile, so truncating
+     * here would dim the backlight behind a page that had kept its glow.
+     */
+    @Test
+    public void aFractionalHourIsRejectedRatherThanTruncated() {
+        assertNull(NightWindow.parse(payload("22.5", "7")));
+        assertNull(NightWindow.parse(payload("22", "6.25")));
+        // And a whole number that arrived as a double is still a whole hour:
+        // JSON has one number type, so 22.0 and 22 are the same value.
+        assertNotNull(NightWindow.parse(payload("22.0", "6")));
+    }
+
     @Test
     public void aSingleDigitHourIsATimeAndASingleDigitMinuteIsNot() {
         assertNotNull(NightWindow.parse(quoted("9:30", "7:00")));

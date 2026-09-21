@@ -185,10 +185,20 @@ def check(m, theme, fails):
                      "night profile: %s-%s" % outside)
     day_glow = glow()
     day_shadows = shadows()
-    day_animation = animating()
-    if day_animation == "none":
-        fails.append("a card holding %d rows is not animating in the day profile, so "
-                     "question 2 below would have been checked against nothing" % ROWS)
+
+    # Answering an overflow with motion is optional in the theme contract
+    # (docs/THEMING.md) -- `check_scroll.py` guards on the same attribute for
+    # the same reason -- so question 2 is asked of a theme that actually
+    # moves and reported as not applicable for one that does not. Both are
+    # needed: without the attribute a theme that stopped scrolling would pass
+    # question 2 by having nothing to stop, and without the skip a conformant
+    # theme would fail a check docs/TESTING.md requires of every theme.
+    scrolls = js("return !!document.querySelector('#quotes[data-scroll]');")
+    day_animation = animating() if scrolls else "none"
+    if scrolls and day_animation == "none":
+        fails.append("a card holding %d rows declares data-scroll and is not animating "
+                     "in the day profile, so question 2 would have been checked "
+                     "against nothing" % ROWS)
 
     # --- night ------------------------------------------------------------
     js(payload(theme, *inside))
@@ -196,7 +206,10 @@ def check(m, theme, fails):
         fails.append("a window containing now did not put the panel in its night "
                      "profile: %s-%s" % inside)
 
-    if animating() != "none":
+    if not scrolls:
+        print("    note: %s answers an overflow without motion, so question 2 is not "
+              "asked of it" % theme)
+    elif animating() != "none":
         fails.append("a card kept animating at night: %r" % animating())
 
     night_shadows = shadows()
@@ -242,12 +255,13 @@ def check(m, theme, fails):
     # two states are kept apart rather than stacked: `paused` resumes where it
     # left off and `none` starts again, so a card dark at 03:00 must be paused
     # and not removed.
-    js("window.onThermal(true);")
-    dark_state = js("return %s.animationPlayState || 'missing';" % MOVING)
-    if dark_state != "paused":
-        fails.append("a card blacked out at night is not merely paused: %r"
-                     % dark_state)
-    js("window.onThermal(false);")
+    if scrolls:
+        js("window.onThermal(true);")
+        dark_state = js("return %s.animationPlayState || 'missing';" % MOVING)
+        if dark_state != "paused":
+            fails.append("a card blacked out at night is not merely paused: %r"
+                         % dark_state)
+        js("window.onThermal(false);")
 
 
 def main():
