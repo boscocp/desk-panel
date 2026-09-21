@@ -165,7 +165,7 @@ served and stress ones.
 
 The arithmetic is not yours to invent either. `overflowsBy(rowCount,
 visibleRows)` says how many rows are hidden, `scrollPlan(rowCount, visibleRows,
-secondsPerRow, movingFraction)` returns `null` or `{hidden, seconds}`, and
+secondsPerRow)` returns `null` or `{hidden, seconds}`, and
 `worthScrolling(travelPx)` says whether the pixels those rows came out to are
 worth moving for at all; you measure, they decide.
 
@@ -174,10 +174,30 @@ integers and the device lays out at a device pixel ratio of 2.75, so a card
 whose rows exactly fill it can measure a pixel over — one hidden row, one pixel
 of travel, and a card twitching in the corner of someone's eye for as long as
 the panel is on, with every check in `e2e/layout` passing because a pixel of
-overflow is a real overflow as far as a measurement can tell. Both are pure and tested, and the two
-numbers you pass in are your own — read them off a custom property so they stay
-in your stylesheet next to the `@keyframes` block they describe, the way both
-themes do.
+overflow is a real overflow as far as a measurement can tell. Both are pure and tested, and the
+number you pass in is your own — read it off a custom property so it stays in your stylesheet
+next to the `@keyframes` block it describes, the way both themes do.
+
+### If you answer the overflow with a loop
+
+Both shipped themes do, since T6.9, and the shape is worth copying because one part of it is
+easy to get subtly wrong:
+
+- **Draw the list twice** and move the box by exactly one copy. At the end of a pass the second
+  copy is sitting where the first started, the animation restarts, and nothing on screen moved.
+- **Measure the pitch; do not compute it.** The distance you want is the offset between a row
+  and its clone — `children[n].offsetTop - children[0].offsetTop` — not the scroll height of one
+  copy. If your rows carry a border or a margin between them and none after the last, a copy
+  inside a pair is taller than a copy on its own, and the difference is a jolt every pass.
+- **`linear`, and no `alternate`.** A loop has no ends to ease into, and the frame after the
+  restart has to be indistinguishable from the frame before it, which is only true at constant
+  speed.
+- **Clone after you measure the overflow**, not before, or the second copy is what makes the
+  card look like it overflows.
+
+`check_scroll.py` asks all of this: an even number of rows, a second copy that says the same
+thing as the first, and a travel distance equal to the measured pitch. That last one is exact —
+a tolerance there would be a tolerance on the jolt.
 
 **Whatever moves must not be rebuilt.** `window.onData` replaces every row in
 every card once a minute. Put the animation on an element your `mount()` builds

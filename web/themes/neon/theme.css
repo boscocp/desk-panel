@@ -83,23 +83,25 @@
     --font: 'sans-serif-condensed', 'Roboto Condensed', 'Liberation Sans Narrow',
             'DejaVu Sans Condensed', 'Arial Narrow', system-ui, sans-serif;
 
-    /* --- How fast an overflowing card gives up its hidden rows (T6.6) -------
+    /* --- How fast an overflowing card gives up its hidden rows (T6.6, T6.9) --
      *
-     * Four seconds a row, and the number is here rather than in format.js
-     * because it is taste and a theme is where taste lives. This panel sits in
-     * someone's peripheral vision all day: at four seconds a row the movement
-     * is not noticeable unless it is looked at, and a card with three rows
-     * hidden still gives up all three inside a minute.
+     * Sixteen seconds a row, and the number is here rather than in format.js
+     * because it is taste and a theme is where taste lives. It is **a quarter
+     * of the speed this shipped at** (T6.9), and the reason is what T6.9
+     * changed underneath it: the card used to walk down as far as its hidden
+     * rows and come back, and it now goes round in one direction for as long
+     * as the panel is on. A movement with ends is one the eye stops watching;
+     * a movement that never ends is one it keeps returning to, and four
+     * seconds a row was chosen against the first.
      *
-     * The fraction is the part of one pass @keyframes card-scroll spends
-     * moving -- 70%, because it holds for 15% at each end so the top and the
-     * bottom of the card can actually be read. The two numbers are one
-     * decision and they are deliberately in the same file: theme.js reads both
-     * off this block and hands them to scrollPlan, which does the arithmetic
-     * and knows nothing about either. Change the keyframes below and this
-     * number changes with them. */
-    --scroll-seconds-per-row: 4;
-    --scroll-moving-fraction: 0.7;
+     * At sixteen it is slow enough to read as scenery from a chair two feet
+     * away, and a nine-row card still shows all nine inside two and a half
+     * minutes.
+     *
+     * There is no companion fraction any more. It described how much of a pass
+     * @keyframes card-scroll spent holding at the two ends so they could be
+     * read; a loop has no ends. */
+    --scroll-seconds-per-row: 16;
 }
 
 /* html's height, its black ground and the text-size-adjust guard are core
@@ -288,7 +290,19 @@ body {
  * it is motion for its own sake, and the clock and the weather card -- neither
  * of which is a .card-list -- can never acquire it from this rule. */
 .card-list[data-scroll] .scroller {
-    animation: card-scroll var(--scroll-seconds, 20s) ease-in-out infinite alternate;
+    /* `linear infinite`, and both words are the change T6.9 made.
+     *
+     * `linear` because a loop has no ends to ease into: an ease-in-out curve
+     * on a cycle that restarts where it began is a card that visibly slows
+     * down and speeds up at an arbitrary row, which is worse than not easing
+     * at all. Constant speed is also the only thing that makes the seam
+     * invisible -- the frame after the restart has to be indistinguishable
+     * from the frame before it, and that is only true if the velocity matches.
+     *
+     * No `alternate`. The card no longer comes back: theme.js has drawn the
+     * list twice and --scroll-distance is exactly one copy, so at the end of a
+     * pass the second copy is sitting where the first started. */
+    animation: card-scroll var(--scroll-seconds, 20s) linear infinite;
     /* Under the attribute, not on `.scroller` at large. `will-change` asks for
      * a compositor layer and keeps it, so declaring it unconditionally would
      * hold three layers open on a 3GB phone for three cards that are usually
@@ -298,13 +312,20 @@ body {
     will-change: transform;
 }
 
-/* `alternate`, so the card walks back up rather than snapping: a jump is the
- * one motion the eye cannot ignore. The holds at 0-15% and 85-100% are the
- * pause at each end -- long enough to read the row that just arrived -- and
- * they are what --scroll-moving-fraction above describes. */
+/* One copy of the list, travelled at a constant speed, for ever.
+ *
+ * --scroll-distance is the *pitch* of one copy and theme.js measures it rather
+ * than computing it: the rows carry a border between them and none after the
+ * last, so a copy sitting inside a pair is one border taller than a copy on
+ * its own. Being wrong by that one pixel would be a jolt every couple of
+ * minutes, which is exactly the motion this design exists to avoid.
+ *
+ * There is nothing here to hold at. T6.6's keyframes paused at 0-15% and
+ * 85-100% so the top and the bottom of the card could be read; a loop reaches
+ * every row on every pass, so the reading time is the pass itself. */
 @keyframes card-scroll {
-    0%, 15%   { transform: translateY(0); }
-    85%, 100% { transform: translateY(calc(-1 * var(--scroll-distance, 0px))); }
+    from { transform: translateY(0); }
+    to   { transform: translateY(calc(-1 * var(--scroll-distance, 0px))); }
 }
 
 /* --- A value that changed says so, once, briefly (T6.2 step 2) ------------

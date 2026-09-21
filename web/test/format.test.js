@@ -8,7 +8,7 @@ const {
     sparklinePath, formatTemp, formatBattery, tempClass, BATTERY_WARN_C, BATTERY_HOT_C,
     formatRange, weatherGlyph, WEATHER_LABELS,
     overflowsBy, scrollPlan, worthScrolling,
-    SCROLL_SECONDS_PER_ROW, SCROLL_MOVING_FRACTION, SCROLL_MIN_TRAVEL_PX,
+    SCROLL_SECONDS_PER_ROW, SCROLL_MIN_TRAVEL_PX,
     offsetFor, burnInSchedule,
     BURN_IN_OFFSETS, BURN_IN_STEP_MINUTES, BURN_IN_AMPLITUDE_PX,
 } = require('../js/format.js');
@@ -332,35 +332,46 @@ test('overflowsBy treats an unusable measurement as no overflow', () => {
 });
 
 test('scrollPlan says do not scroll at the boundary, and does one row past it', () => {
-    assert.equal(scrollPlan(5, 5, 4, 0.7), null);
-    const plan = scrollPlan(6, 5, 4, 0.7);
+    assert.equal(scrollPlan(5, 5, 16), null);
+    const plan = scrollPlan(6, 5, 16);
     assert.equal(plan.hidden, 1);
-    // One hidden row travels for one row's worth of seconds; the cycle is
-    // longer than the travel by whatever the keyframes hold at the two ends.
-    assert.equal(plan.seconds, Math.round((4 / 0.7) * 100) / 100);
 });
 
-test('scrollPlan spends the theme seconds per hidden row', () => {
-    // Six rows hidden at four seconds each is 24 seconds of travel, in a cycle
-    // that also holds at both ends.
-    const plan = scrollPlan(9, 3, 4, 0.7);
-    assert.equal(plan.hidden, 6);
-    assert.ok(Math.abs(plan.seconds * 0.7 - 24) < 0.05,
-              `expected ~24s of travel, got ${plan.seconds * 0.7}`);
+test('a pass is the whole list, not the hidden part of it', () => {
+    // T6.9 turned the card round: it used to walk down as far as the hidden
+    // rows and come back, and it now goes round and round past a seam the
+    // theme has made invisible by drawing the list twice. So the pass is the
+    // list, and two cards showing nine rows move at the same speed whether
+    // one row is hidden or five -- which is what somebody watching the panel
+    // would expect, and was not true before.
+    assert.equal(scrollPlan(9, 3, 16).seconds, 9 * 16);
+    assert.equal(scrollPlan(9, 8, 16).seconds, 9 * 16);
+    // And the hidden count is still what decides whether to move at all.
+    assert.equal(scrollPlan(9, 3, 16).hidden, 6);
+    assert.equal(scrollPlan(9, 8, 16).hidden, 1);
 });
 
-test('scrollPlan falls back to its own numbers when the theme sets none', () => {
+test('the shipped speed is a quarter of what T6.6 scrolled at', () => {
+    // The one number this change is actually about, pinned so that "a quarter"
+    // is a claim with a check under it rather than a sentence in a commit
+    // message. Speed in pixels per second is rowHeight / secondsPerRow on
+    // either design -- T6.6 spent 4s of *travel* per hidden row, and this
+    // spends 16s per row of a pass that travels the whole list -- so the two
+    // are comparable by this constant alone.
+    assert.equal(SCROLL_SECONDS_PER_ROW, 16);
+});
+
+test('scrollPlan falls back to its own number when the theme sets none', () => {
     // getComputedStyle on a custom property a theme never declared parses to
     // NaN, which must not become a NaN-second animation.
-    const plan = scrollPlan(6, 5, NaN, NaN);
-    assert.equal(plan.seconds,
-                 Math.round((SCROLL_SECONDS_PER_ROW / SCROLL_MOVING_FRACTION) * 100) / 100);
-    assert.deepEqual(scrollPlan(6, 5, 0, 0), plan);
-    assert.deepEqual(scrollPlan(6, 5, -4, 2), plan);
+    const plan = scrollPlan(6, 5, NaN);
+    assert.equal(plan.seconds, 6 * SCROLL_SECONDS_PER_ROW);
+    assert.deepEqual(scrollPlan(6, 5, 0), plan);
+    assert.deepEqual(scrollPlan(6, 5, -4), plan);
 });
 
 test('a refresh that changes no rows produces the identical plan, so the scroll is not reset', () => {
-    // This is step 4 of the task, stated where it can be tested. window.onData
+    // This is step 4 of T6.6, stated where it can be tested. window.onData
     // replaces every row in the card every 60s; the scroll survives that for
     // two reasons, and this is the second of them.
     //
@@ -375,12 +386,12 @@ test('a refresh that changes no rows produces the identical plan, so the scroll 
     // no clock, no random, no accumulating state. A plan that drifted by a
     // hundredth of a second per refresh would rewrite the declaration once a
     // minute, for ever.
-    const before = scrollPlan(9, 3.4, 4, 0.7);
-    const after = scrollPlan(9, 3.4, 4, 0.7);
+    const before = scrollPlan(9, 3.4, 16);
+    const after = scrollPlan(9, 3.4, 16);
     assert.deepEqual(after, before);
     // And the card that stopped overflowing stops moving, rather than keeping
     // an animation with a stale distance.
-    assert.equal(scrollPlan(3, 3.4, 4, 0.7), null);
+    assert.equal(scrollPlan(3, 3.4, 16), null);
 });
 
 // --- T6.8: the weather card -------------------------------------------------

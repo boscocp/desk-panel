@@ -92,8 +92,12 @@ body {
     /* Read off the section by theme.js and handed to scrollPlan. Declared here
      * rather than on .col-body because that is the element theme.js measures
      * from, and a custom property inherits down, never up. */
-    --scroll-seconds-per-row: 6;
-    --scroll-moving-fraction: 0.7;
+    /* A quarter of the six seconds this theme shipped with, for the reason
+     * T6.9 gives in the neon theme's copy: the card goes round now instead of
+     * walking down and back, and a movement without ends is one the eye keeps
+     * returning to. Still not the same number as neon's -- this theme's rows
+     * are two lines tall, so a row here is worth more reading time. */
+    --scroll-seconds-per-row: 24;
 
     min-width: 0;
     min-height: 0;
@@ -140,15 +144,17 @@ body {
 }
 
 .col[data-scroll] .scroller {
-    animation: col-scroll var(--scroll-seconds, 30s) ease-in-out infinite alternate;
+    /* linear, and no alternate: see the neon theme's copy. A loop has no ends
+     * to ease into, and constant speed is what makes the seam invisible. */
+    animation: col-scroll var(--scroll-seconds, 30s) linear infinite;
     /* Under the attribute for the reason the neon theme's copy gives: a layer
      * that is asked for is a layer that is kept. */
     will-change: transform;
 }
 
 @keyframes col-scroll {
-    0%, 15%   { transform: translateY(0); }
-    85%, 100% { transform: translateY(calc(-1 * var(--scroll-distance, 0px))); }
+    from { transform: translateY(0); }
+    to   { transform: translateY(calc(-1 * var(--scroll-distance, 0px))); }
 }
 
 @media (prefers-reduced-motion: reduce) {

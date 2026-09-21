@@ -177,17 +177,27 @@ function overflowsBy(rowCount, visibleRows) {
     return Math.max(0, Math.ceil(rowCount) - Math.floor(visibleRows));
 }
 
-// How long one pass takes, given the seconds a theme wants to spend per hidden
-// row and the fraction of the cycle its @keyframes block spends moving.
+// How long the card takes to walk past one row.
 //
-// The fraction is a parameter rather than a constant because it is a property
-// of CSS this file cannot see: the keyframes hold at each end so the top and
-// the bottom of the card can actually be read, and how long they hold is the
-// theme's taste. Passing it in keeps the two numbers in one file -- the
-// theme's stylesheet -- instead of splitting one decision across two languages
-// the way BATTERY_HOT_C and BLANK_AT_C are split.
-const SCROLL_SECONDS_PER_ROW = 4;
-const SCROLL_MOVING_FRACTION = 0.7;
+// **Sixteen, which is a quarter of the speed T6.6 shipped** (T6.9). Four
+// seconds a row was chosen against a card that walked down and came back; the
+// card now goes round and round in one direction for as long as the panel is
+// on, and a movement that never ends is a movement the eye keeps returning to
+// at four times that speed. At sixteen it is slow enough to be scenery and
+// still gives up a row every sixteen seconds, so the whole of a nine-row card
+// is on screen inside two and a half minutes.
+//
+// It is the *whole* list that moves now, not just the hidden part, so a pass
+// is rowCount * this rather than hidden * this. The two agree about speed in
+// pixels per second, which is the thing a reader actually experiences, and
+// that is why the number could be compared with the old one at all.
+//
+// There is no companion fraction any more. T6.6's keyframes held at each end
+// so the top and bottom of the card could be read, so the cycle was longer
+// than the travel and format.js had to be told by how much; a loop has no
+// ends to hold at. `--scroll-moving-fraction` is gone from both themes with
+// it.
+const SCROLL_SECONDS_PER_ROW = 16;
 
 // Below this, a card does not move however the row arithmetic came out.
 //
@@ -217,18 +227,22 @@ function worthScrolling(travelPx) {
 // null rather than {hidden: 0}: "do not scroll" is a different answer from
 // "scroll by nothing", and a caller that has to check a field to tell them
 // apart eventually forgets to.
-function scrollPlan(rowCount, visibleRows, secondsPerRow, movingFraction) {
+//
+// `hidden` is still what decides *whether* to move -- a card showing every row
+// it has must not -- and it no longer decides how far or how long. The card
+// goes round: it walks the full list once per pass and the seam is invisible
+// because the theme has drawn the list twice (T6.9). So the pass is rowCount
+// long, and a card with one row hidden out of nine takes the same two and a
+// half minutes as one with five hidden, because both are showing the same
+// nine rows at the same speed.
+function scrollPlan(rowCount, visibleRows, secondsPerRow) {
     const hidden = overflowsBy(rowCount, visibleRows);
     if (hidden === 0) {
         return null;
     }
     const perRow = Number.isFinite(secondsPerRow) && secondsPerRow > 0
         ? secondsPerRow : SCROLL_SECONDS_PER_ROW;
-    const moving = Number.isFinite(movingFraction) && movingFraction > 0 && movingFraction <= 1
-        ? movingFraction : SCROLL_MOVING_FRACTION;
-    // The travel itself is hidden * perRow; the cycle is longer than the
-    // travel by whatever the keyframes hold at the two ends.
-    return { hidden: hidden, seconds: Math.round((hidden * perRow / moving) * 100) / 100 };
+    return { hidden: hidden, seconds: Math.round(rowCount * perRow * 100) / 100 };
 }
 
 // pct: number (e.g. 1.23 for +1.23%). Sign, one decimal, percent sign.
@@ -599,7 +613,7 @@ if (typeof module !== 'undefined' && module.exports) {
         offsetFor, burnInSchedule,
         BURN_IN_OFFSETS, BURN_IN_STEP_MINUTES, BURN_IN_AMPLITUDE_PX,
         overflowsBy, scrollPlan, worthScrolling,
-        SCROLL_SECONDS_PER_ROW, SCROLL_MOVING_FRACTION, SCROLL_MIN_TRAVEL_PX,
+        SCROLL_SECONDS_PER_ROW, SCROLL_MIN_TRAVEL_PX,
         sparklinePath,
         formatBattery, tempClass, BATTERY_WARN_C, BATTERY_HOT_C,
     };
