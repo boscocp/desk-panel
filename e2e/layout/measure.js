@@ -16,6 +16,12 @@
 // bottom of the CRYPTO card -- hiding a live price's change and sparkline. The
 // harness passed. Nothing here was looking, and a comment in style.css claimed
 // otherwise.
+//
+// T6.11 found two more of the same shape, both in `ink` below: a ::before has
+// no DOM node, and the walk started at a section's descendants rather than at
+// the section. Between them that made the clock, the date, the stale badge
+// and all four card titles invisible to the overlap check -- in the file
+// whose entire purpose is to catch two things drawn in one place.
 
 const SECTIONS = ['clock', 'date', 'quotes', 'fx', 'crypto', 'weather', 'battery',
                   'stale-badge'];
