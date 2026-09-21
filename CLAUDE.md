@@ -61,6 +61,26 @@ requirement, not a preference (ADR 0003).
 Every acceptance criterion is a command with an exit code. If you find yourself judging a task
 by looking at output, the task file is wrong — fix the task file.
 
+## The wave protocol
+**"Execute the next wave" is a standing instruction, not a question.** It means: take what the
+last `## Resuming after (wave N)` section of `STATUS.md` recommends, take as many tasks as the
+wave sensibly holds, and run the whole loop without stopping to confirm — implement, run the
+acceptance commands, branch, commit, PR, **review, apply what the review found**, merge, then
+write the next "Resuming after" section and the wave's note in `docs/harness-notes/`.
+
+**Do what is recommended.** Do not ask which option to take when the record already answers, and
+do not hand the work back at the review. Stop and ask only when it is critical:
+
+- an invariant above, or a decision in an ADR, would have to be contradicted;
+- a secret, a token or hardware that is not here is needed to go further;
+- the action is irreversible or reaches outside the repository — a force-push over a published
+  branch, publishing, deleting data;
+- the recommendation itself is wrong. Then fix the task file, say so in one line, and continue.
+
+That last "Resuming after" section is the next wave's prompt, so write it honestly — including
+what is still only true on this desk. See [docs/LEARNING-REPORT.md](docs/LEARNING-REPORT.md) for
+what this loop has cost and caught, wave by wave.
+
 ## Conventions
 - English everywhere: code, comments, docs, commit messages.
 - Conventional commits (`feat:`, `fix:`, `docs:`, `test:`, `chore:`).

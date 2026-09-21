@@ -126,6 +126,9 @@ something wider, so its text widths are a conservative estimate rather than the 
 | T6.5 | **A sparkline beside every value** | done | 2026-09-19. Asked for at the desk, mid-wave. The series is **fetched, not accumulated**: the WebView reloads on every wake (ADR 0014) so a page-side buffer is lost exactly when the screen returns, and a server-side one dies with the login session, so the chart would restart every morning. Real daily closes instead, from the same key-free upstreams that serve the prices — and the two disagree about direction, AwesomeAPI newest-first against Binance oldest-first, which is the trap: drawing one without reversing renders a rise as a fall and nothing about the picture says so. Each has its own `normalise_history` and its own test. Its own cache at 6h, and it never marks the payload `stale` — a decoration on a row that already carries the number it decorates must not be able to call that number old. `sparklinePath` is pure and in `format.js`, scaled to the series' own min and max rather than to zero, because a currency that moved 0.4% is a flat line against a zero baseline: true about the magnitude, useless about the trend. B3 carries an empty series until a brapi token exists. Two layout facts the device taught: the crypto card has the panel's widest prices and no slack, so the sparkline shrinks before the ticker does (it rendered `B…` first), and `vector-effect: non-scaling-stroke` is load-bearing under `preserveAspectRatio="none"` |
 | T6.4 | Night profile | done | 2026-09-21. Phase 6 is finished. The window rides `/quotes` as two strings and is compared against the **phone's** clock twice — `isNight` for the glow, `NightWindow.java` for the backlight — because the two mechanisms do not meet and a page cannot reach `screenBrightness`. Three things cost time. **(1)** `DataPayload.merge` rebuilds the payload key by key, so the first build had a correct server, a correct page and a correct predicate on both sides, no `night` in the merge, and a panel that simply stayed bright with nothing in logcat; the device acceptance is what found it. **(2)** The acceptance the task shipped with — `logcat -c && sleep 90 && grep night=on` — could not pass against a correct app: the marker is a transition. `e2e/check_night_marker.py` drives the window instead, both edges, running the server itself. **(3)** The page's half is `animation: none`, not the blackout's `paused`, because here the panel is visible and a paused pulse is one number frozen at its brightest until morning |
 | T6.8 | **The weather card earns its space** | done | 2026-09-20, wave 14. `formatRange` kills `-12-42`; `weatherGlyph` maps the WMO table onto six drawn conditions plus a named `unknown` that draws nothing. The neon card is city, glyph + 48px temperature, range, condition, measured at 872x392 under the stress payload; the city wraps rather than ellipsising, because it is the one string on the panel a reader cannot reconstruct from a truncation and it is server config. The plain theme takes the same two functions and its own answer |
+| T6.9 | **The scroll goes round, at a quarter of the speed** | done | 2026-09-21, wave 17. Asked for from the chair. T6.6's card walked down to its hidden rows and back at four seconds a row; it now goes round in one direction at sixteen. The loop is the list drawn twice with the box moved by exactly one copy, and the pitch is **measured off the clone rather than computed** — rows carry a border between them and none after the last, so a copy inside a pair is one border taller than a copy alone, and that pixel is a jolt every couple of minutes. `check_scroll.py` asserts it exactly, not within a tolerance, and was mutation-tested from both sides. `scrollPlan` loses its fourth argument with the holds it described |
+| T6.10 | **The battery corner draws its two labels** | done | 2026-09-21, wave 17. Asked for from the chair. `BAT 87% · 31°C` spent four characters of the widest thing in that corner saying what a picture says at a glance. `batteryFields` splits the line and `formatBattery` composes its string from it, so the two cannot drift. The battery draws its own charge, to the body's **inner** edge — a 1.6-unit stroke sits half outside its path, so a bar drawn to the coordinates vanishes under its own outline above about 80%. `unplugged` stays a word: there is no picture for "this phone is running its own battery down" that a stranger reads the way they read a battery outline. Turning the line into a flex row took its wrapping away and `check_layout.py` caught it at once |
+| T6.11 | **Every word the panel shows, in the panel's own language** | done | 2026-09-21, wave 17. Asked for from the chair, after `Light drizzle`. A table per language in `format.js`; `language` rides `/quotes` beside `theme` and `night`, so a panel in another country is a restart of the server and never a rebuild. The fallback is **pt-BR and not English**, and the device's own locale is deliberately not consulted. `DEFASADO` rather than `DESATUALIZADO`, and the badge from 20px to 17: it shares a strip with the weather card's title and neither word is fixed any more. **It also found two blind spots in `measure.js`** — a `::before` has no DOM node, and the ink walk started at a section's *descendants*, so the clock, the date, the badge and all four card titles were invisible to the overlap check |
 
 ## Phase 7 — Packaging
 
@@ -163,6 +166,117 @@ and the first line of each file says so.
 |---|---|---|---|
 | T9.1 | **The next meeting, under the clock** | todo | Google Calendar and Microsoft Outlook merged, the soonest event under the clock in the `#shortcuts` strip, between T8.2's two buttons. Blocked behind T8.2 for a layout reason and behind **ADR 0016** for a bigger one: this is the first feature that puts *personal data* on a panel whose server has no authentication, and the refresh tokens it needs are credentials sitting on a desktop PC. OAuth stays on the PC and never reaches the APK — two acceptance lines exist for exactly that. The merge is where the design is: the two providers disagree about all-day events, about time zones and about the word for "declined" |
 | T9.2 | **Spike: can the panel talk to an assistant for nothing?** | todo | A button to ask something out loud and hear an answer, with the whole pipeline on the PC — invariant 1 means the page cannot call anything. Time-boxed, produces `docs/spikes/2026-voice-assistant.md` and a throwaway prototype under `spikes/`, and is allowed to conclude *do not build this*. The unknown is whether offline STT, a small local model and offline TTS fit inside a latency a person will stand at a panel for; Claude and DeepSeek are the paid comparison, not the plan. Also has to answer the awkward ones: `RECORD_AUDIO` would be the app's first dangerous permission, and an unauthenticated LAN endpoint that runs a model and speaks in someone's room is not in ADR 0015's family |
+
+## Resuming after 2026-09-21 (wave 17)
+
+Wave 17 is **T6.9 + T6.10 + T6.11**, on `wave/17-scroll-icons-and-language`, and none of the
+three came from the backlog: all three were asked for from the chair, in Portuguese, while the
+panel was on. That is worth noting because it is the first wave driven by somebody using the
+thing rather than by the plan.
+
+**Next: T3.9** (the systemd user unit), unchanged — wave 16 pulled TT.10 forward so T3.9's
+parsers land already tested, and what it still needs that nothing here provides is a second
+device for the SSH round trip.
+
+### The scroll goes round, and the seam is the whole difficulty
+
+T6.6 gave an overflowing card a walk down to its hidden rows and back. Two things about that
+were wrong once it was living on a desk: four seconds a row was chosen against a movement with
+*ends*, and a movement that never ends is one the eye keeps returning to; and half its life was
+spent showing rows it had just shown.
+
+The loop is the oldest trick there is — the list drawn twice, the box moved by exactly one copy
+— and the one part that can be wrong by a pixel and look right in every frame but two is the
+distance. **It is measured off the clone, not computed from `scrollHeight`.** Rows carry a
+border between them and none after the last, so a copy sitting inside a pair is one border
+taller than a copy on its own, and that pixel is a jolt every couple of minutes: the exact
+motion T6.6's notes ask this panel never to make, arriving by the back door. `check_scroll.py`
+asserts the pitch *exactly* rather than within a tolerance — a tolerance there is a tolerance
+on the jolt — and it was mutation-tested from both sides.
+
+`plain` keeps a different number from `neon`, 24 against 16, because its rows are two lines
+tall. The quarter is the ratio, not the constant.
+
+### The battery icon draws its own charge, which is more than was asked for
+
+The ask was to replace `BAT` with a picture. A static outline beside a two-digit number is a
+label; a filled one is read *before* the number is, which is the same trade the sparkline makes
+beside a price. Dropping the `<rect>` in `renderBatteryIcon` puts it back to a plain outline.
+
+The bar goes to the body's **inner** edge and not to the path: a 1.6-unit stroke sits half
+outside the line it is drawn on, so a bar drawn to the path's own coordinates disappears under
+its own outline and reads as one solid lozenge at every level above about 80%.
+
+`unplugged` is still a word, deliberately. There is no picture for "this phone is now running
+its own battery down" that a stranger reads the way they read a battery outline, and it is the
+one thing in that corner that matters (ADR 0014).
+
+### The language is config, and the fallback is pt-BR
+
+Everything a person reads comes from a table in `format.js`, and `language` rides `/quotes`
+beside `theme` and `night` — so a panel in another country is a restart of the server and never
+a rebuild (ADR 0013). `DataPayload.merge` copies it, with a test, because that copy is exactly
+what T6.4 forgot and nothing else in any layer would have noticed.
+
+Two decisions that could each have gone the other way:
+
+- **The fallback is pt-BR, not English.** The same call `host.useTheme` makes about an unknown
+  theme name: a typo in a file on the PC must cost nothing anybody can see, rather than
+  switching the whole panel to a language its owner did not ask for.
+- **The device's own locale is not consulted.** A phone in a stand running its system in one
+  language is not evidence about who is looking at the panel, and there would be no way to ask
+  for the other one. `toLocaleDateString(undefined, …)` was doing exactly that and is why the
+  date was English under Portuguese words.
+
+English stays everywhere else — code, comments, docs, commits — and that is not an
+inconsistency. Those are read by whoever works on this; the fifteen strings on the glass are
+read by whoever owns it.
+
+`DEFASADO`, not `DESATUALIZADO`: the badge shares its strip with the weather card's title and
+neither word is fixed any more. The badge also came down from 20px to 17, because the title is
+read every minute of every day and the badge is on screen for minutes a month. The constraint
+left behind is real and a third language has to be checked against it — `check_layout.py`
+takes `--lang` now.
+
+### The harness could not see either collision, and that is the bigger finding
+
+`measure.js` compares *ink* rather than boxes, because two sections are allowed to share a
+rectangle. Two whole categories of ink were invisible to it, and T6.11 walked into both at
+once:
+
+- **A `::before` has no DOM node**, so `querySelectorAll('*')` had never been shown a card
+  title. It measures them now with a probe span carrying the pseudo's computed font — the only
+  way to get a width for text with no element. Firefox computes the `font` shorthand to the
+  empty string on a pseudo, so the probe has to copy the longhands; with the shorthand it
+  measured the text in the document's default face and answered quietly wrong.
+- **The ink walk started at a section's *descendants*.** A section whose text sits directly on
+  the section element — `#clock`, `#date` and `#stale-badge`, three of the eight — contributed
+  no ink at all. The overlap check has therefore never been able to see the clock, the date or
+  the badge collide with anything, in the file whose entire purpose is to catch exactly that.
+
+Both were found by trying a thirteen-letter Portuguese word for STALE, watching it land
+squarely on `TEMPO`, and being told the pass was clean. Fixing the second is what made the
+first one's measurement mean anything — and with both fixed, even `DEFASADO` at 20px was
+reported as a 4x18px overlap.
+
+### Verified
+
+`make check`; the five browser checks across **both themes and both languages** (sixteen
+combinations for the four that take `--theme`, plus `check_pulse`); and the panel itself on the
+phone, in pt-BR, with both icons and the release APK installed.
+
+### What is still only true on this desk
+
+- **The loop has not been watched for a full pass on the device.** The seam is asserted to the
+  pixel by `check_scroll.py` in Firefox, and whether sixteen seconds a row reads as scenery
+  rather than as motion from a chair is the task's manual check.
+- **The server on this desk is running again**, started by hand for the device check and left
+  up. Stop it **by PID**, found through `ss -ltnp 'sport = :8777'`, never
+  `pkill -f "server/server.py"`.
+- **Only two languages ship**, and the badge-versus-title constraint is not enforced anywhere
+  except by running `check_layout.py --lang` for each one. A third language that nobody
+  measures will overlap silently — which is now at least *possible* to catch, and was not
+  before this wave.
 
 ## Resuming after 2026-09-21 (wave 16)
 
