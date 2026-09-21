@@ -361,26 +361,52 @@ const BATTERY_WARN_C = 40;
 // "BAT" rather than a card title: T5.4 demotes this from a card to a line, so
 // the line has to say what it is on its own. Three characters is the cheapest
 // way to do that.
-function formatBattery(battery) {
+// The battery line taken apart, so a theme can decide what to draw beside each
+// piece (T6.10). null when there is nothing worth a corner at all.
+//
+// Split out of formatBattery, which now composes its string from this, so the
+// two can never disagree about what the line says. The reason a theme needs
+// the pieces is that `neon` draws an icon in front of two of them and a bare
+// string cannot be taken apart afterwards -- not reliably, and not at all once
+// the separator is a character somebody's locale also uses.
+//
+//   level      "87%", always present
+//   temp       "31°C", or null when the phone sent no usable temperature
+//   unplugged  true only when the phone said so
+function batteryFields(battery) {
     if (!battery || typeof battery.level !== 'number' || !Number.isFinite(battery.level)) {
-        return '';
+        return null;
     }
-    const parts = [`BAT ${Math.round(battery.level)}%`];
-
     // Reuses formatTemp, so an absent temperature is drawn as an absence here
     // exactly as it is in the weather line. The native side leaves the key out
     // rather than sending a zero, for the same reason the server does.
     const temp = formatTemp(battery.tempC);
-    if (temp !== '--') {
-        parts.push(`${temp}°C`);
-    }
+    return {
+        level: `${Math.round(battery.level)}%`,
+        temp: temp === '--' ? null : `${temp}°C`,
+        // Only the interesting half is worth saying. On this desk the phone is
+        // powered from the PC's USB, so charging is the resting state and
+        // saying so every second of every day would spend the line's width on
+        // no information; unplugged is the condition worth a word, because it
+        // means the panel is now running the battery down (ADR 0014).
+        //
+        // `=== false` and not `!charging`: a payload with no `charging` key at
+        // all has not said the phone is on battery, and the corner must not
+        // claim it has.
+        unplugged: battery.charging === false,
+    };
+}
 
-    // Only the interesting half is spelled out. On this desk the phone is
-    // powered from the PC's USB, so charging is the resting state and saying so
-    // every second of every day would spend the line's width on no information;
-    // "unplugged" is the condition that is worth a word, because it means the
-    // panel is now running the battery down (ADR 0014).
-    if (battery.charging === false) {
+function formatBattery(battery) {
+    const fields = batteryFields(battery);
+    if (!fields) {
+        return '';
+    }
+    const parts = [`BAT ${fields.level}`];
+    if (fields.temp) {
+        parts.push(fields.temp);
+    }
+    if (fields.unplugged) {
         parts.push('unplugged');
     }
     return parts.join(' · ');
@@ -615,6 +641,6 @@ if (typeof module !== 'undefined' && module.exports) {
         overflowsBy, scrollPlan, worthScrolling,
         SCROLL_SECONDS_PER_ROW, SCROLL_MIN_TRAVEL_PX,
         sparklinePath,
-        formatBattery, tempClass, BATTERY_WARN_C, BATTERY_HOT_C,
+        formatBattery, batteryFields, tempClass, BATTERY_WARN_C, BATTERY_HOT_C,
     };
 }

@@ -744,6 +744,80 @@ body {
 /* Above 40 degrees. Visible from across the room and still not an alarm: the
  * colour changes, nothing flashes, nothing moves, and the number that earned it
  * is right there in the same line. */
+/* --- The battery line's two icons (T6.10) -------------------------------- *
+ *
+ * The line was `BAT 87% · 31°C`; it is now two pictures and two numbers. Four
+ * characters of the widest thing in this corner were spent saying what a
+ * fourteen-pixel drawing says at a glance from across the room.
+ *
+ * Laid out as a flex row rather than left to the inline flow, because an
+ * inline <svg> sits on the text baseline and a 14px box hanging off a 20px
+ * line leaves the icons a pixel or two low with no way to say so. `center`
+ * puts each icon against the middle of the digits beside it.
+ */
+#battery > div {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+
+    /* Wrapping, and right-aligned, because the rule above this one depends on
+     * it: #battery is capped at 222px and its overflow story is that the line
+     * *wraps* into the two-line foot #weather reserves for it, rather than
+     * running out of the box to the left over the CRYPTO card's prices. A
+     * flex row does not wrap by default, so turning this div into one took
+     * that away -- and check_layout.py caught it immediately, at 289px of
+     * content in a 222px box with `unplugged` 52px outside the viewport.
+     *
+     * flex-end rather than the inherited `text-align: right`, which a flex
+     * container does not pass to its items: without it the second line would
+     * start at the left edge of a right-aligned box. */
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+/* 18px against the line's 20px type, which is smaller than the floor T6.3 sets
+ * for text and is allowed to be: that floor is about resolving letterforms,
+ * and there is nothing inside a battery outline to resolve. 14px was the first
+ * cut and it was wrong from the chair -- the thermometer read as a tick rather
+ * than as an object. 18 puts both icons at about the cap height of the digits
+ * beside them, which is where the eye expects a label to sit. */
+.b-icon {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    fill: none;
+    /* currentColor, which is what makes the icons take the temperature band's
+     * colour with the text (T5.4): the whole line is coloured, so a hot phone
+     * turns its thermometer red without this file knowing the bands exist. */
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+/* The charge, drawn inside the outline. Filled rather than stroked -- it is
+ * the one solid shape in the icon set, and that is what makes it read as a
+ * level rather than as a second outline. `currentColor` again, so it is the
+ * same ink as the body it sits in. */
+.b-fill {
+    fill: currentColor;
+    stroke: none;
+}
+
+/* A little air after each value, so the next icon does not crowd the digits
+ * it is not labelling. The gap above handles the icon-to-value side. */
+.b-value + .b-icon {
+    margin-left: 5px;
+}
+
+/* The one word left in the corner. Dimmer than the numbers and never
+ * coloured by the temperature bands: it is about the charger, not the heat,
+ * and a red "unplugged" would read as a second alarm (ADR 0014). */
+.b-note {
+    color: var(--accent-dim);
+    letter-spacing: 0.06em;
+}
+
 #battery .warm {
     color: var(--warn);
 }
