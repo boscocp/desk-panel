@@ -25,6 +25,7 @@ import org.json.JSONObject;
  *  weather: {tempC, minC, maxC, code, city},
  *  stale:  bool,
  *  theme:  string,
+ *  language: string,
  *  night:  {start, end}}
  * </pre>
  *
@@ -128,6 +129,18 @@ public final class DataPayload {
             // backlight never dims, with a correct server, a correct page
             // and a correct predicate. That is how T6.4 shipped its first
             // build, and `e2e/check_night_marker.py` is what caught it.
+            // Which language the panel speaks (T6.11), passed straight through
+            // for the same reason `theme` is: the set of packaged languages
+            // lives in the APK, the page owns the fallback, and a tag this
+            // class did not recognise would be a tag it had no business
+            // rejecting.
+            //
+            // Absent rather than empty, so an older server leaves it
+            // undefined and the page uses the panel's own language -- the
+            // same path a typo takes.
+            String language = quotes.optString("language", "");
+            payload.put("language", language.isEmpty() ? null : language);
+
             payload.put("night", quotes.optJSONObject("night"));
 
             return escapeForScript(payload.toString());

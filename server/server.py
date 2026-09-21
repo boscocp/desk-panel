@@ -88,6 +88,13 @@ DEFAULT_CONFIG = {
     # installed APK was built with, and guessing would turn a cosmetic typo
     # into a blank panel.
     "theme": "neon",
+    # Which language the panel speaks (T6.11). Runtime config for the same
+    # reason `theme` is: changing what a person reads must never mean
+    # rebuilding the APK (ADR 0013). "pt-BR" and "en" ship; anything else
+    # falls back in the page, not here, because the server has no idea which
+    # languages the installed APK was built with and guessing would turn a
+    # typo into a panel nobody can read.
+    "language": "pt-BR",
     "actions": {},
 }
 
@@ -504,6 +511,10 @@ class App:
         # the desk. A server that sent `night: true` would be answering with
         # its own timezone, and a panel that had been moved would dim an hour
         # late for ever with nothing to explain why.
+        # Rides here with `theme` and `night`, and for the same reason: /quotes
+        # is the payload's carrier and a third endpoint would be a third
+        # request a cycle for a string a human edits by hand.
+        payload["language"] = config.get("language", "")
         payload["night"] = {
             "start": config.get("night_start", ""),
             "end": config.get("night_end", ""),

@@ -69,6 +69,10 @@ All five take `--theme NAME`. Run `check_layout`, `check_blackout` and `check_ni
 theme; `check_scroll` for a theme that answers overflow with motion, and `check_pulse` for one
 that marks a changed value — both are optional in the theme contract (`docs/THEMING.md`).
 
+`check_layout` also takes `--lang TAG`, and it is worth running for every language that ships
+(T6.11). The words are not the same length — `TEMPO` against `WEATHER`, `DEFASADO` against
+`STALE` — and in `neon` the stale badge and the weather card's title share a strip.
+
 Three things are worth knowing before trusting one. The first is true of all five; the other
 two are `check_layout.py` alone, which is the only one of them that measures *where* anything
 is:

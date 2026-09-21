@@ -298,7 +298,7 @@ class AppPayloadTests(unittest.TestCase):
             crypto=[{"symbol": "BTC", "price": 81470.0, "changePct": 1.01}],
         )
         payload = self.app.quotes()
-        self.assertEqual(set(payload), {"quotes", "fx", "crypto", "stale", "theme", "night"})
+        self.assertEqual(set(payload), {"quotes", "fx", "crypto", "stale", "theme", "night", "language"})
         self.assertFalse(payload["stale"])
         self.assertEqual(payload["quotes"][0]["symbol"], "PETR4")
 
@@ -323,6 +323,26 @@ class AppPayloadTests(unittest.TestCase):
         app = App({k: v for k, v in CONFIG.items() if k != "theme"}, clock=self.clock)
         self._stub_providers(quotes=[], fx=[], crypto=[])
         self.assertEqual(app.quotes()["theme"], "")
+
+    def test_quotes_carries_the_configured_language(self):
+        """T6.11: everything a person reads comes from a key in this file, so
+        a panel in another country is a restart of this server and never a
+        rebuild of the APK (ADR 0013).
+
+        A real tag rather than the default, so the assertion can fail."""
+        app = App(dict(CONFIG, language="en"), clock=self.clock)
+        self._stub_providers(quotes=[], fx=[], crypto=[])
+        self.assertEqual(app.quotes()["language"], "en")
+
+    def test_quotes_language_is_empty_when_config_omits_it(self):
+        """An absent key is an empty string, never a missing one. The page
+        reads a falsy tag as "use the panel's own language", which is the same
+        path a typo takes -- and that fallback is pt-BR and not English, so a
+        mistake never switches the panel to a language nobody asked for."""
+        app = App({k: v for k, v in CONFIG.items() if k != "language"},
+                  clock=self.clock)
+        self._stub_providers(quotes=[], fx=[], crypto=[])
+        self.assertEqual(app.quotes()["language"], "")
 
     def test_quotes_carries_the_night_window_as_the_config_spells_it(self):
         """T6.4: the window rides /quotes beside `theme`, and it rides as two
@@ -356,7 +376,7 @@ class AppPayloadTests(unittest.TestCase):
         payload = self.app.quotes()
         self.assertTrue(payload["stale"])
         self.assertEqual(payload["quotes"], [])
-        self.assertEqual(set(payload), {"quotes", "fx", "crypto", "stale", "theme", "night"})
+        self.assertEqual(set(payload), {"quotes", "fx", "crypto", "stale", "theme", "night", "language"})
 
     def test_one_market_failing_does_not_empty_the_other_two(self):
         # Found on the desk, by changing a ticker to one that needs a token:

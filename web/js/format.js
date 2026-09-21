@@ -266,34 +266,136 @@ function changeClass(pct) {
     return pct > 0 ? 'up' : 'down';
 }
 
-// WMO weather interpretation codes (open-meteo, same table brapi's weather
-// proxy will pass through) mapped to a short human label.
-const WEATHER_LABELS = {
-    0: 'Clear sky',
-    1: 'Mainly clear',
-    2: 'Partly cloudy',
-    3: 'Overcast',
-    45: 'Fog',
-    48: 'Rime fog',
-    51: 'Light drizzle',
-    53: 'Drizzle',
-    55: 'Dense drizzle',
-    61: 'Light rain',
-    63: 'Rain',
-    65: 'Heavy rain',
-    71: 'Light snow',
-    73: 'Snow',
-    75: 'Heavy snow',
-    80: 'Light showers',
-    81: 'Showers',
-    82: 'Violent showers',
-    95: 'Thunderstorm',
-    96: 'Thunderstorm, hail',
-    99: 'Thunderstorm, heavy hail',
+// --- Every word the panel shows (T6.11) -------------------------------------
+//
+// The panel stands on a desk in Brazil and said "Light drizzle". The rule for
+// the rest of this repository is English everywhere -- code, comments, docs,
+// commit messages -- and none of that is what a person reads from a chair two
+// feet away, which is the one category that has to be in their language.
+//
+// **The language is config, exactly like the theme** (T3.12, ADR 0013). It
+// rides the payload from `server/config.toml` and defaults to pt-BR, so
+// changing it is editing a file on the PC and never a rebuild of the APK. The
+// device's own locale is deliberately *not* what decides: a phone in a stand
+// running the system in one language is not evidence about who is looking at
+// the panel, and there would be no way to ask for the other one.
+//
+// A table per language rather than a lookup per string. Two reasons, and the
+// second is the one that matters: a missing key in a table is visible the
+// moment the table is read next to its neighbour, and a table is the shape a
+// third language is added in without touching a single call site.
+//
+// WMO weather interpretation codes (open-meteo, the same table brapi's
+// weather proxy passes through) mapped to a short human label. Short is the
+// constraint: the weather card gives the condition one line at 20px, and
+// "Trovoada com granizo forte" is already the widest thing on the panel.
+const LANGUAGES = {
+    'pt-BR': {
+        // The tag the table answers to, carried inside it so that a caller
+        // holding the table can hand it to Intl -- `toLocaleDateString` takes
+        // a tag and not a vocabulary, and the resolved tag is the one thing
+        // `strings` knows that its caller does not.
+        tag: 'pt-BR',
+        unknown: 'Desconhecido',
+        // "DEFASADO", not "DESATUALIZADO", and the difference is five
+        // characters the badge does not have. It is drawn in the top corner
+        // of the weather card, where the card's own title already is: at
+        // thirteen characters the badge lands on top of TEMPO and both words
+        // become unreadable. Defasado is what a quote that is behind the
+        // market is called in Portuguese anyway, which is exactly what this
+        // badge means.
+        stale: 'DEFASADO',
+        // "na bateria" rather than "desconectado", which in Portuguese reads
+        // first as a network having dropped -- the wrong alarm entirely on a
+        // panel whose other states are about the PC being away.
+        unplugged: 'na bateria',
+        titles: { quotes: 'B3', fx: 'CÂMBIO', crypto: 'CRIPTO', weather: 'TEMPO' },
+        weather: {
+            0: 'Céu limpo',
+            1: 'Predominantemente limpo',
+            2: 'Parcialmente nublado',
+            3: 'Encoberto',
+            45: 'Neblina',
+            48: 'Neblina congelante',
+            51: 'Garoa fraca',
+            53: 'Garoa',
+            55: 'Garoa forte',
+            61: 'Chuva fraca',
+            63: 'Chuva',
+            65: 'Chuva forte',
+            71: 'Neve fraca',
+            73: 'Neve',
+            75: 'Neve forte',
+            80: 'Pancadas fracas',
+            81: 'Pancadas',
+            82: 'Pancadas violentas',
+            95: 'Trovoada',
+            96: 'Trovoada com granizo',
+            99: 'Trovoada com granizo forte',
+        },
+    },
+    en: {
+        tag: 'en',
+        unknown: 'Unknown',
+        stale: 'STALE',
+        unplugged: 'unplugged',
+        titles: { quotes: 'B3', fx: 'FX', crypto: 'CRYPTO', weather: 'WEATHER' },
+        weather: {
+            0: 'Clear sky',
+            1: 'Mainly clear',
+            2: 'Partly cloudy',
+            3: 'Overcast',
+            45: 'Fog',
+            48: 'Rime fog',
+            51: 'Light drizzle',
+            53: 'Drizzle',
+            55: 'Dense drizzle',
+            61: 'Light rain',
+            63: 'Rain',
+            65: 'Heavy rain',
+            71: 'Light snow',
+            73: 'Snow',
+            75: 'Heavy snow',
+            80: 'Light showers',
+            81: 'Showers',
+            82: 'Violent showers',
+            95: 'Thunderstorm',
+            96: 'Thunderstorm, hail',
+            99: 'Thunderstorm, heavy hail',
+        },
+    },
 };
 
-function weatherLabel(code) {
-    return WEATHER_LABELS[code] || 'Unknown';
+// The panel's language when the config says nothing, which is where it stands.
+const FALLBACK_LANGUAGE = 'pt-BR';
+
+// The vocabulary for one language tag, never null.
+//
+// The fallback is the panel's own language and not English, and it is the same
+// decision `host.useTheme` makes about an unknown theme name: a typo in a file
+// on the PC costs nothing anybody can see, rather than turning the whole panel
+// into a language its owner did not ask for. Matched on the tag's primary
+// subtag as well, so "pt", "pt-PT" and "en-GB" all land somewhere sensible --
+// a config that says "pt" is not wrong enough to ignore.
+function strings(language) {
+    if (typeof language !== 'string' || !language) {
+        return LANGUAGES[FALLBACK_LANGUAGE];
+    }
+    if (LANGUAGES[language]) {
+        return LANGUAGES[language];
+    }
+    const primary = language.split('-')[0].toLowerCase();
+    for (const tag of Object.keys(LANGUAGES)) {
+        if (tag.split('-')[0].toLowerCase() === primary) {
+            return LANGUAGES[tag];
+        }
+    }
+    return LANGUAGES[FALLBACK_LANGUAGE];
+}
+
+function weatherLabel(code, language) {
+    const table = strings(language);
+    return table.weather[code] || table.unknown;
 }
 
 // minC/maxC: the day's low and high, or null when the upstream had none.
@@ -397,7 +499,10 @@ function batteryFields(battery) {
     };
 }
 
-function formatBattery(battery) {
+// The whole line as one string, for a theme that draws no icons. `BAT` stays
+// English-shaped because it is the same abbreviation in both languages the
+// panel ships; the one real word in the line comes from the table.
+function formatBattery(battery, language) {
     const fields = batteryFields(battery);
     if (!fields) {
         return '';
@@ -407,7 +512,7 @@ function formatBattery(battery) {
         parts.push(fields.temp);
     }
     if (fields.unplugged) {
-        parts.push('unplugged');
+        parts.push(strings(language).unplugged);
     }
     return parts.join(' · ');
 }
@@ -634,7 +739,8 @@ function burnInSchedule() {
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         formatPrice, formatRate, formatPair, formatTemp, formatChange, changeClass,
-        weatherLabel, weatherGlyph, formatRange, WEATHER_LABELS,
+        weatherLabel, weatherGlyph, formatRange,
+        strings, LANGUAGES, FALLBACK_LANGUAGE,
         isNight,
         offsetFor, burnInSchedule,
         BURN_IN_OFFSETS, BURN_IN_STEP_MINUTES, BURN_IN_AMPLITUDE_PX,

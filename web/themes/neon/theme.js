@@ -26,6 +26,17 @@
     // The skeleton's elements, cached between renders. Null until mount().
     let els = null;
 
+    // The words this render is drawing in (T6.11). Set at the top of render()
+    // from the payload's `language`, which comes from the PC's config the same
+    // way `theme` does -- so it is never read before it has been set, and a
+    // panel that has not heard from the PC yet draws the panel's own default.
+    //
+    // A field rather than an argument threaded through nine functions: every
+    // one of them would take it and three would use it, which is the shape
+    // that gets a parameter quietly dropped in six months. `resumed` above is
+    // kept for the same reason and set in the same place.
+    let words = strings(null);
+
     // True for the length of one render: the panel has been dark, so the values
     // it is still showing are not evidence of anything and nothing may pulse
     // (T6.2). Core sets it -- see `context.resumed` in js/host.js -- because it
@@ -73,6 +84,14 @@
         const fx = el('section', 'fx', 'card-list');
         const crypto = el('section', 'crypto', 'card-list');
         const weather = el('section', 'weather', 'card');
+        // The titles are still drawn by ::before and they are no longer
+        // written there (T6.11). `content: attr(data-title)` lets the word be
+        // data while the box stays the stylesheet's, which is what keeps the
+        // original reason for using ::before at all: renderWeather empties
+        // #weather on every payload, and a real <h2> in there would go with
+        // it. Set here and refreshed in render(), because the language can
+        // change under a running panel exactly as the theme can.
+        applyTitles({ quotes, fx, crypto, weather });
 
         // Each list is three elements, not one, and the nesting is what makes
         // T6.6's scroll possible at all:
@@ -101,7 +120,7 @@
         // is what carried the border, the padding and the DEVICE label.
         const battery = el('section', 'battery');
         const stale = el('div', 'stale-badge');
-        stale.textContent = 'STALE';
+        stale.textContent = words.stale;
         stale.hidden = true;
 
         const panel = el('div', 'panel');
@@ -109,6 +128,16 @@
 
         root.append(sidebar, panel);
         els = { root, clock, date, lists, weather, battery, stale };
+    }
+
+    // The four card titles, as data on the sections ::before reads them from.
+    // Called from mount() and again from every render, because `language` is
+    // config on the PC and a human editing that file must not have to restart
+    // anything — the same promise `theme` makes (T3.12, ADR 0013).
+    function applyTitles(sections) {
+        for (const [id, section] of Object.entries(sections)) {
+            section.setAttribute('data-title', words.titles[id]);
+        }
     }
 
     // Cheap, and called on every render and tick. `root.contains` rather than
@@ -499,11 +528,11 @@
         const range = el('div', null, 'w-range');
         range.textContent = formatRange(weather.minC, weather.maxC);
 
-        // Kept, not replaced. Seven glyphs cannot say "Thunderstorm, heavy
-        // hail", and the label is what makes the card readable when the
+        // Kept, not replaced. Seven glyphs cannot say "Trovoada com granizo
+        // forte", and the label is what makes the card readable when the
         // picture is ambiguous -- rain and showers share one.
         const cond = el('div', null, 'w-cond');
-        cond.textContent = weatherLabel(weather.code);
+        cond.textContent = words.weather[weather.code] || words.unknown;
 
         body.append(city, main, range, cond);
         els.weather.appendChild(body);
@@ -549,7 +578,7 @@
         // thing in this corner that matters (ADR 0014).
         if (fields.unplugged) {
             const note = el('span', null, 'b-note');
-            note.textContent = 'unplugged';
+            note.textContent = words.unplugged;
             line.appendChild(note);
         }
         els.battery.appendChild(line);
@@ -559,8 +588,23 @@
     // built and the cards are empty, which is what the panel looked like in
     // that state before T6.7 too.
     function render(payload, root, context) {
+        // Before ensure(), which may mount and which reads `words` for the
+        // titles and the badge. Unconditional and before the early return, so
+        // a payload-less render still draws the skeleton in the right
+        // language and a render that throws halfway cannot leave the panel
+        // speaking the last payload's.
+        words = strings(payload && payload.language);
         ensure(root);
         resumed = !!(context && context.resumed);
+        // The language is the one thing here that can change without the
+        // markup changing, so it is reapplied rather than left to mount().
+        applyTitles({
+            quotes: els.lists.quotes.section,
+            fx: els.lists.fx.section,
+            crypto: els.lists.crypto.section,
+            weather: els.weather,
+        });
+        els.stale.textContent = words.stale;
         if (!payload) {
             return;
         }
@@ -583,7 +627,13 @@
         // rendered, and e2e/layout/measure.js asserts its shape.
         els.clock.textContent = `${hours}:${minutes}:${seconds}`;
 
-        els.date.textContent = now.toLocaleDateString(undefined, {
+        // The language the PC asked for, not the host's (T6.11). `undefined`
+        // means "whatever this runtime thinks", which on the device is the
+        // phone's system locale and in a browser is the developer's -- so the
+        // panel used to say MONDAY, FEBRUARY 23 on a desk in Brazil whose
+        // every other word was Portuguese, and the two would drift apart
+        // again the moment somebody changed one of them.
+        els.date.textContent = now.toLocaleDateString(words.tag, {
             weekday: 'long',
             year: 'numeric',
             month: 'long',
