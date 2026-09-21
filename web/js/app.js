@@ -110,8 +110,8 @@
     function applyNight() {
         let night = false;
         try {
-            const window_ = (payload && payload.night) || {};
-            night = visible() && isNight(new Date(), window_.start, window_.end);
+            const bounds = (payload && payload.night) || {};
+            night = visible() && isNight(new Date(), bounds.start, bounds.end);
         } catch (err) {
             // Guarded for the reason host.js guards the burn-in shift: isNight
             // is a global out of js/format.js, and an unguarded call here

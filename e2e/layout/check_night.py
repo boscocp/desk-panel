@@ -126,6 +126,16 @@ def check(m, theme, fails):
         return js("return getComputedStyle(document.documentElement)"
                   ".getPropertyValue('--glow').trim();")
 
+    # The outermost element inside #quotes whose computed animation-name is
+    # not 'none', found by what it does rather than by what it is called: a
+    # theme is free to answer an overflow however it likes and to name its
+    # moving box whatever it likes. `[0]` is the card's scroller -- an
+    # ancestor precedes its descendants in document order, and a pulsing
+    # value is a second animation further in (T6.2).
+    MOVING = ("(Array.from(document.querySelectorAll('#quotes *'))"
+              ".map((el) => getComputedStyle(el))"
+              ".filter((s) => s.animationName !== 'none')[0] || {})")
+
     def animating():
         """The computed animation-name of whatever is moving inside #quotes.
 
@@ -136,10 +146,7 @@ def check(m, theme, fails):
         in document order, and a pulsing value is a second animation further
         in (T6.2).
         """
-        return js("return (Array.from(document.querySelectorAll('#quotes *'))"
-                  ".map((el) => getComputedStyle(el))"
-                  ".filter((s) => s.animationName !== 'none')[0] || {})"
-                  ".animationName || 'none';")
+        return js("return %s.animationName || 'none';" % MOVING)
 
     def shadows():
         """Every rendered glow on the panel, as the strings the browser computes.
@@ -236,10 +243,7 @@ def check(m, theme, fails):
     # left off and `none` starts again, so a card dark at 03:00 must be paused
     # and not removed.
     js("window.onThermal(true);")
-    dark_state = js("return (Array.from(document.querySelectorAll('#quotes *'))"
-                    ".map((el) => getComputedStyle(el))"
-                    ".filter((s) => s.animationName !== 'none')[0] || {})"
-                    ".animationPlayState || 'missing';")
+    dark_state = js("return %s.animationPlayState || 'missing';" % MOVING)
     if dark_state != "paused":
         fails.append("a card blacked out at night is not merely paused: %r"
                      % dark_state)
