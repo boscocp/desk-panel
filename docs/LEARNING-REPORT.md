@@ -19,12 +19,19 @@ read before writing the next task file.
 |---|---|
 | period | 2026-09-13 → 2026-09-21 |
 | scale | 70 commits, 21 pull requests, ~17 waves, 49 task rows |
-| primary sources | [`docs/harness-notes/`](harness-notes/) — four instrumented rounds with pre-registered predictions · [`tasks/STATUS.md`](../tasks/STATUS.md) — a "Resuming after" section per wave · the git log |
+| primary sources | [`docs/harness-notes/`](harness-notes/) — four instrumented rounds with pre-registered predictions · [`tasks/STATUS.md`](../tasks/STATUS.md) — a "Resuming after" section per wave |
+| retroactive sources | the git log and the 21 merged pull requests (`gh pr list --json additions,deletions`) · the 17 session transcripts under `~/.claude/projects/`, which is where the prompt counts below come from · the four project memories under `memory/` |
 
 Every number below is cited. Where a fact was not recorded, the cell says so rather than
-carrying an estimate — **the largest gap being token cost**: the four local-model rounds were
-instrumented (completion tokens, wall clock, provider calls, trajectories), and **none of the
-Claude-driven waves were**. That is follow-up 1.
+carrying an estimate. Two gaps are worth stating up front:
+
+- **Input is measured, cost is not.** The transcripts give exact human-prompt counts and
+  characters typed. They do not give token consumption — the four local-model rounds were
+  instrumented (completion tokens, wall clock, provider calls, trajectories) and **none of the
+  Claude-driven waves were**. Every "cheaper" claim here is therefore structural or comes from
+  the local-model rounds.
+- **The note series lapsed for ten waves**, so waves 7–15 are reconstructed from `STATUS.md` and
+  the diffs rather than from notes written while they ran.
 
 ---
 
@@ -74,7 +81,8 @@ wave** — that is why they cost one prompt each and nothing afterwards.
 ## 1. The finding
 
 Minimal interaction is not bought with better prompts. It is bought with **files that are
-correct**, and the failure mode is not the model writing bad code.
+correct** — 51 characters of instruction can move 2,447 lines, but only while the files those
+51 characters point at are right. The failure mode is not the model writing bad code.
 
 In the one wave where every defect was classified — the 2026-09-16 backlog run — **five of eight
 were in the instructions or in the gates**, not in the code being gated: two self-contradicting
@@ -107,6 +115,8 @@ Every row here exists so that something does **not** have to be said again in a 
 | `verifier`, a different context from the author | `.claude/agents/` | trusting the report of whoever wrote the code |
 | allow/deny lists, twinned for two agents | `.claude/settings.json`, `reasonix.toml` | a permission decision per call; secrets reaching an agent |
 | one sub-agent per task, clean context | the backlog run's own method | an orchestrator window holding a Gradle log |
+| the wave protocol — "execute the next wave" means do what is recommended, without asking | `CLAUDE.md` | a confirmation round between every step of the loop |
+| four project memories | `memory/` | facts that are true of this desk and are in no file: the NAT topology behind the firewall rule, the four browser checks a web change must pass, that a review is applied *before* the merge, and where the backlog stands |
 
 **What this bought.** Ten tasks in a single session, with the orchestrating window never holding
 a `gradlew` log, a `unittest` dump or an APK listing — only compact summaries
@@ -206,24 +216,26 @@ step was a human-directed reviewer running the commands and reading the diff.
 
 Only what is cited. `—` means not recorded, which is itself a finding.
 
-| Wave | Merged | Scope | Review findings | Defects in gates or specs that the wave found |
-|---|---|---|---|---|
-| 1, 2, 4 | #4 #5 #6 | web · server · android foundations | **8 defects, all after the gate exited 0** | 3 in the verification itself; T3.2 and T7.1 self-contradicting |
-| 6 | #10 | milestone B, `PcPoller` | — | config lifecycle split (ADR 0013) |
-| 7 | #11 | screen state | — (two fix commits) | "the acceptance that lied" |
-| 8 | #12 | real data | two rounds, counts not recorded | — |
-| 9 | #13 | resilience, battery | — | T5.2 + T5.3 → the "three for three" pattern |
-| 10 | #14 #15 | dormant polling, Windows autostart | **6** | T3.8's acceptance asserted the wrong spelling |
-| 11 | #16 | thermal cutoff | **14 across two rounds, 11 applied, 3 declined** | T5.5 + TT.6 → "which makes five" |
-| 12 | #17 | config in TOML | **4, all applied** | example shipped 300s against a 600s default; the key-set guard was vacuous |
-| 13 | #18 | theme boundary | **6, all fixed** | 4 acceptance blocks repaired; 1 broken since T6.5 |
-| 14 | #19 | overflow + weather | **7** | T6.6's criterion could not fail, and asked for the wrong thing |
-| 15 | #20 | glow, burn-in shift | two rounds: **4, then 7** | a test that passed only in some timezones; a table whose comment claimed a property it did not have |
-| 16 | #21 | night profile, login-scope tests | **4, all real** | T6.4's acceptance could never have passed |
-| 17 | in progress | scroll goes round, battery icons | — | — |
+| Wave | PR | Scope | Diff | Review findings | Defects in gates or specs that the wave found |
+|---|---|---|---|---|---|
+| 1, 2, 4 | #4 #5 #6 | web · server · android foundations | +3,060 / −36 | **8 defects, all after the gate exited 0** | 3 in the verification itself; T3.2 and T7.1 self-contradicting |
+| — | #8 #9 | login-scope contract · the panel on the phone | +4,403 / −94 | — | — |
+| 6 | #10 | milestone B, `PcPoller` | +973 / −67 | — | config lifecycle split (ADR 0013) |
+| 7 | #11 | screen state | +1,197 / −116 | — (two fix commits) | "the acceptance that lied" |
+| 8 | #12 | real data, a sparkline per value | +3,745 / −119 | two rounds, counts not recorded | — |
+| 9 | #13 | resilience, battery | +1,005 / −86 | — | T5.2 + T5.3 → the "three for three" pattern |
+| 10 | #14 #15 | dormant polling · Windows autostart | +1,955 / −46 | **6** | T3.8's acceptance asserted the wrong spelling |
+| 11 | #16 | thermal cutoff | +1,245 / −55 | **14 across two rounds, 11 applied, 3 declined** | T5.5 + TT.6 → "which makes five" |
+| 12 | #17 | config in TOML | +1,013 / −125 | **4, all applied** | example shipped 300s against a 600s default; the key-set guard was vacuous |
+| 13 | #18 | theme boundary | +2,447 / −731 | **6, all fixed** | 4 acceptance blocks repaired; 1 broken since T6.5 |
+| 14 | #19 | overflow + weather | +1,806 / −68 | **7** | T6.6's criterion could not fail, and asked for the wrong thing |
+| 15 | #20 | glow, burn-in shift | +1,977 / −33 | two rounds: **4, then 7** | a test that passed only in some timezones; a table whose comment claimed a property it did not have |
+| 16 | #21 | night profile, login-scope tests | +2,372 / −50 | **4, all real** | T6.4's acceptance could never have passed |
+| 17 | open | scroll goes round, battery icons | — | — | — |
 
-There is no wave 3 or 5 in the record; the numbering has gaps and the sections in `STATUS.md`
-are the authority.
+There is no wave 3 or 5 in the record; the numbering has gaps, and the "Resuming after"
+sections in `STATUS.md` are the authority. Diffs are `gh pr list --json additions,deletions`,
+not estimates.
 
 **What the table says.** Review before merge has found between four and fourteen real things in
 every wave it was run on. It is the highest-yield step in the loop, and it is the one that costs
@@ -285,7 +297,46 @@ the least — it runs against a finished diff, in one pass, with no device.
 
 ---
 
-## 7. The checklist
+## 7. The wave protocol
+
+The transcripts show one command repeated across ten sessions, between 18 and 102 characters
+long, and it is the whole of what a wave normally costs:
+
+> *faz a proxima onda* · *segue proxima onda* · *executa proxima onda, revisa tudo, corrige,
+> merge* · *pode disparar, e segue tudo como recomendado até o final*
+
+It is a standing instruction, and reading it as a question is the most expensive mistake
+available in this loop — a confirmation round costs more than the step it guards.
+
+**"Execute the next wave" means, in full:**
+
+1. Take the recommendation already written at the end of the last wave — the `## Resuming after
+   (wave N)` section of `tasks/STATUS.md` names the next task, what to read before starting it,
+   and what the task file gets wrong about itself. That section is the next wave's prompt.
+2. Take as many tasks as the wave sensibly holds. Two that are the same shape of work beat one;
+   `Prereqs:` decides, not the phase order.
+3. Run the whole loop without stopping to confirm: implement → run the acceptance commands →
+   branch, commit, PR → review → **apply what the review found** → merge → write the next
+   "Resuming after" section and the wave's note.
+4. **Do what is recommended.** Do not ask which option to take when the record already answers.
+
+**Stop and ask only when it is critical**, which is a short list:
+
+- an invariant in `CLAUDE.md` or a decision in an ADR would have to be contradicted;
+- a secret, a token or hardware that is not here is needed to go further;
+- the action is irreversible or reaches outside the repository — a force-push over a published
+  branch, publishing, deleting someone's data;
+- the recommendation itself turns out to be wrong. Then fix the task file, say so in one line,
+  and keep going — that correction *is* the work, and §3.1 is the record of how often it is
+  needed.
+
+**The corollary is the one worth internalising.** If a wave's result is decided by the previous
+wave's "Resuming after" section rather than by the prompt, then the last act of every wave —
+writing that section honestly, including what is still only true on this desk — is not
+bookkeeping. It is the highest-leverage writing in the project, and it is the only thing that
+survives a session boundary.
+
+## 8. The checklist
 
 **Before writing a task file**
 - [ ] Self-contained: it can be executed without reading the rest of the repository.
@@ -297,6 +348,7 @@ the least — it runs against a finished diff, in one pass, with no device.
       catches it.
 
 **Before dispatching**
+- [ ] The next wave's scope comes from the last "Resuming after" section, not from the phase order.
 - [ ] The prerequisites are `done` in `STATUS.md`, not merely written.
 - [ ] Secrets and destructive verbs are denied in `.claude/settings.json` — and in `reasonix.toml`
       if a second agent exists. They are a maintained pair.
@@ -318,11 +370,15 @@ the least — it runs against a finished diff, in one pass, with no device.
 
 ---
 
-## 8. What this experiment has not shown
+## 9. What this experiment has not shown
 
-- **No token instrumentation for the Claude-driven waves.** Every claim about cost above is
-  structural or comes from the local-model rounds. Wave-level token accounting is follow-up 1,
-  and `docs/harness-notes/README.md` now asks for it per wave.
+- **Input is measured; consumption is not.** The transcripts give human prompts and characters
+  typed exactly. Nothing here records what the waves *cost* — tokens, wall clock, or money —
+  because no Claude-driven wave was instrumented. Wave-level accounting is follow-up 1, and
+  `docs/harness-notes/README.md` now asks for it per wave.
+- **The comparison this report cannot make.** There is no control arm. Nobody built this panel
+  by hand, or with heavy prompting and no task files, so "structure is cheaper" is an inference
+  from where the rework landed — not a measured difference against an alternative.
 - **`make verify-accepted` is still not written**, three proposals later. It is the one gate that
   would have caught a `done` row silently going red for five waves.
 - **The local model has not run since wave 6.** `docs/LOCAL-MODELS.md`'s routing table has been
