@@ -24,6 +24,28 @@ The five scenarios and their timing allowances live in
 [docs/TESTING.md](../docs/TESTING.md#end-to-end). They are not repeated here: this file, that
 one and `tasks/TT.8-e2e-suite.md` each carried a copy, and they had already drifted.
 
+## `check_night_marker.py`, which is here already
+
+One scenario does exist ahead of TT.8, because T6.4's acceptance needed it: the night
+profile's backlight is a window property no browser can see, and the app's only evidence for
+it is the `night=` marker.
+
+```bash
+python e2e/check_night_marker.py
+```
+
+It runs the PC server itself, under a temporary config, and walks the window from day to
+night and back — asserting both edges. Both, because either is free to be wrong alone: an app
+logging the marker on every refresh passes the first for ever, and one that never cleared its
+state passes the first and fails the second. It needs port 8777 free and refuses to start if
+something is already listening, because changing that config means a restart and restarting
+somebody's running server is not a script's to do.
+
+The marker is emitted on transitions only, like every other marker here, which is why the
+window has to be driven rather than waited for. T6.4's task file records the acceptance it
+shipped with — `logcat -c && sleep 90 && grep night=on` — and why no correct implementation
+could ever have passed it.
+
 ## Why this does not read screen state from the OS
 
 `adb shell dumpsys power` filtered for `mWakefulness` is the usual recipe, and it is **not**

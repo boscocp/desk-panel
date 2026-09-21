@@ -92,6 +92,35 @@ test('isNight returns false for an unparseable bound instead of guessing', () =>
     assert.equal(isNight(new Date(2026, 0, 1, 23, 0), '22:00', '22:00'), false);
 });
 
+// The one property this predicate shares with its twin in Java. T6.4 needs
+// the same answer in two languages -- format.js dims the glow, NightWindow
+// dims the backlight, and neither can reach the other's mechanism -- so the
+// agreement is asserted on both sides in the same shape rather than left to
+// two lists of examples that drift apart. NightWindowTest counts 540 too.
+//
+// A count over a whole day also catches what the examples above cannot: an
+// off-by-one at either bound moves it by exactly one.
+test('the shipped window is night for exactly the nine hours it names', () => {
+    // A clock rather than a Date, and that is not a shortcut. Walking a real
+    // Date through 1440 minutes walks it through whatever daylight-saving
+    // transition the host's timezone puts on the day chosen, and the count
+    // then comes out one hour wrong in some zones and not others -- which is
+    // the shape of failure wave 15 spent a review on. isNight asks a clock
+    // for its hours and its minutes and nothing else, so this is every input
+    // it can see.
+    const clock = (minute) => ({
+        getHours: () => Math.floor(minute / 60),
+        getMinutes: () => minute % 60,
+    });
+    let covered = 0;
+    for (let minute = 0; minute < 24 * 60; minute += 1) {
+        if (isNight(clock(minute), '22:00', '07:00')) {
+            covered += 1;
+        }
+    }
+    assert.equal(covered, 9 * 60);
+});
+
 // mock.js deliberately carries a sub-1 crypto price (and keeps six decimals
 // for it) to prove the layout survives one. Truncating to two decimals shows
 // it as 0.00 on every tick, hiding both the price and any movement in it.
