@@ -212,14 +212,39 @@ implementation that *did* pass it would be one logging the marker every refresh,
 contract broken.
 
 `e2e/check_night_marker.py` drives the only input a test can reach, the window in the PC's
-config, and walks it day → night → day. Both edges, because either is free to be wrong alone:
-an app logging on every refresh passes the first for ever, and one that never cleared its state
-passes the first and fails the second. It runs the server itself under a temporary config —
-changing that config means a restart, and restarting somebody's running server is not a
-script's to do — and it nudges the Activity after each restart, because a restart slow enough
-for the probe ladder to notice is a real logout as far as the phone is concerned and coming
-back from that is T4.3's and T5.6's behaviour, with their own acceptances and their own
-fifteen-minute alarm.
+config, and asks three questions: a steady panel logs nothing across two refreshes (which is
+what the original acceptance was reaching for, and the assertion that fails an app logging the
+marker per refresh), a window containing now turns the profile on, and the window *ending*
+turns it off. It runs the server itself under a temporary config, because changing that config
+means a restart and restarting somebody's running server is not a script's to do.
+
+**The falling edge is the one that cost a second attempt.** The obvious way to drive it is
+another restart, and that is what the first version did — and it passed for the wrong reason,
+visibly, on the device:
+
+```
+19:36:22 night=on
+19:36:24 state=offline
+19:36:24 screen=sleep
+19:36:24 night=off      <- not the window. The PC leaving.
+```
+
+A restart is a gap in the server's answers, and a gap the probe ladder notices is a logout as
+far as the phone is concerned. The rising edge is immune — a gap can only *clear* the profile,
+never set it — so only the falling one had to stop depending on a restart. The night window is
+now ninety seconds long and expires while the server sits there answering, which is also what
+happens at 07:00 every morning; and the check rejects a `night=off` that a `state=offline`
+precedes in the buffer, by position rather than by comparing the timestamps logcat prints,
+which carry no year and sort backwards across New Year.
+
+It also nudges the Activity after a restart, because coming back from a real offline stretch is
+T4.3's and T5.6's behaviour, with their own acceptances and their own fifteen-minute alarm.
+
+**The quiet window needed a second refresh before it could mean anything**, and that too was
+the feature working rather than a flake: the app keeps the window across an offline stretch, so
+a panel left in the night profile by a previous run comes back still in it and corrects itself
+on the first payload under the day window. A `night=off` four milliseconds after a `data=ok`,
+reading as a marker that fires per refresh.
 
 ### Three decisions inside the page's half
 
@@ -276,6 +301,27 @@ Writing the named cases found a gap in the tests themselves: `detect_autologin` 
 falls through to the Linux branch, finds no display manager and returns `unknown` — loud here,
 but it would have gone on asserting something true about the wrong platform if the expectation
 had been written to match what it returned.
+
+### What the review found, and all four were real
+
+- **`e2e/check_night_marker.py` named `server/config.json` directly** instead of going through
+  `config_search_paths`, which exists for this and prefers `config.toml`. On a machine set up
+  the documented way (T3.12) the acceptance would have died with a `ConfigError` traceback
+  rather than the clean `FAIL:` line every other path in that file produces.
+- **`check_night.py` hard-failed a theme that answers an overflow without motion**, which the
+  theme contract explicitly allows and `check_scroll.py` already guards for — while
+  `docs/TESTING.md`, edited in this same wave, requires the night check of *every* theme. Both
+  shipped themes animate, so it would have bitten the next one.
+- **`NightWindow` accepted `22.5` and truncated it to 22:00** where `isNight` rejects it, so a
+  fractional bound in a TOML config would have dimmed the backlight behind a page that kept its
+  glow — each half correct on its own, which is the most confusing way this could fail. It is
+  the only input where the two readers could have disagreed, and the javadoc directly above it
+  claimed the parity was the point.
+- **A comment said "three custom properties" where the block redefines two**, the third being
+  the alarm's, which the same block goes on to say must never be dimmed. `docs/THEMING.md`
+  repeated the claim. In a repo where comments are the design record, that is a licence to do
+  the one thing the design forbids.
+
 
 ### What is still only true on this desk
 

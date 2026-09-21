@@ -123,7 +123,18 @@ public final class NightWindow {
      */
     static Integer minuteOfDay(Object bound) {
         if (bound instanceof Number) {
-            int hour = ((Number) bound).intValue();
+            double exact = ((Number) bound).doubleValue();
+            int hour = (int) exact;
+            // Integral, and this is the one input where the two readers could
+            // disagree. `night_start = 22.5` is legal TOML and reaches the
+            // payload as 22.5; format.js guards with Number.isInteger and
+            // leaves the panel in its day profile, so a truncation here would
+            // dim the backlight against a page that had kept its glow --
+            // which is the single most confusing way this feature could fail,
+            // because each half would look correct on its own.
+            if (exact != hour) {
+                return null;
+            }
             // A bare hour only. Minutes-since-midnight as a number would make
             // 22 mean 00:22 on one reader and 22:00 on the other, which is the
             // kind of agreement that is easier to refuse than to document.

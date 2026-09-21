@@ -778,8 +778,9 @@ body {
  * promise -- a theme with no glow has nothing to do here and plain does
  * exactly nothing.
  *
- * Three custom properties and not one hex literal, which is what the comment
- * at the top of this file promised T6.4 would need. The accent, the text
+ * Two of this theme's three glow properties, and not one hex literal, which is
+ * what the comment at the top of this file promised T6.4 would need. The third
+ * is deliberately left alone -- see the bottom of the block. The accent, the text
  * colours and every size stay exactly as they are: the panel at night is the
  * same panel, read in the dark, and a design that also desaturated itself
  * would be a second theme arriving unannounced at 22:00. The dimming a reader

@@ -284,8 +284,9 @@ the pass began.
 The other half is yours, and it is taste:
 
 - **Dim whatever you glow with.** Glow is a light source, and at night the room has no other
-  one. `neon` halves three `rgba()` custom properties under `:root[data-night]` and changes
-  nothing else; `plain` has no glow and does nothing at all.
+  one. `neon` halves two of its three `rgba()` glow properties under `:root[data-night]` and
+  changes nothing else; `plain` has no glow and does nothing at all. The third is the alarm's,
+  and the next bullet is why it is not in that list.
 - **Do not build a second design.** The panel at night is the same panel read in the dark. A
   theme that also changed its colours, its sizes or its layout at 22:00 would be a surprise
   arriving nightly rather than a profile.
