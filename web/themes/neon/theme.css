@@ -782,16 +782,20 @@ body {
     justify-content: flex-end;
 }
 
-/* 18px against the line's 20px type, which is smaller than the floor T6.3 sets
+/* 22px against the line's 20px type, which is smaller than the floor T6.3 sets
  * for text and is allowed to be: that floor is about resolving letterforms,
- * and there is nothing inside a battery outline to resolve. 14px was the first
- * cut and it was wrong from the chair -- the thermometer read as a tick rather
- * than as an object. 18 puts both icons at about the cap height of the digits
- * beside them, which is where the eye expects a label to sit. */
+ * and there is nothing inside a battery outline to resolve.
+ *
+ * It took three goes. 14px read as a tick rather than an object; 18px put the
+ * icons at the cap height of the digits beside them, which is where the eye
+ * expects a *label* to sit and is still too small for a drawing with an inside
+ * to it. 22 is slightly taller than the digits, which is the point: these are
+ * pictures, and a picture that has to be resolved rather than recognised needs
+ * more room than a letter of the same nominal size. */
 .b-icon {
     flex: 0 0 auto;
-    width: 18px;
-    height: 18px;
+    width: 22px;
+    height: 22px;
     fill: none;
     /* currentColor, which is what makes the icons take the temperature band's
      * colour with the text (T5.4): the whole line is coloured, so a hot phone
@@ -802,11 +806,14 @@ body {
     stroke-linejoin: round;
 }
 
-/* The charge, drawn inside the outline. Filled rather than stroked -- it is
- * the one solid shape in the icon set, and that is what makes it read as a
- * level rather than as a second outline. `currentColor` again, so it is the
- * same ink as the body it sits in. */
-.b-fill {
+/* Everything in these two icons that is solid rather than drawn: the charge
+ * inside the battery, the battery's terminal, the thermometer's bulb and
+ * column. Filled shapes are what separate an icon from a diagram at this size
+ * -- the outline gives the silhouette and the fill gives it a substance the
+ * eye recognises before it resolves anything. `currentColor` throughout, so
+ * all of it takes the temperature band's colour with the text (T5.4). */
+.b-fill,
+.b-solid {
     fill: currentColor;
     stroke: none;
 }

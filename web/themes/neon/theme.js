@@ -409,22 +409,37 @@
     // which is what makes the battery line's three temperature colours
     // (T5.4) colour the icons too, for free.
     const ICONS = {
-        // A cell lying on its side with its terminal on the right. The body is
-        // drawn as one rounded rectangle rather than as a path so that the
-        // fill below has something exact to sit inside.
-        // Body and terminal, with a real gap between them: the first cut put
-        // the terminal two units off a body that ran to 18, and at 18px that
-        // is a pixel and a half -- the nub vanished into the outline and the
-        // icon read as a pill. The body stops at 16.8 and the terminal stands
-        // at 18.6, which is about the proportion a real cell has.
-        battery: 'M4 8.4h11.2a1.6 1.6 0 0 1 1.6 1.6v3.6a1.6 1.6 0 0 1-1.6 1.6H4'
-               + 'a1.6 1.6 0 0 1-1.6-1.6V10A1.6 1.6 0 0 1 4 8.4z'
-               + 'M18.6 10.6v2.8',
-        // Bulb and stem. The stem stops short of the bulb's centre so the two
-        // read as one object at 14px rather than as a circle with a line
-        // through it.
-        thermometer: 'M12 3.5a2 2 0 0 1 2 2v7.1a4 4 0 1 1-4 0V5.5a2 2 0 0 1 2-2z'
-                   + 'M12 9v5.5',
+        // A cell lying on its side, drawn as an outline with a solid terminal
+        // standing clear of it on the right.
+        //
+        // **Second cut**, because the first was reported as hard to read from
+        // the chair and it is worth saying exactly why. The body ran from 2.4
+        // to 16.8 and the charge was drawn to its inner edge, so above about
+        // 60% the fill met the outline and the whole thing read as one solid
+        // lozenge -- a pill, not a battery. The terminal was a 2.8-unit stroke
+        // one and a half pixels off the body, which at this size disappeared
+        // into it.
+        //
+        // So: the charge keeps a visible gap inside the outline at every level
+        // (see renderBatteryIcon), and the terminal is a filled rounded
+        // rectangle with real air around it rather than a tick. A battery is
+        // recognised by its silhouette -- a long box with a small nub -- and
+        // the nub is the half that was missing.
+        battery: 'M3.6 7.6h11.8a1.8 1.8 0 0 1 1.8 1.8v5.2a1.8 1.8 0 0 1-1.8 1.8H3.6'
+               + 'a1.8 1.8 0 0 1-1.8-1.8V9.4a1.8 1.8 0 0 1 1.8-1.8z',
+        batteryCap: 'M19.2 10.2h1.2a.8.8 0 0 1 .8.8v2a.8.8 0 0 1-.8.8h-1.2z',
+
+        // Bulb, column and three scale marks.
+        //
+        // **Second cut**, for the same reason. The first was an outline bulb
+        // with a hairline stem through it, which at this size is a keyhole or
+        // a lowercase i -- there was nothing in it that says *thermometer*
+        // except the proportion. What says it is the silhouette plus two
+        // things the outline did not have: a **filled** bulb and column, which
+        // is what mercury looks like, and a scale down one side, which nothing
+        // else on a panel has.
+        thermometer: 'M12 3a2.4 2.4 0 0 1 2.4 2.4v7.4a4.4 4.4 0 1 1-4.8 0V5.4A2.4 2.4 0 0 1 12 3z',
+        thermometerTicks: ['M15.6 7.4h2.2', 'M15.6 10.2h1.5', 'M15.6 13h2.2'],
     };
 
     // One <svg> with one path in it. Both icon sets go through this: the only
@@ -440,10 +455,32 @@
         // The value beside it says the same thing, so the picture is
         // decoration to anything that reads the DOM aloud.
         svg.setAttribute('aria-hidden', 'true');
+        svg.appendChild(svgPath(d, null));
+        return svg;
+    }
+
+    // Shared by the icon builders below, which add a second and a third path
+    // to an <svg> svgIcon has already made -- a filled terminal, a scale.
+    function svgPath(d, className) {
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path.setAttribute('d', d);
-        svg.appendChild(path);
-        return svg;
+        if (className) {
+            path.setAttribute('class', className);
+        }
+        return path;
+    }
+
+    // A <rect> in the SVG namespace, which `document.createElement` cannot
+    // make: an HTML <rect> inside an <svg> is parsed, kept, and never drawn.
+    function svgRect(x, y, width, height, rx, className) {
+        const r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        r.setAttribute('x', String(x));
+        r.setAttribute('y', String(y));
+        r.setAttribute('width', String(width));
+        r.setAttribute('height', String(height));
+        r.setAttribute('rx', String(rx));
+        r.setAttribute('class', className);
+        return r;
     }
 
     function renderGlyph(name) {
@@ -458,6 +495,14 @@
     // this panel is actually looked at. It says the same thing the number
     // says, which is exactly what the sparkline does beside a price.
     //
+    // **The gap is the second cut, and it is the whole of the fix.** The bar
+    // used to run to the outline's inner edge, so above about 60% it met the
+    // outline and the icon became one solid lozenge -- which is what got it
+    // reported as unreadable from the chair. It is inset on every side now, so
+    // there is always a line of unlit ground between the charge and the wall
+    // holding it, at 1% and at 100% alike. That gap is what makes the shape a
+    // container with something in it rather than a filled pill.
+    //
     // Clamped, because a level over 100 arrives from a phone that has just
     // been plugged in and a bar sticking out of its own battery looks like a
     // rendering bug rather than a full charge.
@@ -466,21 +511,42 @@
         if (!svg) {
             return null;
         }
+        // The terminal, drawn rather than stroked: a nub is what a battery is
+        // recognised by, and a 2.8-unit hairline standing a pixel and a half
+        // off the body was invisible at this size.
+        svg.appendChild(svgPath(ICONS.batteryCap, 'b-solid'));
+
         const fraction = Math.max(0, Math.min(1, level / 100));
         if (fraction > 0) {
-            const fill = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-            // The body's *inner* edge, which is not the path's coordinates: a
-            // 1.6-unit stroke sits half outside the line it is drawn on, so
-            // the usable inside runs 3.2..16 across and 9.2..14.8 down. A bar
-            // drawn to the path itself would sit under its own outline and
-            // read as one solid lozenge at every level above about 80%.
-            fill.setAttribute('x', '3.2');
-            fill.setAttribute('y', '9.2');
-            fill.setAttribute('width', String(Math.round(12.8 * fraction * 100) / 100));
-            fill.setAttribute('height', '5.6');
-            fill.setAttribute('rx', '0.7');
-            fill.setAttribute('class', 'b-fill');
-            svg.appendChild(fill);
+            // The body's inner edge is not the path's coordinates -- a
+            // 1.8-unit stroke sits half outside the line it is drawn on --
+            // and the gap comes off that again. Inside runs 4.5..14.5 across
+            // and 10.3..13.7 down.
+            svg.appendChild(svgRect(4.5, 10.3,
+                                    Math.round(10 * fraction * 100) / 100,
+                                    3.4, 0.6, 'b-fill'));
+        }
+        return svg;
+    }
+
+    // The thermometer (T6.10): an outline, a filled bulb and column, and a
+    // scale down one side. The fill is what says mercury and the scale is
+    // what says instrument -- without either, an outline this size is a
+    // keyhole or a lowercase i, which is what the first cut was read as.
+    function renderThermometerIcon() {
+        const svg = svgIcon(ICONS.thermometer, 'b-icon');
+        if (!svg) {
+            return null;
+        }
+        svg.appendChild(svgRect(11.2, 7.5, 1.6, 8.5, 0.8, 'b-solid'));
+        const bulb = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        bulb.setAttribute('cx', '12');
+        bulb.setAttribute('cy', '16.6');
+        bulb.setAttribute('r', '2.5');
+        bulb.setAttribute('class', 'b-solid');
+        svg.appendChild(bulb);
+        for (const d of ICONS.thermometerTicks) {
+            svg.appendChild(svgPath(d, null));
         }
         return svg;
     }
@@ -569,7 +635,7 @@
         if (fields.temp) {
             const temp = el('span', null, 'b-value');
             temp.textContent = fields.temp;
-            line.append(...[svgIcon(ICONS.thermometer, 'b-icon')].filter(Boolean), temp);
+            line.append(...[renderThermometerIcon()].filter(Boolean), temp);
         }
 
         // Still a word, and deliberately: there is no picture for "this phone
