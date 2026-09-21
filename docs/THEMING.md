@@ -257,6 +257,49 @@ a theme to call: core applies it to whatever you put in the body.
 escapes the viewport at one of them is a certain failure rather than a check that fails on a
 Tuesday.
 
+## The night profile is half yours
+
+Inside the window `server/config.toml` describes — `night_start` and `night_end`, 24-hour
+`"HH:MM"`, evaluated against **the phone's** clock — `js/app.js` puts `data-night="on"` on
+`<html>`. The window wraps midnight by default (22:00 to 07:00), and the predicate behind it
+is `isNight` in `js/format.js`.
+
+Core owns one half and it is not negotiable:
+
+```css
+:root[data-night] body * { animation: none !important; }
+```
+
+Nothing moves at night. Peripheral vision is more sensitive to motion than to detail and more
+sensitive still in the dark, so a card walking through its hidden rows at 03:00 is the one
+thing on this panel that can wake somebody. You owe that rule only the courtesy of not
+overriding `animation` on something inside a panel at night.
+
+Note that this is `animation: none` where the blackout above is `animation-play-state:
+paused`, and the two never apply together — core only sets `data-night` while the panel is
+visible. The difference matters if you animate anything: at night your animation is *removed*,
+so it restarts from its first frame in the morning, and an element mid-pass goes back to where
+the pass began.
+
+The other half is yours, and it is taste:
+
+- **Dim whatever you glow with.** Glow is a light source, and at night the room has no other
+  one. `neon` halves two of its three `rgba()` glow properties under `:root[data-night]` and
+  changes nothing else; `plain` has no glow and does nothing at all. The third is the alarm's,
+  and the next bullet is why it is not in that list.
+- **Do not build a second design.** The panel at night is the same panel read in the dark. A
+  theme that also changed its colours, its sizes or its layout at 22:00 would be a surprise
+  arriving nightly rather than a profile.
+- **Leave the alarm alone.** If something on your panel means *this is wrong* — `neon`'s STALE
+  badge — it exists to be seen from across a dark room, which is exactly the condition you are
+  otherwise softening.
+
+The backlight dims at the same moment and it is the bigger half of the effect by a long way:
+`MainActivity` takes the window to `screenBrightness = 0.15f`, which is the one thing here no
+stylesheet can reach. It reaches that decision by asking `NightWindow.java` the same question
+about the same payload, so the two halves can disagree only for the seconds between a minute
+boundary and the next refresh.
+
 ## Saying which value just changed, if you want to
 
 Optional, and `neon` does it: a value whose rendered text is not what it was a minute ago lifts

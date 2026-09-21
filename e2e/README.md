@@ -24,6 +24,29 @@ The five scenarios and their timing allowances live in
 [docs/TESTING.md](../docs/TESTING.md#end-to-end). They are not repeated here: this file, that
 one and `tasks/TT.8-e2e-suite.md` each carried a copy, and they had already drifted.
 
+## `check_night_marker.py`, which is here already
+
+One scenario does exist ahead of TT.8, because T6.4's acceptance needed it: the night
+profile's backlight is a window property no browser can see, and the app's only evidence for
+it is the `night=` marker.
+
+```bash
+python e2e/check_night_marker.py
+```
+
+It runs the PC server itself, under a temporary config, and asks three questions: a steady
+panel outside the window logs nothing, the window opening turns the profile on, and the window
+closing turns it off. It needs port 8777 free and refuses to start if something is already
+listening, because it has to own the config the server reads and restarting somebody's running
+server is not a script's to do.
+
+**Nothing in it restarts**, and that is the design rather than an omission. A restart is a gap
+in the server's answers, and a gap the probe ladder notices is a logout as far as the phone is
+concerned — so the first version watched the PC leaving take the profile off and reported it as
+the window doing it. The window is served once, before it opens, and the clock walks into it
+and back out on its own, which is what happens at 22:00 and 07:00 anyway. Budget twelve
+minutes; nothing here can be hurried, because what is being waited for is a clock.
+
 ## Why this does not read screen state from the OS
 
 `adb shell dumpsys power` filtered for `mWakefulness` is the usual recipe, and it is **not**

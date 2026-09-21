@@ -86,6 +86,44 @@ public class DataPayloadTest {
     }
 
     @Test
+    public void theNightWindowRidesQuotesThroughUntouched() throws Exception {
+        // T6.4, and this test exists because the feature shipped without it
+        // once. The payload is rebuilt key by key rather than patched, so a
+        // key nobody names in merge() simply never reaches the phone -- and
+        // the failure is silent in every layer: the server sends the window,
+        // the page asks for one and finds none, NightWindow parses null, and
+        // the panel stays bright all night with nothing in logcat to say so.
+        // e2e/check_night_marker.py found it on the device; this is what
+        // stops it coming back on the JVM.
+        String withNight = QUOTES.replace(
+                "\"stale\":false",
+                "\"stale\":false,\"night\":{\"start\":\"22:00\",\"end\":\"07:00\"}");
+        JSONObject night = new JSONObject(DataPayload.merge(withNight, WEATHER))
+                .getJSONObject("night");
+        assertEquals("22:00", night.getString("start"));
+        assertEquals("07:00", night.getString("end"));
+
+        // And it survives the second half of the merge, which is a separate
+        // rebuild: withBattery re-parses and re-serialises the whole payload,
+        // so a key that reached the page on a cold start could still be lost
+        // the moment a battery broadcast arrived.
+        String folded = DataPayload.withBattery(
+                DataPayload.merge(withNight, WEATHER),
+                "{\"level\":50,\"tempC\":30,\"charging\":true}");
+        assertEquals("22:00",
+                new JSONObject(folded).getJSONObject("night").getString("start"));
+    }
+
+    @Test
+    public void anAbsentNightWindowLeavesTheKeyOutAltogether() throws Exception {
+        // An older server on the PC sends no window. Both readers treat the
+        // absence as "day", so this must arrive as a missing key rather than
+        // as an empty object that would have to be special-cased twice.
+        assertFalse("no night key in, no night key out",
+                new JSONObject(DataPayload.merge(QUOTES, WEATHER)).has("night"));
+    }
+
+    @Test
     public void eitherUpstreamBeingStaleMakesThePayloadStale() throws Exception {
         String staleQuotes = QUOTES.replace("\"stale\":false", "\"stale\":true");
         assertTrue(new JSONObject(DataPayload.merge(staleQuotes, WEATHER))

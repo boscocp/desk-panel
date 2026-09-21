@@ -24,13 +24,13 @@ import org.json.JSONObject;
  *  crypto: [{symbol, price, changePct}],
  *  weather: {tempC, minC, maxC, code, city},
  *  stale:  bool,
- *  theme:  string}
+ *  theme:  string,
+ *  night:  {start, end}}
  * </pre>
  *
  * <p>{@code battery} is added afterwards by {@link #withBattery}, because it
  * comes from the device rather than from the server and arrives on its own
- * schedule — a broadcast, never a poll (T5.4). {@code night} is still absent:
- * T6.4 owns it, and a key invented here would have to be un-invented there.
+ * schedule — a broadcast, never a poll (T5.4).
  */
 public final class DataPayload {
 
@@ -106,6 +106,29 @@ public final class DataPayload {
             // this file.
             String theme = quotes.optString("theme", "");
             payload.put("theme", theme.isEmpty() ? null : theme);
+
+            // The night profile's window (T6.4), and like `theme` it is
+            // passed straight through and never interpreted here. Two
+            // readers take it from the payload and both are elsewhere:
+            // {@link NightWindow} for the backlight and js/format.js for the
+            // glow. Deciding it here would put the answer in a merge step
+            // that runs once a minute, when what the window has to be
+            // compared against is the clock at the moment it is asked.
+            //
+            // Absent rather than empty when the server does not send one, so
+            // an older server on the PC leaves the page's `night` undefined
+            // and both readers fall back to the day profile -- the same path
+            // a typo in the bounds takes. put(null) is how JSONObject removes
+            // a key, which is exactly what is wanted here.
+            //
+            // **This copy is the whole of the wiring, and forgetting it is
+            // silent.** The payload is rebuilt key by key rather than
+            // patched, so a key nobody names here simply does not reach the
+            // phone: the page stays in its day profile for ever and the
+            // backlight never dims, with a correct server, a correct page
+            // and a correct predicate. That is how T6.4 shipped its first
+            // build, and `e2e/check_night_marker.py` is what caught it.
+            payload.put("night", quotes.optJSONObject("night"));
 
             return escapeForScript(payload.toString());
         } catch (JSONException malformed) {

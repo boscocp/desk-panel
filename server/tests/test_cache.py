@@ -298,7 +298,7 @@ class AppPayloadTests(unittest.TestCase):
             crypto=[{"symbol": "BTC", "price": 81470.0, "changePct": 1.01}],
         )
         payload = self.app.quotes()
-        self.assertEqual(set(payload), {"quotes", "fx", "crypto", "stale", "theme"})
+        self.assertEqual(set(payload), {"quotes", "fx", "crypto", "stale", "theme", "night"})
         self.assertFalse(payload["stale"])
         self.assertEqual(payload["quotes"][0]["symbol"], "PETR4")
 
@@ -324,12 +324,39 @@ class AppPayloadTests(unittest.TestCase):
         self._stub_providers(quotes=[], fx=[], crypto=[])
         self.assertEqual(app.quotes()["theme"], "")
 
+    def test_quotes_carries_the_night_window_as_the_config_spells_it(self):
+        """T6.4: the window rides /quotes beside `theme`, and it rides as two
+        strings rather than as a boolean.
+
+        The panel is the thing that dims, so the comparison belongs to the
+        phone's clock -- format.js for the glow, NightWindow.java for the
+        backlight. A server that decided here would be answering with its own
+        timezone, which is the failure this shape exists to make impossible.
+
+        Values other than the defaults, so the assertion can fail: with
+        22:00/07:00 on both sides it would pass against a hard-coded pair."""
+        app = App(dict(CONFIG, night_start="23:30", night_end="05:45"),
+                  clock=self.clock)
+        self._stub_providers(quotes=[], fx=[], crypto=[])
+        self.assertEqual(app.quotes()["night"],
+                         {"start": "23:30", "end": "05:45"})
+
+    def test_quotes_night_bounds_are_empty_when_config_omits_them(self):
+        """An absent bound is an empty string, never a missing key. Both
+        readers treat an unparseable bound as "not night" and leave the panel
+        in its day profile, which is the right way round: a config typo costs
+        the dimming, never the panel."""
+        app = App({k: v for k, v in CONFIG.items()
+                   if k not in ("night_start", "night_end")}, clock=self.clock)
+        self._stub_providers(quotes=[], fx=[], crypto=[])
+        self.assertEqual(app.quotes()["night"], {"start": "", "end": ""})
+
     def test_every_upstream_failing_still_returns_the_contract_shape(self):
         self._stub_providers(fail="everything down")
         payload = self.app.quotes()
         self.assertTrue(payload["stale"])
         self.assertEqual(payload["quotes"], [])
-        self.assertEqual(set(payload), {"quotes", "fx", "crypto", "stale", "theme"})
+        self.assertEqual(set(payload), {"quotes", "fx", "crypto", "stale", "theme", "night"})
 
     def test_one_market_failing_does_not_empty_the_other_two(self):
         # Found on the desk, by changing a ticker to one that needs a token:

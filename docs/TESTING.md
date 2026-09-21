@@ -22,7 +22,7 @@ make e2e                                         # python e2e/run_e2e.py
 make contract                                    # hits the real APIs, opt-in
 ```
 
-The four browser checks under `e2e/layout/` are **not** in `make check` and not in CI: they
+The five browser checks under `e2e/layout/` are **not** in `make check` and not in CI: they
 need Firefox on `PATH`, which is a host dependency neither of those can assume. They are run
 by the acceptance of the tasks that own them, and by hand after anything that moves markup.
 See the section below.
@@ -52,7 +52,7 @@ tests.
 
 ## The panel, in a real browser — `e2e/layout/`
 
-Four checks, one harness. They drive Firefox over Marionette (its built-in automation
+Five checks, one harness. They drive Firefox over Marionette (its built-in automation
 protocol — no driver binary, no npm, standard library only) at **872x392**, the phone's real
 landscape viewport, and none of them needs the phone. `e2e/layout/README.md` is the long
 version; this is what each one is for.
@@ -63,12 +63,13 @@ version; this is what each one is for.
 | `check_blackout.py` | does the panel go dark on both causes, hold what arrives, and draw it on the way back |
 | `check_scroll.py` | does an overflowing card keep moving across a refresh |
 | `check_pulse.py` | does a value pulse only when it changed |
+| `check_night.py` | does the panel enter its night profile inside the window, stop moving, drop its glow, and leave it alone when nobody can see it |
 
-All four take `--theme NAME`. Run `check_layout` and `check_blackout` for every theme;
-`check_scroll` for a theme that answers overflow with motion, and `check_pulse` for one that
-marks a changed value — both are optional in the theme contract (`docs/THEMING.md`).
+All five take `--theme NAME`. Run `check_layout`, `check_blackout` and `check_night` for every
+theme; `check_scroll` for a theme that answers overflow with motion, and `check_pulse` for one
+that marks a changed value — both are optional in the theme contract (`docs/THEMING.md`).
 
-Three things are worth knowing before trusting one. The first is true of all four; the other
+Three things are worth knowing before trusting one. The first is true of all five; the other
 two are `check_layout.py` alone, which is the only one of them that measures *where* anything
 is:
 
@@ -84,10 +85,15 @@ is:
   *today's* pt-BR date, so "the widest case" was only the widest case on the days it happened
   to be.
 
-  The other three freeze the page's timers instead, which is a weaker and sufficient
+  The other four freeze the page's timers instead, which is a weaker and sufficient
   guarantee: none of them reads an absolute position, so the panel is free to be wherever the
   shift last put it. `check_scroll.py` reads the scrolling box's *own* transform, which an
   ancestor's does not enter into.
+
+  `check_night.py` goes the other way on purpose and leaves the clock alone, computing its
+  night window from the harness's own time instead. What it is testing is that the page
+  compares a window against *now*; a pinned clock would let a page that ignored the payload's
+  bounds pass as long as it happened to agree.
 
 What none of them can tell you is whether the panel is *readable*. Nothing here measures
 contrast, glow or type against a human at 50cm, and Android resolves `sans-serif-condensed` to
@@ -186,6 +192,17 @@ them:
   charging. It is **not** one line per render: the page is only re-rendered when the level or
   the temperature actually changes, so the marker count and the render count differ on purpose
   (T5.4).
+- `night=on|off` reports the *profile*, not the brightness, and it is not a conjunction with
+  heat the way `screen=thermal` is. A hot night is two independent facts and the log says
+  both — `night=on` beside `screen=thermal` — where folding them would swallow one and leave
+  the morning's `screen=thermal-clear` next to a profile nobody could tell the state of. It
+  *is* gated on the PC: offline the display is out and a dimmer backlight behind it is not
+  something anybody can see (T6.4).
+- **`night=` cannot be waited for; it has to be driven.** The window is configuration on the
+  PC compared against the phone's own clock, so nothing changes on a steady panel and a
+  `sleep 90 && grep` waits for a line the app is right not to write.
+  `e2e/check_night_marker.py` walks the window from day to night and back, restarting the
+  server under a temporary config, and asserts both edges.
 - `panel=rendered` is **not** once per session. The wake relaunches the Activity, so one lands
   about a second after each `screen=wake`, and WebView is entitled to fire `onPageFinished`
   twice for a single load — both have been seen on the device. Assert that it appears, never

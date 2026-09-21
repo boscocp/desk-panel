@@ -768,3 +768,40 @@ body {
  * The one thing this theme owes that rule: nothing below sets
  * `visibility: visible`, which would un-hide a descendant of the hidden body.
  */
+
+/* --- The night profile, this theme's half of it (T6.4) -------------------- *
+ *
+ * `:root[data-night]` is set by js/app.js through host.night() when the
+ * device's own clock is inside the window the PC's config describes. Core
+ * stops every animation under it (css/style.css); everything below is this
+ * theme's answer to the same attribute, and it is taste rather than a
+ * promise -- a theme with no glow has nothing to do here and plain does
+ * exactly nothing.
+ *
+ * Two of this theme's three glow properties, and not one hex literal, which is
+ * what the comment at the top of this file promised T6.4 would need. The third
+ * is deliberately left alone -- see the bottom of the block. The accent, the text
+ * colours and every size stay exactly as they are: the panel at night is the
+ * same panel, read in the dark, and a design that also desaturated itself
+ * would be a second theme arriving unannounced at 22:00. The dimming a reader
+ * actually sees is this plus the backlight, which MainActivity takes to 0.15
+ * at the same moment -- and the backlight is the bigger half by a long way.
+ *
+ * Halved, roughly. Glow is a light source and this room has no other one at
+ * 03:00: at the daytime alpha a 16px halo on the clock reads as a smear
+ * across the glass once the eye is dark-adapted, which is the opposite of
+ * what the glow is for. Dropped rather than removed, because a neon panel
+ * with no glow at all is not this theme in a dim state, it is a different
+ * design.
+ */
+:root[data-night] {
+    --glow: rgba(213, 63, 167, 0.22);
+    --glow-dim: rgba(187, 129, 170, 0.16);
+
+    /* Not dimmed, and this is the one deliberate exception. STALE is the only
+     * thing on this panel that says something is wrong, and the reason it
+     * glows at all is to be noticed from across a dark room -- which is
+     * precisely the condition this block otherwise exists to soften. A night
+     * profile that also quietened the alarm would be turning the volume down
+     * on the one thing worth hearing. It is on screen for minutes a month. */
+}

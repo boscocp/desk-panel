@@ -10,7 +10,8 @@
 // screen state. Not one element, id or class name.
 // Below it, web/themes/<name>/: every element on the panel.
 // Here: the document itself -- which stylesheet is live, which theme object is
-// current, what the theme's root element is, and the blackout attribute.
+// current, what the theme's root element is, and the two attributes on <html>
+// that core owns: the blackout and the night profile.
 //
 // Deliberately not a plugin system. There is one consumer and it is a page
 // that renders a payload, so a theme is an object with two functions and a
@@ -213,11 +214,34 @@
         }
     }
 
+    // The night profile, and it is an attribute for the same reasons the
+    // blackout above is one: it goes on <html> rather than on <body>, because
+    // <body> belongs to the theme and a theme that cleared it would clear
+    // this with it, and it is core's to set rather than the theme's to
+    // remember.
+    //
+    // What it means is split, and the split is the point. css/style.css owns
+    // the half that is a promise about the room -- nothing moves at night --
+    // because a theme that forgot it would look perfectly fine in a
+    // screenshot and keep a card walking across a dark bedroom all night. The
+    // theme owns the half that is taste: how much glow a dim panel has, which
+    // is a question only a theme can answer because only a theme has any glow
+    // (web/themes/neon/theme.css redefines three custom properties under this
+    // attribute; plain has nothing to dim and does nothing).
+    function night(on) {
+        if (on) {
+            document.documentElement.setAttribute('data-night', 'on');
+        } else {
+            document.documentElement.removeAttribute('data-night');
+        }
+    }
+
     window.DeskPanel = {
         defineTheme: defineTheme,
         useTheme: useTheme,
         render: render,
         tick: tick,
         blackout: blackout,
+        night: night,
     };
 })();

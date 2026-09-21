@@ -185,16 +185,24 @@ page's `Date`.** Marionette executes in its own sandbox with its own globals, so
 trap that made `instanceof Date` the wrong guard inside `offsetFor` — that one answered the
 origin for every clock the sweep handed it, and seven positions measured as one.
 
-## The other three checks in this directory
+## The other four checks in this directory
 
-`check_layout.py` measures one frame. Three siblings answer what a frame cannot, all of them
-driving the same Marionette plumbing so this is four checks and one harness:
+`check_layout.py` measures one frame. Four siblings answer what a frame cannot, all of them
+driving the same Marionette plumbing so this is five checks and one harness:
 
 | | asks |
 |---|---|
 | `check_blackout.py` | does the panel go dark on both causes, hold what arrives, and draw it on the way back (T6.7) |
 | `check_scroll.py` | does an overflowing card keep moving across a refresh (T6.6) |
 | `check_pulse.py` | does a value pulse **only** when it changed (T6.2) |
+| `check_night.py` | does the panel run its night profile inside the configured window (T6.4) |
+
+`check_night.py` is the only one that deliberately does **not** pin or freeze the page's
+clock: what it is testing is that the page compares the payload's window against *now*, so a
+pinned clock would let a page ignoring the bounds pass whenever it happened to agree. It also
+carries a lesson worth repeating in the next check somebody writes here — its fixtures name
+the theme under test, because `host.useTheme` falls back to `neon` on an absent name, and the
+first cut reported `--theme plain` as passing while measuring neon.
 
 `check_pulse.py` is the one that is about a theme rather than about the panel: `neon` lifts a
 changed value toward a brighter accent for 280ms, `plain` deliberately does nothing. Run it

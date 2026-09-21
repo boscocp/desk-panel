@@ -35,6 +35,13 @@ public class MainActivity extends Activity implements PanelService.Panel {
     private static final String PANEL_URL =
             "https://appassets.androidplatform.net/assets/index.html";
 
+    /**
+     * The backlight the night profile holds (T6.4). A fraction of the
+     * device's range, not a nit value: {@code screenBrightness} is 0f to 1f
+     * and what that comes out as is the panel's business.
+     */
+    private static final float NIGHT_BRIGHTNESS = 0.15f;
+
     /** Reads the clock the panel is supposed to have painted. */
     private static final String READ_CLOCK =
             "(function () {"
@@ -63,13 +70,24 @@ public class MainActivity extends Activity implements PanelService.Panel {
     private boolean tooHot;
 
     /**
-     * Whether the window is currently held at brightness zero. Kept rather than
-     * read back off the layout params: this is what makes the marker fire once
-     * per change, and the two are not the same question — the window manager
-     * may round or clamp a brightness, and a comparison against what it stored
-     * would eventually disagree with what was asked for.
+     * The brightness override this window was last asked to hold. Kept rather
+     * than read back off the layout params, because the two are not the same
+     * question — the window manager may round or clamp a value, and a
+     * comparison against what it stored would eventually disagree with what
+     * was asked for, which would turn a no-op into a relayout every cycle.
+     *
+     * <p>Starts at the window default, which is what a freshly created window
+     * already holds, so the first call that changes nothing changes nothing.
      */
-    private boolean blanked;
+    private float brightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+
+    /**
+     * Whether the night profile is in force (T6.4), from {@link PanelService}.
+     * A {@code boolean} rather than a {@code Boolean} for the reason
+     * {@link #tooHot} is: "nothing heard yet" and "not night" both mean full
+     * brightness, so there is nothing for a third state to say.
+     */
+    private boolean night;
 
     /**
      * The last payload handed to the page, for the same reason
@@ -230,6 +248,28 @@ public class MainActivity extends Activity implements PanelService.Panel {
     }
 
     /**
+     * The night profile, on the main thread, from {@link PanelService}
+     * (T6.4).
+     *
+     * <p>Nothing is pushed to the page here, which is the one thing that
+     * makes this callback look different from the two above it. The page
+     * asks {@code isNight} in {@code web/js/format.js} the same question
+     * about the same payload and drops its own glow, so what crosses this
+     * boundary is only what the page cannot reach: the backlight. See
+     * {@link NightWindow} for why two implementations of one predicate is
+     * the right number here.
+     *
+     * <p>Nothing is logged here either, for the reason {@link #onThermal}
+     * logs nothing: the marker's claim survives this Activity, and MIUI
+     * recreates it on every wake from doze.
+     */
+    @Override
+    public void onNight(boolean isNight) {
+        night = isNight;
+        applyScreenState();
+    }
+
+    /**
      * <b>The arbitration.</b> The one place the two authorities meet, and the
      * one expression that decides whether the panel is lit (ADR 0012): the PC
      * is online <em>and</em> the device is not too hot. Either alone puts it
@@ -290,7 +330,12 @@ public class MainActivity extends Activity implements PanelService.Panel {
         // receiver is service-scoped, so the verdict keeps updating with the
         // Activity destroyed and the screen out, and cooling clears the
         // override on its own.
-        setBlanked(tooHot);
+        //
+        // One call, and it settles the night profile in the same breath
+        // (T6.4): both are the same mechanism, so they cannot be two vetoes
+        // the way the block above and this one are. applyBrightness holds the
+        // precedence between them.
+        applyBrightness();
     }
 
     @Override
@@ -333,28 +378,59 @@ public class MainActivity extends Activity implements PanelService.Panel {
     }
 
     /**
-     * The one place that touches {@code screenBrightness}: zero while blanked,
-     * and back to {@code BRIGHTNESS_OVERRIDE_NONE} — the window default, which
-     * is -1f and means "whatever the system says" — when not.
+     * <b>The one place that touches {@code screenBrightness}</b>, and since
+     * T6.4 it arbitrates three values rather than switching between two:
      *
-     * <p>A no-op unless the state actually changes. Every {@code setAttributes}
-     * is a round trip to the window manager and a relayout, and this is reached
-     * from a broadcast-driven path.
+     * <pre>
+     *   0f      too hot      the thermal cutoff (T5.5, ADR 0012)
+     *   0.15f   night        the night profile (T6.4)
+     *   -1f     otherwise    BRIGHTNESS_OVERRIDE_NONE: whatever the system says
+     * </pre>
      *
-     * <p>It does not log. Whether the panel <em>looked</em> different is not a
-     * question this method can answer — blanking a window whose display is
-     * already out changes nothing anybody can see — and the marker that claims
-     * it lives in {@code PanelService.updateThermalMarker}, which holds both
-     * halves of the answer.
+     * <p>Heat wins, and the order is the whole of the decision. Both are
+     * expressed in the same mechanism — unlike the PC's authority, which
+     * releases {@code FLAG_KEEP_SCREEN_ON} and lets the display actually
+     * sleep — so unlike {@link #applyScreenState()} above, this one cannot be
+     * two independent vetoes. It has to be a precedence, and it is written as
+     * one expression so that there is no second place where it could be
+     * written differently. A night that outranked heat would leave a phone at
+     * 46 degrees lighting its backlight because the clock said 23:00, which
+     * is exactly the trade ADR 0012 refuses.
+     *
+     * <p>{@code 0.15f} rather than something lower, and it is a floor rather
+     * than a preference: this panel is read at about 50cm in a dark room and
+     * a backlight below roughly a tenth is a panel you have to lean towards.
+     * The page drops its glow at the same time (T6.4 step 3), so the dimming
+     * a reader actually sees is the two together.
+     *
+     * <p>A no-op unless the value actually changes. Every
+     * {@code setAttributes} is a round trip to the window manager and a
+     * relayout, and this is reached from a broadcast-driven path and from a
+     * per-refresh one.
+     *
+     * <p>It does not log, and neither marker it might be tempted to emit
+     * belongs here. Whether the panel <em>looked</em> different is not a
+     * question this method can answer — dimming a window whose display is
+     * already out changes nothing anybody can see — and both claims are made
+     * in {@code PanelService}, which holds the PC's half of each and survives
+     * the Activity recreation every wake from doze causes.
      */
-    private void setBlanked(boolean blank) {
-        if (blank == blanked) {
+    private void applyBrightness() {
+        float wanted;
+        if (tooHot) {
+            wanted = 0f;
+        } else if (night) {
+            wanted = NIGHT_BRIGHTNESS;
+        } else {
+            wanted = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+        }
+        if (wanted == brightness) {
             return;
         }
-        blanked = blank;
+        brightness = wanted;
 
         WindowManager.LayoutParams params = getWindow().getAttributes();
-        params.screenBrightness = blank ? 0f : WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE;
+        params.screenBrightness = wanted;
         getWindow().setAttributes(params);
     }
 
