@@ -5,7 +5,8 @@ const assert = require('node:assert/strict');
 
 const {
     formatPrice, formatRate, formatPair, formatChange, changeClass, weatherLabel, isNight,
-    sparklinePath, formatTemp, formatBattery, tempClass, BATTERY_WARN_C, BATTERY_HOT_C,
+    sparklinePath, formatTemp, formatBattery, batteryFields, tempClass,
+    BATTERY_WARN_C, BATTERY_HOT_C,
     formatRange, weatherGlyph, WEATHER_LABELS,
     overflowsBy, scrollPlan, worthScrolling,
     SCROLL_SECONDS_PER_ROW, SCROLL_MIN_TRAVEL_PX,
@@ -233,6 +234,46 @@ test('formatTemp keeps one decimal and does not round a real zero away', () => {
 // This is a diagnostic, so the thing worth testing is that it never says
 // something confidently wrong: a missing reading has to read as missing, and
 // the temperature has to keep the tenth the broadcast carries.
+
+// T6.10: the corner draws a battery and a thermometer instead of writing BAT
+// and a degree sign, so the theme needs the pieces rather than the sentence.
+// formatBattery composes its string out of these, which is what stops the two
+// disagreeing about what the line says.
+test('batteryFields hands a theme the three pieces of the line', () => {
+    assert.deepEqual(batteryFields({ level: 87, tempC: 31.5, charging: true }),
+                     { level: '87%', temp: '31.5\u00B0C', unplugged: false });
+});
+
+test('batteryFields reports unplugged only when the phone said so', () => {
+    // `=== false`, not `!charging`: a payload with no charging key has not
+    // said the phone is on battery, and the corner must not claim it has.
+    assert.equal(batteryFields({ level: 50, tempC: 30, charging: false }).unplugged, true);
+    assert.equal(batteryFields({ level: 50, tempC: 30, charging: true }).unplugged, false);
+    assert.equal(batteryFields({ level: 50, tempC: 30 }).unplugged, false);
+});
+
+test('batteryFields says null when there is nothing worth a corner', () => {
+    // Distinct from a row of absences: the panel shows an empty corner before
+    // the first battery broadcast, not a battery icon beside a dash.
+    assert.equal(batteryFields(null), null);
+    assert.equal(batteryFields({}), null);
+    assert.equal(batteryFields({ level: NaN }), null);
+    assert.equal(batteryFields({ level: '87' }), null);
+});
+
+test('batteryFields separates an absent temperature from a zero one', () => {
+    assert.equal(batteryFields({ level: 87, charging: true }).temp, null);
+    // Zero is a temperature and not an absence -- a phone outdoors in winter.
+    assert.equal(batteryFields({ level: 87, tempC: 0, charging: true }).temp, '0\u00B0C');
+});
+
+test('formatBattery is built from the same fields, so the two cannot drift', () => {
+    const battery = { level: 64, tempC: 29, charging: false };
+    const fields = batteryFields(battery);
+    const text = formatBattery(battery);
+    assert.ok(text.includes(fields.level), text);
+    assert.ok(text.includes(fields.temp), text);
+});
 
 test('formatBattery writes the level, the temperature and its own label', () => {
     assert.equal(formatBattery({ level: 87, tempC: 31.5, charging: true }),

@@ -370,20 +370,89 @@
     // member of the set and lands here: a code open-meteo adds next year is
     // still named in full by the label underneath, and a made-up picture would
     // be the only thing on this panel that was not true.
-    function renderGlyph(name) {
-        const d = GLYPHS[name];
+    // The panel's second icon set (T6.10). The battery line used to label its
+    // two numbers with the word BAT and a degree sign, which is four
+    // characters of the widest thing in the corner spent saying what a
+    // fourteen-pixel picture says at a glance from across the room.
+    //
+    // Same 24-unit box and same stroke-only construction as the weather
+    // glyphs above, so they take the card's ink and never need a palette --
+    // which is what makes the battery line's three temperature colours
+    // (T5.4) colour the icons too, for free.
+    const ICONS = {
+        // A cell lying on its side with its terminal on the right. The body is
+        // drawn as one rounded rectangle rather than as a path so that the
+        // fill below has something exact to sit inside.
+        // Body and terminal, with a real gap between them: the first cut put
+        // the terminal two units off a body that ran to 18, and at 18px that
+        // is a pixel and a half -- the nub vanished into the outline and the
+        // icon read as a pill. The body stops at 16.8 and the terminal stands
+        // at 18.6, which is about the proportion a real cell has.
+        battery: 'M4 8.4h11.2a1.6 1.6 0 0 1 1.6 1.6v3.6a1.6 1.6 0 0 1-1.6 1.6H4'
+               + 'a1.6 1.6 0 0 1-1.6-1.6V10A1.6 1.6 0 0 1 4 8.4z'
+               + 'M18.6 10.6v2.8',
+        // Bulb and stem. The stem stops short of the bulb's centre so the two
+        // read as one object at 14px rather than as a circle with a line
+        // through it.
+        thermometer: 'M12 3.5a2 2 0 0 1 2 2v7.1a4 4 0 1 1-4 0V5.5a2 2 0 0 1 2-2z'
+                   + 'M12 9v5.5',
+    };
+
+    // One <svg> with one path in it. Both icon sets go through this: the only
+    // things that differ are the drawing and the class, and a second copy of
+    // the namespace incantation is how the two sets start drifting.
+    function svgIcon(d, className) {
         if (!d) {
             return null;
         }
         const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.setAttribute('class', 'w-glyph');
+        svg.setAttribute('class', className);
         svg.setAttribute('viewBox', '0 0 24 24');
-        // The label beside it says the same thing in words, so the picture is
+        // The value beside it says the same thing, so the picture is
         // decoration to anything that reads the DOM aloud.
         svg.setAttribute('aria-hidden', 'true');
         const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         path.setAttribute('d', d);
         svg.appendChild(path);
+        return svg;
+    }
+
+    function renderGlyph(name) {
+        return svgIcon(GLYPHS[name], 'w-glyph');
+    }
+
+    // The battery icon, with its charge drawn inside it (T6.10).
+    //
+    // The bar is the one place this set departs from the weather glyphs, and
+    // it is the reason the icon is worth more than the word it replaced: a
+    // filled outline is read before a two-digit number is, from the distance
+    // this panel is actually looked at. It says the same thing the number
+    // says, which is exactly what the sparkline does beside a price.
+    //
+    // Clamped, because a level over 100 arrives from a phone that has just
+    // been plugged in and a bar sticking out of its own battery looks like a
+    // rendering bug rather than a full charge.
+    function renderBatteryIcon(level) {
+        const svg = svgIcon(ICONS.battery, 'b-icon');
+        if (!svg) {
+            return null;
+        }
+        const fraction = Math.max(0, Math.min(1, level / 100));
+        if (fraction > 0) {
+            const fill = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            // The body's *inner* edge, which is not the path's coordinates: a
+            // 1.6-unit stroke sits half outside the line it is drawn on, so
+            // the usable inside runs 3.2..16 across and 9.2..14.8 down. A bar
+            // drawn to the path itself would sit under its own outline and
+            // read as one solid lozenge at every level above about 80%.
+            fill.setAttribute('x', '3.2');
+            fill.setAttribute('y', '9.2');
+            fill.setAttribute('width', String(Math.round(12.8 * fraction * 100) / 100));
+            fill.setAttribute('height', '5.6');
+            fill.setAttribute('rx', '0.7');
+            fill.setAttribute('class', 'b-fill');
+            svg.appendChild(fill);
+        }
         return svg;
     }
 
@@ -447,19 +516,42 @@
     // broadcast arrives.
     function renderBattery(battery) {
         els.battery.textContent = '';
-        const text = formatBattery(battery);
-        if (!text) {
+        const fields = batteryFields(battery);
+        if (!fields) {
             return;
         }
         const line = el('div');
         // The whole line takes the colour, not just the number: at 20px in a
         // corner, a single re-coloured word is easy to miss and the
-        // temperature is right there to explain it.
+        // temperature is right there to explain it. The icons are stroked in
+        // currentColor, so they take the band's colour with the text.
         //
         // 'normal' is set as a class rather than left empty so the three bands
         // read as three states in the DOM; the stylesheet gives it nothing.
         line.className = tempClass(battery.tempC);
-        line.textContent = text;
+
+        // Icon, value, icon, value (T6.10). The word BAT and the ° are gone;
+        // what is left in the corner is two pictures and two numbers, which
+        // is the least this line can be and still say what it says.
+        const level = el('span', null, 'b-value');
+        level.textContent = fields.level;
+        line.append(...[renderBatteryIcon(battery.level)].filter(Boolean), level);
+
+        if (fields.temp) {
+            const temp = el('span', null, 'b-value');
+            temp.textContent = fields.temp;
+            line.append(...[svgIcon(ICONS.thermometer, 'b-icon')].filter(Boolean), temp);
+        }
+
+        // Still a word, and deliberately: there is no picture for "this phone
+        // is now running its own battery down" that a stranger would read the
+        // way they read a battery outline, and getting it wrong is the one
+        // thing in this corner that matters (ADR 0014).
+        if (fields.unplugged) {
+            const note = el('span', null, 'b-note');
+            note.textContent = 'unplugged';
+            line.appendChild(note);
+        }
         els.battery.appendChild(line);
     }
 
