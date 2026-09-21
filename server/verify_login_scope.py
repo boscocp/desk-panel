@@ -1346,6 +1346,21 @@ def self_test_cases():
                       "macos.agent.run-at-load": FAIL,
                       "macos.agent.loaded": PASS,
                   }))
+    # The deliberate version of the same mistake, and a different fixture:
+    # LoginWindow is what somebody picks on purpose, reading the three session
+    # types as a chronology and wanting the panel up as early as possible. It
+    # is the greeter -- nobody is logged in there. Only the session type
+    # differs from the good plist, so nothing else in the row may move.
+    plist_greeter = parse_launchagent_plist(fixture("macos_launchagent_loginwindow.plist"))
+    cases.append(("macos LoginWindow session type: checks",
+                  statuses(check_macos_agent(plist_greeter, agent, user_agents)), {
+                      "macos.agent.exists": PASS,
+                      "macos.agent.location": PASS,
+                      "macos.agent.session-type": FAIL,
+                      "macos.agent.run-at-load": PASS,
+                      "macos.agent.loaded": PASS,
+                  }))
+
     cases.append(("macos plist in /Library fails", statuses(check_macos_agent(
         plist_good, agent,
         Path("/Library/LaunchAgents/dev.bosco.deskpanel.plist")))["macos.agent.location"], FAIL))
