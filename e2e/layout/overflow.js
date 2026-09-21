@@ -62,6 +62,10 @@ window.onData({
     // --theme run would switch the panel back to the default and measure the
     // wrong one while reporting the right name (T6.7).
     theme: new URLSearchParams(location.search).get('theme') || undefined,
+    // And the language, for the same reason: without it a --lang run would
+    // put the panel back into pt-BR the moment this fixture landed, and
+    // report the right tag while measuring the wrong words (T6.11).
+    language: new URLSearchParams(location.search).get('lang') || undefined,
 });
 
 return true;

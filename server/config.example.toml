@@ -167,6 +167,26 @@ night_end = "07:00"
 # panel. Writing your own: docs/THEMING.md.
 theme = "neon"
 
+# Which language the panel speaks (T6.11). Everything a person reads from the
+# chair comes from here: the weather condition, the card titles, the stale
+# badge, the word for a phone running on its own battery, and the date, which
+# is handed to the browser's own date formatter as this tag.
+#
+# Shipped with the project:
+#   pt-BR  Brazilian Portuguese. The default, because that is where the panel
+#          stands. A bare "pt" or a "pt-PT" lands here too.
+#   en     English. "en-GB" and "en-US" land here too.
+#
+# Everything *else* in this repository is English on purpose -- code, comments,
+# docs, commit messages -- and none of that is what somebody reads from two
+# feet away, which is the one category that has to be in their language.
+#
+# A tag no packaged language answers to is not an error here, exactly as with
+# `theme` above: the page falls back to pt-BR rather than to English, so a typo
+# leaves the panel in the language its owner asked for last rather than
+# switching it to one they did not ask for at all.
+language = "pt-BR"
+
 
 # ---------------------------------------------------------------------------
 # Actions — reserved

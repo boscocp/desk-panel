@@ -34,6 +34,12 @@
         return node;
     }
 
+    // The words this render is drawing in (T6.11). Set at the top of render()
+    // from the payload's `language`, exactly as the neon theme does it: a
+    // field rather than an argument threaded through every function, because
+    // most of them would take it and not use it.
+    let words = strings(null);
+
     // A section is a heading plus a body the renderers refill. Two elements
     // rather than one because the heading is markup here, which is half of
     // what this theme is demonstrating.
@@ -60,7 +66,7 @@
         const clock = el('div', 'clock');
         const date = el('div', 'date');
         const stale = el('div', 'stale-badge');
-        stale.textContent = 'STALE';
+        stale.textContent = words.stale;
         stale.hidden = true;
 
         const header = el('header', null, 'header');
@@ -70,10 +76,10 @@
         // before the buttons do.
         const shortcuts = el('div', 'shortcuts');
 
-        const quotes = column('quotes', 'B3');
-        const fx = column('fx', 'FX');
-        const crypto = column('crypto', 'Crypto');
-        const weather = column('weather', 'Weather');
+        const quotes = column('quotes', words.titles.quotes);
+        const fx = column('fx', words.titles.fx);
+        const crypto = column('crypto', words.titles.crypto);
+        const weather = column('weather', words.titles.weather);
 
         const grid = el('div', null, 'grid');
         grid.append(quotes.section, fx.section, crypto.section, weather.section);
@@ -138,20 +144,31 @@
         const visibleRows = rowHeight > 0 ? available / rowHeight : rowCount;
         const style = getComputedStyle(list.section);
         const plan = scrollPlan(rowCount, visibleRows,
-                                parseFloat(style.getPropertyValue('--scroll-seconds-per-row')),
-                                parseFloat(style.getPropertyValue('--scroll-moving-fraction')));
+                                parseFloat(style.getPropertyValue('--scroll-seconds-per-row')));
         // The second half is the twitch guard the neon theme's copy of this
         // explains at length: integer box metrics at dpr 2.75 can invent a
         // hidden row that is one pixel tall, and a card that moved for it would
         // twitch on the device and pass every check here.
-        if (!plan || !worthScrolling(content - available)) {
+        if (!plan || !worthScrolling(content - available, rowHeight)) {
             list.section.removeAttribute('data-scroll');
             list.scroller.style.removeProperty('--scroll-distance');
             list.scroller.style.removeProperty('--scroll-seconds');
             return;
         }
-        list.scroller.style.setProperty('--scroll-distance',
-                                        `${Math.round(content - available)}px`);
+        // The list drawn twice and moved by exactly one copy (T6.9), which is
+        // the same seam the neon theme makes and for the same reason. The
+        // pitch is measured off the clone rather than computed from
+        // scrollHeight: this theme's rows are two lines tall with a rule
+        // between them and none after the last, so a copy inside a pair is
+        // one rule taller than a copy on its own.
+        const rows = Array.from(list.scroller.children);
+        for (const row of rows) {
+            list.scroller.appendChild(row.cloneNode(true));
+        }
+        const pitch = rows.length
+            ? list.scroller.children[rows.length].offsetTop - rows[0].offsetTop
+            : 0;
+        list.scroller.style.setProperty('--scroll-distance', `${Math.round(pitch)}px`);
         list.scroller.style.setProperty('--scroll-seconds', `${plan.seconds}s`);
         list.section.setAttribute('data-scroll', '');
     }
@@ -179,13 +196,13 @@
         const range = el('div', null, 'w-range');
         range.textContent = formatRange(weather.minC, weather.maxC);
         const cond = el('div', null, 'w-cond');
-        cond.textContent = weatherLabel(weather.code);
+        cond.textContent = words.weather[weather.code] || words.unknown;
         els.weather.append(city, temp, range, cond);
     }
 
     function renderBattery(battery) {
         els.battery.textContent = '';
-        const text = formatBattery(battery);
+        const text = formatBattery(battery, words.tag);
         if (!text) {
             return;
         }
@@ -195,7 +212,23 @@
     }
 
     function render(payload, root) {
+        // Before ensure(), which may mount and which reads `words` for the
+        // column headings and the badge (T6.11).
+        words = strings(payload && payload.language);
         ensure(root);
+        // The headings are built by mount() and the language can change under
+        // a running panel, so they are refreshed here as well -- the same
+        // thing the neon theme does with its data-title attributes. Found by
+        // the id the column was built with rather than kept in `els`, which
+        // would be a fifth reference to the same four sections for the sake
+        // of four querySelector calls a minute.
+        for (const id of Object.keys(words.titles)) {
+            const heading = root.querySelector(`#${id} .col-title`);
+            if (heading) {
+                heading.textContent = words.titles[id];
+            }
+        }
+        els.stale.textContent = words.stale;
         if (!payload) {
             return;
         }
@@ -215,7 +248,13 @@
         // HH:MM:SS, like every theme: native reads this string by id to prove
         // the page rendered (docs/THEMING.md).
         els.clock.textContent = `${hours}:${minutes}:${seconds}`;
-        els.date.textContent = now.toLocaleDateString(undefined, {
+        // The language the PC asked for, not the host's (T6.11). `undefined`
+        // means "whatever this runtime thinks", which on the device is the
+        // phone's system locale and in a browser is the developer's -- so the
+        // panel used to say MONDAY, FEBRUARY 23 on a desk in Brazil whose
+        // every other word was Portuguese, and the two would drift apart
+        // again the moment somebody changed one of them.
+        els.date.textContent = now.toLocaleDateString(words.tag, {
             weekday: 'short', year: 'numeric', month: 'short', day: 'numeric',
         });
     }

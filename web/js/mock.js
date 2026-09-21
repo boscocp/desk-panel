@@ -37,6 +37,14 @@
     // theme other than the default.
     const THEME = new URLSearchParams(location.search).get('theme') || undefined;
 
+    // Develop in the other language: open web/index.html?lang=en. Same path
+    // as production, where the tag comes from the PC's config (T6.11), fed
+    // from the query string instead of from the server. Absent unless asked
+    // for, so the browser shows what the device shows -- an unset language is
+    // what a config that never mentions one sends, and the panel falls back
+    // to pt-BR.
+    const LANGUAGE = new URLSearchParams(location.search).get('lang') || undefined;
+
     const BASE_QUOTES = [
         { symbol: 'PETR4', price: 38.42, changePct: 1.2 },
         { symbol: 'VALE3', price: 61.75, changePct: -0.6 },
@@ -141,6 +149,7 @@
             // Must actually happen here, or the degraded path ships untested.
             stale: tick % 5 === 0,
             night: NIGHT,
+            language: LANGUAGE,
             // Absent unless asked for, so the browser shows what the device
             // shows: an unset `theme` is what a config that never mentions one
             // sends, and the panel falls back to neon.

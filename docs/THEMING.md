@@ -165,19 +165,43 @@ served and stress ones.
 
 The arithmetic is not yours to invent either. `overflowsBy(rowCount,
 visibleRows)` says how many rows are hidden, `scrollPlan(rowCount, visibleRows,
-secondsPerRow, movingFraction)` returns `null` or `{hidden, seconds}`, and
-`worthScrolling(travelPx)` says whether the pixels those rows came out to are
-worth moving for at all; you measure, they decide.
+secondsPerRow)` returns `null` or `{hidden, seconds}`, and
+`worthScrolling(hiddenPx, rowHeightPx)` says whether what those rows came out to in pixels is
+worth putting a card in permanent motion for; you measure, they decide.
 
 That last one is not optional politeness. `clientHeight` and `scrollHeight` are
 integers and the device lays out at a device pixel ratio of 2.75, so a card
 whose rows exactly fill it can measure a pixel over — one hidden row, one pixel
 of travel, and a card twitching in the corner of someone's eye for as long as
 the panel is on, with every check in `e2e/layout` passing because a pixel of
-overflow is a real overflow as far as a measurement can tell. Both are pure and tested, and the two
-numbers you pass in are your own — read them off a custom property so they stay
-in your stylesheet next to the `@keyframes` block they describe, the way both
-themes do.
+overflow is a real overflow as far as a measurement can tell. **Pass it your row height as well
+as your overflow**: since T6.9 both shipped themes answer an overflow with a loop, so any
+overflow at all puts the card in motion for as long as the panel is on — and a flat pixel floor
+that was generous when five pixels bought five pixels of travel is not generous when five pixels
+buy a permanent pass over the whole list. The floor is half a row. Both are pure and tested, and
+the number you pass in is your own — read it off a custom property so it stays in your stylesheet
+next to the `@keyframes` block it describes, the way both themes do.
+
+### If you answer the overflow with a loop
+
+Both shipped themes do, since T6.9, and the shape is worth copying because one part of it is
+easy to get subtly wrong:
+
+- **Draw the list twice** and move the box by exactly one copy. At the end of a pass the second
+  copy is sitting where the first started, the animation restarts, and nothing on screen moved.
+- **Measure the pitch; do not compute it.** The distance you want is the offset between a row
+  and its clone — `children[n].offsetTop - children[0].offsetTop` — not the scroll height of one
+  copy. If your rows carry a border or a margin between them and none after the last, a copy
+  inside a pair is taller than a copy on its own, and the difference is a jolt every pass.
+- **`linear`, and no `alternate`.** A loop has no ends to ease into, and the frame after the
+  restart has to be indistinguishable from the frame before it, which is only true at constant
+  speed.
+- **Clone after you measure the overflow**, not before, or the second copy is what makes the
+  card look like it overflows.
+
+`check_scroll.py` asks all of this: an even number of rows, a second copy that says the same
+thing as the first, and a travel distance equal to the measured pitch. That last one is exact —
+a tolerance there would be a tolerance on the jolt.
 
 **Whatever moves must not be rebuilt.** `window.onData` replaces every row in
 every card once a minute. Put the animation on an element your `mount()` builds
@@ -256,6 +280,40 @@ a theme to call: core applies it to whatever you put in the body.
 `check_layout.py` measures every pass at every position in the cycle, so a card that only
 escapes the viewport at one of them is a certain failure rather than a check that fails on a
 Tuesday.
+
+## The words are not yours to choose
+
+Everything a person reads off the panel comes from a language table in `js/format.js`, and the
+language comes from the PC's config the same way the theme does (T6.11). `pt-BR` and `en` ship;
+`pt-BR` is what an unknown tag falls back to.
+
+```js
+const words = strings(payload && payload.language);
+words.titles.crypto   // 'CRIPTO'
+words.stale           // 'DEFASADO'
+words.weather[99]     // 'Trovoada com granizo forte'
+words.unplugged       // 'na bateria'
+words.tag             // 'pt-BR', for toLocaleDateString and anything else Intl
+```
+
+Read it once at the top of `render()` and keep it for that render. Both shipped themes do; both
+also re-apply their headings there rather than only in `mount()`, because the language can
+change under a running panel exactly as the theme can.
+
+- **Do not write a user-facing string in your theme.** Not in the JavaScript, and not in the
+  stylesheet either — `neon`'s card titles are `content: attr(data-title)` and the theme writes
+  the attribute. A literal is a word that only exists in one language, and nothing will tell
+  you.
+- **Do not read the device's locale.** `toLocaleDateString(undefined, …)` asks the WebView,
+  which on a phone in a stand says nothing about who is looking at the panel. `words.tag` is
+  the answer.
+- **Leave room for the other language.** The words are not the same length: `TEMPO` against
+  `WEATHER`, `DEFASADO` against `STALE`. If two of them share a strip — the stale badge and a
+  card title do, in `neon` — `check_layout.py --lang` is what tells you whether they still fit,
+  and it can see a `::before`'s ink since T6.11.
+
+Adding a language is a table in `format.js` and nothing else. A test asserts every table has
+every key the fallback has, so a half-translated one fails before it reaches a panel.
 
 ## The night profile is half yours
 

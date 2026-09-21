@@ -3,7 +3,8 @@
 // A typical tick never breaks a layout. This one exists because every value in
 // it has, or plausibly could, come out of the real feed:
 //
-//   - the longest label in format.js's WMO table ("Thunderstorm, heavy hail")
+//   - the longest label in format.js's WMO table for the language under test
+//     ("Trovoada com granizo forte", or "Thunderstorm, heavy hail" in English)
 //   - a long city name, since the city is server config and not a rebuild
 //   - a negative temperature with a wide min-max, which is the longest weather
 //     line that can be built
@@ -18,10 +19,10 @@
 // The first five come from web/js/mock.js, which put them there for the same
 // reason; the rest cannot be got from a served tick.
 //
-// Also forces the clock to 23:59:59 (the widest time) and the date to pt-BR,
-// which is what the phone actually renders and is far longer than en-US. The
-// harness pins the clock first, so that date is the longest one of the year
-// rather than today's (check_layout.py, PINNED).
+// Also forces the clock to 23:59:59 (the widest time) and the date to the
+// panel's language -- pt-BR by default, which is what the phone renders and is
+// far longer than en-US. The harness pins the clock first, so that date is the
+// longest one of the year rather than today's (check_layout.py, PINNED).
 
 window.onData({
     quotes: [
@@ -48,6 +49,10 @@ window.onData({
     // this pass would switch a --theme run back to the default and measure the
     // wrong panel while reporting the right name (T6.7).
     theme: new URLSearchParams(location.search).get('theme') || undefined,
+    // And the language, for the same reason: without it a --lang run would
+    // put the panel back into pt-BR the moment this fixture landed, and
+    // report the right tag while measuring the wrong words (T6.11).
+    language: new URLSearchParams(location.search).get('lang') || undefined,
 });
 
 document.getElementById('clock').textContent = '23:59:59';
@@ -58,9 +63,24 @@ document.getElementById('clock').textContent = '23:59:59';
 // widest case on the days it happened to be. The harness pins the page's clock
 // to the longest pt-BR date of the year before running this
 // (check_layout.py, PINNED), and this is what reads it.
+//
+// The tag is **the one the panel resolves to**, not the one the query string
+// asked for, and the difference is not pedantry. Since T6.11 the language is
+// config and `strings()` matches on the primary subtag, so `?lang=en-GB` is an
+// `en` panel -- and a fixture writing `en-GB` here would render
+// "Monday 23 February 2026" where the panel renders "Monday, February 23,
+// 2026". The harness would then be measuring a string the page cannot produce,
+// which is the same class of infidelity this file's own comment above warns
+// about for `theme`. Asking `strings` is the only way to be sure; it is the
+// page's own function and it is already loaded.
+//
+// pt-BR is still the default and still the longer of the two -- "segunda-feira,
+// 23 de fevereiro de 2026" is 38 characters against 25 for en-US -- so the
+// widest case is what an unqualified run measures.
 document.getElementById('date').textContent =
-    new window.Date().toLocaleDateString('pt-BR', {
-        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-    });
+    new window.Date().toLocaleDateString(
+        strings(new URLSearchParams(location.search).get('lang')).tag, {
+            weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+        });
 
 return true;
