@@ -218,9 +218,10 @@ marker per refresh), a window containing now turns the profile on, and the windo
 turns it off. It runs the server itself under a temporary config, because changing that config
 means a restart and restarting somebody's running server is not a script's to do.
 
-**The falling edge is the one that cost a second attempt.** The obvious way to drive it is
-another restart, and that is what the first version did — and it passed for the wrong reason,
-visibly, on the device:
+**Driving the edges took three attempts, and the failures are the interesting part.** The
+obvious way is to restart the server into a new config — and a restart is a gap in the server's
+answers, so a gap the probe ladder notices is a logout as far as the phone is concerned. The
+falling edge passed for the wrong reason, visibly:
 
 ```
 19:36:22 night=on
@@ -229,78 +230,23 @@ visibly, on the device:
 19:36:24 night=off      <- not the window. The PC leaving.
 ```
 
-A restart is a gap in the server's answers, and a gap the probe ladder notices is a logout as
-far as the phone is concerned. The rising edge is immune — a gap can only *clear* the profile,
-never set it — so only the falling one had to stop depending on a restart. The night window is
-now ninety seconds long and expires while the server sits there answering, which is also what
-happens at 07:00 every morning; and the check rejects a `night=off` that a `state=offline`
-precedes in the buffer, by position rather than by comparing the timestamps logcat prints,
-which carry no year and sort backwards across New Year.
+The second attempt drove the falling edge off the clock — a short window that expires while the
+server sits there answering — and left the rising one behind a restart. That one then had to
+reconnect a possibly-dozing phone inside a window with minutes left to live, and passed with
+about seventy seconds of margin, which is not a pass anybody should rely on.
 
-It also nudges the Activity after a restart, because coming back from a real offline stretch is
-T4.3's and T5.6's behaviour, with their own acceptances and their own fifteen-minute alarm.
+The third serves the window **once, before it opens**, from a server that never moves. The
+clock walks into it and back out of it, which is what happens at 22:00 and 07:00 anyway; there
+is no blip to have and no reconnect to race. Both edges are guarded regardless — a
+`state=offline` before either marker fails the run, checked by position in the buffer rather
+than by comparing the timestamps logcat prints, which carry no year and sort backwards across
+New Year.
 
-**The quiet window needed a second refresh before it could mean anything**, and that too was
-the feature working rather than a flake: the app keeps the window across an offline stretch, so
-a panel left in the night profile by a previous run comes back still in it and corrects itself
-on the first payload under the day window. A `night=off` four milliseconds after a `data=ok`,
-reading as a marker that fires per refresh.
-
-### Three decisions inside the page's half
-
-- **`animation: none`, not the blackout's `animation-play-state: paused`.** The panel is
-  *visible* at night, and a paused animation holds its frame — so T6.2's 280ms pulse would
-  freeze one number at its brightest until morning. `none` also returns a scroller to the top
-  of its card, which is the readable place to spend a night. Core only sets the night attribute
-  while the panel is visible, so the two rules never apply at once and a card blacked out at
-  night still resumes where it left off.
-- **The alarm's glow is not dimmed.** `--glow` and `--glow-dim` are halved under
-  `:root[data-night]`; `--glow-alarm` is left alone, because STALE exists to be noticed from
-  across a dark room and that is precisely the condition the rest of the block softens.
-- **The window survives the offline stretch**, unlike the prices, which are dropped. It is
-  configuration rather than a measurement and is exactly as true at midnight with the PC off as
-  it was at ten — which is what makes a 23:00 login come up dim instead of at full brightness
-  for the minute until the first payload lands.
-
-Heat outranks night, and it is a precedence rather than two vetoes: the two blackouts in
-`applyScreenState` are independent because each has its own mechanism, while night and the
-thermal cutoff share one. `applyBrightness` holds the order in a single expression, because a
-night that outranked heat would light the backlight on a phone at 46 degrees.
-
-### `check_night.py` is the fifth browser check, and it does not pin the clock
-
-Every other check either pins the page's clock or freezes its timers. This one computes its
-window from the harness's own time, because what it is testing is that the page compares a
-window against *now*: a pinned clock would let a page ignoring the payload's bounds pass
-whenever it happened to agree.
-
-Its first cut reported `--theme plain` as passing while measuring neon. The fixtures did not
-carry a `theme`, and `host.useTheme` falls back to neon on an absent name — so the first
-injected payload switched the page back to the default. It asserts the live stylesheet is the
-one asked for now, before measuring anything. **`check_blackout.py` has the same shape of
-gap** and it is deliberate there, because its second payload exists to prove a theme switch on
-wake; worth knowing before trusting a `--theme` run of it. All four mutations of the night
-feature — the core rule, the attribute, the theme's glow, the visibility gate — were confirmed
-to fail the check.
-
-### What TT.10 changed about its own task file
-
-Two rows of the fixture table were amended, both because the implementation answers a better
-question than the table asked:
-
-- **No linger fixture**, because the verifier does not check `Linger` at all. It proves the
-  stronger property directly — the unit is outside the transitive closure of `default.target`
-  — which holds whatever lingering says, and is exactly why T3.9's acceptance can require a
-  pass with `Linger=yes` on this machine. A `Linger=yes` trap fixture would have been a check
-  that fails on a correct installation.
-- **WSL from `/proc/sys/kernel/osrelease`, not `/proc/version`.** Same `microsoft` marker,
-  one short line rather than a sentence that also names the compiler.
-
-Writing the named cases found a gap in the tests themselves: `detect_autologin` dispatches on
-`sys.platform`, so the Windows branch answers to `"win32"`. A case spelling it `"windows"`
-falls through to the Linux branch, finds no display manager and returns `unknown` — loud here,
-but it would have gone on asserting something true about the wrong platform if the expectation
-had been written to match what it returned.
+**The quiet window needed two refreshes before it could mean anything**, and that too was the
+feature working rather than a flake: the app keeps the window across an offline stretch, so a
+panel left in the night profile by a previous run comes back still in it and corrects itself on
+the first day payload. A `night=off` four milliseconds after a `data=ok`, reading as a marker
+that fires per refresh.
 
 ### What the review found, and all four were real
 
