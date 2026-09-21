@@ -491,6 +491,23 @@ class App:
         # /quotes rather than /weather because /quotes is already the payload's
         # carrier -- it is where `stale` is decided for the whole panel.
         payload["theme"] = config.get("theme", "")
+        # The night profile's window, and it rides here for the same reason
+        # `theme` does: /quotes is the payload's carrier, and a third endpoint
+        # would be a third request a cycle for two strings a human edits by
+        # hand. Changing when the panel dims must never mean rebuilding the
+        # APK (ADR 0013), which is the whole reason these are config at all.
+        #
+        # Sent as written, never as a boolean. The window is configured here
+        # and evaluated against *the phone's* clock -- by js/format.js for the
+        # glow and by NightWindow.java for the backlight -- because the panel
+        # is the thing whose screen dims and the phone is the thing sitting on
+        # the desk. A server that sent `night: true` would be answering with
+        # its own timezone, and a panel that had been moved would dim an hour
+        # late for ever with nothing to explain why.
+        payload["night"] = {
+            "start": config.get("night_start", ""),
+            "end": config.get("night_end", ""),
+        }
         return payload
 
     def _history(self, now):

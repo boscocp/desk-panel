@@ -20,6 +20,8 @@ import android.util.Log;
 import androidx.core.app.ServiceCompat;
 import androidx.core.content.ContextCompat;
 
+import java.util.Calendar;
+
 /**
  * Owns the poll loop, so that the loop outlives the screen (ADR 0014).
  *
@@ -93,7 +95,7 @@ public final class PanelService extends Service implements PcPoller.Listener {
          * because the PC is away, where nothing blanks and there is nothing to
          * report. The window is the only thing that knows whether a verdict
          * actually took the panel out, so the window logs it — see
-         * {@code MainActivity.setBlanked}.
+         * {@code MainActivity.applyBrightness}.
          *
          * <p>Two authorities arrive as two calls rather than as one combined
          * verdict because each is applied by a different mechanism, and only
@@ -104,6 +106,29 @@ public final class PanelService extends Service implements PcPoller.Listener {
          * @param tooHot whether the device is too hot to keep painting
          */
         void onThermal(boolean tooHot);
+
+        /**
+         * Whether the night profile is in force (T6.4).
+         *
+         * <p>Delivered the same way {@link #onThermal} is, and for the same
+         * reason: only the window can reach {@code screenBrightness}, and the
+         * decision must not be made twice. What the window does with it is a
+         * third brightness, not a third blackout — the panel at night is lit,
+         * dimly, because a dark room is exactly when somebody glances at a
+         * clock.
+         *
+         * <p>Nothing about the page rides this call. {@code js/app.js} asks
+         * {@code isNight} in {@code web/js/format.js} the same question about
+         * the same payload, so the glow drops without a round trip through
+         * Java — and so the profile can be developed in a browser, where
+         * there is no Java at all. See {@link NightWindow} for why that is a
+         * deliberate second implementation rather than a missed chance to
+         * share one.
+         *
+         * @param night whether the device's own clock is inside the window
+         *              the PC's config describes
+         */
+        void onNight(boolean night);
 
         /**
          * A fresh data payload for the page (T5.1).
@@ -221,6 +246,41 @@ public final class PanelService extends Service implements PcPoller.Listener {
     private static volatile boolean screenMarkerPending;
 
     /**
+     * The night profile's window, as the last payload described it, or null
+     * while no payload has carried a usable one (T6.4).
+     *
+     * <p><b>Not cleared when the PC goes away</b>, unlike
+     * {@link #lastServerPayload} beside it, and the difference is what the two
+     * hold. A price is a measurement and goes stale; this is configuration —
+     * two strings a human edits in {@code server/config.toml} — and it is
+     * exactly as true at midnight with the PC off as it was at ten. Keeping it
+     * is what makes a 23:00 login come up dim immediately instead of at full
+     * brightness for the minute until the first payload lands, which is the
+     * one minute the profile exists for.
+     */
+    private static volatile NightWindow nightWindow;
+
+    /**
+     * Whether the night profile is currently in force — the state the
+     * {@code night=} marker reports, and the reason it is emitted here rather
+     * than by the window.
+     *
+     * <p>It is the conjunction {@code online && inside the window}: offline
+     * the screen is asleep and a dimmer backlight behind a display that is
+     * out is not a thing anybody can see, so there is nothing to claim. Heat
+     * is deliberately <em>not</em> part of it. A hot night is two independent
+     * facts and the log says both — {@code night=on} beside
+     * {@code screen=thermal} — where a conjunction would have swallowed one
+     * of them and left the morning's {@code screen=thermal-clear} arriving
+     * next to a profile nobody could tell the state of.
+     *
+     * <p>Static for the reason {@link #thermalDark} is: MIUI recreates the
+     * Activity on every wake from doze, and a per-window flag would emit a
+     * second {@code night=on} for one nightfall.
+     */
+    private static volatile boolean nightDim;
+
+    /**
      * The last payload the page was given, replayed to a window that arrives
      * late for the same reason {@link #lastOnline} is. The data refreshes once
      * a minute, so without this a wake would show an empty panel for up to a
@@ -331,6 +391,14 @@ public final class PanelService extends Service implements PcPoller.Listener {
         if (newPanel != null && hot != null) {
             newPanel.onThermal(hot);
         }
+        // Unconditional, where the two above are guarded, because "no night
+        // window yet" and "not night" ask the same thing of the window --
+        // full brightness -- whereas "no PC verdict yet" and "offline" ask
+        // opposite ones. The same asymmetry MainActivity.tooHot has against
+        // MainActivity.lastOnline, one layer up.
+        if (newPanel != null) {
+            newPanel.onNight(nightDim);
+        }
         String payload = lastPayload;
         if (newPanel != null && payload != null) {
             newPanel.onData(payload);
@@ -413,7 +481,56 @@ public final class PanelService extends Service implements PcPoller.Listener {
      */
     private void onData(String json) {
         lastServerPayload = json;
+        // Re-evaluated here and nowhere on a clock of its own (T6.4 step 4).
+        // A timer would be one more thing running on a device whose whole
+        // power story is that it does as little as possible, to answer a
+        // question that changes twice a day -- and this path already runs
+        // once a minute while the panel is lit, which is the resolution the
+        // profile is specified at.
+        //
+        // Before publish(), not after: publish() returns early when the
+        // folded payload is unchanged, and the window must be re-read from a
+        // payload whose bounds a human may have just edited on the PC even
+        // when every price in it is the same.
+        nightWindow = NightWindow.parse(json);
+        updateNight();
         publish();
+    }
+
+    /**
+     * Applies the night profile to the window and emits {@code night=} on its
+     * edges (T6.4).
+     *
+     * <p>Called from the two places that can change the answer -- a refresh,
+     * which may carry new bounds, and a PC transition, which is what the
+     * {@code online} half of the conjunction is -- and from nowhere else.
+     *
+     * <p><b>What the marker claims is "the panel is running its night
+     * profile"</b>, which is the same shape of claim the thermal marker makes
+     * and is why both live in this class: {@link #nightDim} survives the
+     * Activity recreation that every wake from doze causes, and a flag on the
+     * window does not.
+     */
+    private void updateNight() {
+        NightWindow window = nightWindow;
+        boolean night = Boolean.TRUE.equals(lastOnline)
+                && window != null
+                && window.covers(NightWindow.minuteOfDay(Calendar.getInstance()));
+
+        Panel target = panel;
+        if (target != null) {
+            target.onNight(night);
+        }
+
+        // The window is told on every evaluation and the log only on a
+        // change. The first is idempotent -- MainActivity compares against
+        // the brightness it last asked for -- and the second is a contract:
+        // one line per transition, the same as state=, screen= and dormant=.
+        if (night == nightDim) {
+            return;
+        }
+        nightDim = night;
+        Log.i(Markers.TAG, Markers.night(night));
     }
 
     /**
@@ -802,6 +919,13 @@ public final class PanelService extends Service implements PcPoller.Listener {
         // hot device says so here — that is the morning where the panel comes
         // up black and the log has to explain why.
         updateThermalMarker();
+
+        // And half of what the night profile reports, for the mirror-image
+        // case: a login at 23:00. The window is kept across the offline
+        // stretch (see nightWindow), so this is what brings the panel up
+        // already dim rather than at full brightness until the first payload
+        // lands a minute later.
+        updateNight();
 
         if (online) {
             // Started only now, and stopped below: the data poll exists to
