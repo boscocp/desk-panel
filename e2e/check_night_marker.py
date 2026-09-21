@@ -13,36 +13,36 @@ documented way to read a window's brightness back from adb (ADR 0009).
 with nothing changing there is nothing to log, and the grep would be waiting
 for a line the app is right not to write. The transition has to be *driven*,
 and the only input a test can reach is the one the window is configured
-through -- the two bounds in the PC's config. Three questions, in order:
+through -- the two bounds in the PC's config. So the server is started once,
+with a window that has not opened yet, and then **nothing restarts**: the
+clock walks into the window and back out of it while the panel watches, which
+is exactly what happens at 22:00 and at 07:00 every day. Three questions:
 
-  1. **a steady panel logs nothing.** A day window, and not one `night=` line
-     across a whole data cycle. This is what the original acceptance was
-     reaching for, and it is the assertion that fails an implementation
-     logging the marker on every refresh -- which is the one shape that would
-     pass questions 2 and 3 for ever.
-  2. **a window containing now turns it on.** The window changes, which means
-     the server restarts.
-  3. **the window ending turns it off, with nothing else moving.**
+  1. **a steady panel outside the window logs nothing.** This is what the
+     original acceptance was reaching for, and it is the assertion that fails
+     an implementation logging the marker on every refresh -- the one shape
+     that would pass questions 2 and 3 for ever.
+  2. **the window opening turns the profile on.**
+  3. **the window closing turns it off.**
 
-Question 3 is why the night window here is *ninety seconds long* rather than
-two hours. The obvious way to drive the falling edge is another restart, and
-the first cut did exactly that -- and passed for the wrong reason. A restart
-is a gap in the server's answers, and a gap the probe ladder notices is a
-logout as far as the phone is concerned: the panel goes offline, the profile
-comes off with it, and `night=off` is logged by the blip rather than by the
-window. It was recorded on the device, two lines apart:
+**The restart-free shape is the third attempt and the reason is worth
+keeping.** The obvious way to drive an edge is to restart the server into a
+new config, and a restart is a gap in the server's answers -- a gap the probe
+ladder notices is a logout as far as the phone is concerned. The panel goes
+offline and the profile comes off with it, so `night=off` was logged by the
+blip rather than by the window. Recorded on the device, two lines apart:
 
     19:36:22 night=on
     19:36:24 state=offline
     19:36:24 screen=sleep
     19:36:24 night=off      <- not the window. The PC leaving.
 
-The rising edge does not have this problem and needs no protection: a blip
-can only ever *clear* the profile, never set it, so a `night=on` is
-unforgeable by one. The falling edge is the one that had to stop depending on
-a restart, so it does not use one -- the window simply expires while the
-server sits there answering, which is also what happens at 07:00 every
-morning.
+The second attempt drove the falling edge off the clock and left the rising
+one behind a restart, which then had to reconnect a possibly-dozing phone
+inside a window with minutes to live -- it passed with about seventy seconds
+to spare, which is not a pass anybody should rely on. With the server never
+gone there is no blip to have and no reconnect to race, and both edges are
+guarded anyway: a `state=offline` before either marker fails the run.
 
 The windows are computed from this machine's clock. That the *phone's* clock
 is the one being compared against is not something this file can prove -- the
@@ -51,8 +51,8 @@ two are minutes apart on the same desk -- and it is covered where it can be:
 payload carries two strings rather than a boolean so that there is nothing
 else it could be comparing.
 
-Slow on purpose: a data cycle is 60s and this waits for three of them, so
-budget about five minutes.
+Slow on purpose: nothing here can be hurried, because what is being waited
+for is a clock. Budget about twelve minutes.
 
 Requires: the phone on adb with the app installed, and port 8777 free -- this
 script runs the server itself, because a config change is a restart and
@@ -93,42 +93,56 @@ def hhmm(minute_of_day):
     return "%02d:%02d" % (minute_of_day // 60, minute_of_day % 60)
 
 
-# How long the night window has left to run when the server is restarted into
-# it. Long enough for the restart, the reconnect and one data cycle to land
-# inside it; short enough that waiting for it to expire is not the whole
-# afternoon. The panel enters the profile on the first refresh after the
-# restart and leaves it on the first refresh after this many seconds.
-NIGHT_SECONDS = 150
+# When the window opens, and how long it stays open. Both are minutes from
+# the moment the server starts, and the lead is what makes the whole run
+# restart-free: the panel settles, the quiet window is measured, and only then
+# does the clock walk into the window on its own.
+#
+# Six minutes of lead is generous on purpose. The panel has to come online
+# after a stretch with no server, which can mean waking a dozing phone, and
+# then two refreshes have to land -- and a lead that ran out early would look
+# exactly like the feature being broken.
+LEAD_SECONDS = 360
+NIGHT_SECONDS = 180
 
 # DataPoller's interval. Every wait here is written in cycles rather than in
 # seconds, because what is being waited for is always "the next refresh".
 CYCLE_SECONDS = 60
 
 
-def windows(now):
-    """(night, day, seconds_to_end): a window ending shortly, and one three hours off.
+def window(now):
+    """(start, end, opens_in, closes_in) for a window that has not opened yet.
 
-    The night window starts an hour ago and ends NIGHT_SECONDS from now, so it
-    contains this moment and stops containing it soon -- which is the whole
-    trick that lets the falling edge be driven by the clock instead of by a
-    restart. `start` is an hour back rather than a minute so that the restart
-    and the reconnect cannot land before it.
+    **Nothing restarts in this scenario, and that is the whole design.** The
+    first two attempts drove the edges by restarting the server into a new
+    config, and a restart is a gap in the server's answers: a gap the probe
+    ladder notices is a logout as far as the phone is concerned, so the panel
+    goes offline and the profile comes off with it. The falling edge was
+    logged by that blip rather than by the window, visibly, on the device --
+    `night=on`, then two seconds later `state=offline`, `screen=sleep`,
+    `night=off`. The second attempt fixed the falling edge and left the rising
+    one riding a reconnect that took most of the window's life.
+
+    So the window is served once, by a server that never moves, and it simply
+    opens and closes while the panel watches. Which is also exactly what
+    happens at 22:00 and at 07:00 every day, and it is the only version of
+    this that no blip can answer by accident: with the server never gone,
+    there is no blip to have.
 
     Both bounds are modular, so both wrap midnight when the clock does. That
     is not a special case being dodged: 22:00 to 07:00 is the shipped window's
     own shape, and it gets exercised here for free once a night.
     """
     minute = now.hour * 60 + now.minute
-    # Rounded up: the payload's bounds have minute resolution, so a window
-    # ending "in 150 seconds" ends at the top of the minute at or after that,
-    # and rounding down would make it end early. The third value is how many
-    # seconds that actually is from *now*, which is what the wait is written
-    # against -- guessing it from NIGHT_SECONDS would be up to a minute out,
+    # Rounded up, because the payload's bounds have minute resolution: a
+    # window "opening in 360 seconds" opens at the top of the minute at or
+    # after that. The two counts back are what the waits are written against
+    # -- deriving them from the constants would be up to a minute out,
     # depending only on which second of the minute the run started in.
-    ends_in = -(-NIGHT_SECONDS // 60)
-    return ((hhmm(minute - 60), hhmm(minute + ends_in)),
-            (hhmm(minute + 180), hhmm(minute + 240)),
-            ends_in * 60 - now.second)
+    opens_at = -(-LEAD_SECONDS // 60)
+    closes_at = opens_at + -(-NIGHT_SECONDS // 60)
+    return (hhmm(minute + opens_at), hhmm(minute + closes_at),
+            opens_at * 60 - now.second, closes_at * 60 - now.second)
 
 
 def port_free(port):
@@ -191,20 +205,19 @@ class Server:
 
 
 def nudge():
-    """Put the panel back on screen after a restart.
+    """Put the panel on screen, once, at the start.
 
-    A restart is a gap in the server's answers, and a gap long enough for the
-    probe ladder to notice is a real logout as far as the phone is concerned:
-    the screen sleeps, the device dozes, and the app is left probing on a
-    fifteen-minute alarm (T5.6). Coming back from that is T4.3's and T5.6's
-    behaviour and they have their own acceptances; waiting on it here would
-    make this file's answer depend on theirs and take a quarter of an hour to
-    get it.
+    Whatever ran here last left the phone with no server to talk to, so it is
+    offline, its screen is out and -- on battery -- it is probing on a
+    fifteen-minute alarm (T5.6). Coming back from that unaided is T4.3's and
+    T5.6's behaviour, they have their own acceptances, and waiting on them
+    here would make this file's answer depend on theirs and take a quarter of
+    an hour to get it.
 
-    It starts an Activity that is usually already running, which is a no-op
-    when the restart was quick enough that the phone never noticed. It cannot
-    put the panel into the night profile or out of it -- the only thing that
-    does that is the window in the payload.
+    Called once and never again: nothing in this scenario restarts, so there
+    is nothing else to come back from. It cannot put the panel into the night
+    profile or out of it -- the only thing that does that is the window in the
+    payload against the phone's own clock.
     """
     adb("shell", "am", "start", "-n", ACTIVITY)
 
@@ -290,40 +303,35 @@ def main():
               "`ss -ltnp 'sport = :%d'` -- and run this again." % (port, port))
         return 2
 
-    # Only the day window is settled here. The night one has minutes to live
-    # by design, and the baseline below takes two of them -- so it is
-    # computed at the moment it is served, not at the moment the run starts.
-    _, day, _ = windows(datetime.datetime.now())
-    print("day window %s-%s" % day)
+    start, end, opens_in, closes_in = window(datetime.datetime.now())
+    print("night window %s-%s: opens in %ds, closes in %ds"
+          % (start, end, opens_in, closes_in))
 
     server = Server(base, port)
+    began = time.monotonic()
     fails = []
     try:
-        # --- the baseline, and the first question --------------------------
+        # --- settle, and then ask the first question -----------------------
         #
-        # A day window, the app on screen, and one refresh landed under it, so
-        # that whatever the panel was doing before this run is over and
-        # logged before the buffer is cleared.
-        if not server.start(*day):
-            print("FAIL: the server did not answer /ping in the day profile")
+        # The window has not opened yet, so this is the day profile with no
+        # second config and no restart. Two refreshes rather than one: the app
+        # keeps the night window across an offline stretch on purpose -- it is
+        # configuration, not a measurement -- so a panel left in the night
+        # profile by a previous run comes back online still in it and corrects
+        # itself on the first payload. That correction is the feature working
+        # and it is also a `night=off` that would read as chatter below. It
+        # was observed on the device rather than reasoned out:
+        #
+        #     19:40:11.336 data=ok
+        #     19:40:11.340 night=off     <- last night's window, corrected
+        if not server.start(start, end):
+            print("FAIL: the server did not answer /ping")
             return 2
         nudge()
         if wait_for_marker("state=online", args.wait) is None:
             print("FAIL: the phone never reported the server as up. Check the "
                   "firewall rule and the PC's address in .env.")
             return 2
-        # **Two**, and the second one is not belt and braces. The app keeps
-        # the night window across an offline stretch on purpose -- it is
-        # configuration, not a measurement -- so a panel that was left in the
-        # night profile by a previous run comes back online still in it, and
-        # corrects itself on the first payload under the day window. That is
-        # the feature working; it is also a `night=off` landing in the middle
-        # of the quiet window below and reading as chatter. Waiting for a
-        # second refresh puts the correction safely before the clear. It was
-        # observed on the device rather than reasoned out:
-        #
-        #     19:40:11.336 data=ok
-        #     19:40:11.340 night=off     <- last night's window, corrected
         if wait_for_marker("data=ok", CYCLE_SECONDS * 3, count=2) is None:
             print("FAIL: the phone never settled into the day profile")
             return 2
@@ -331,65 +339,53 @@ def main():
         adb("logcat", "-c")
         # An app logging the marker per refresh writes a line per cycle here;
         # a correct one writes none.
-        if wait_for_marker("data=ok", CYCLE_SECONDS * 3, count=2) is None:
+        if wait_for_marker("data=ok", CYCLE_SECONDS * 3) is None:
             print("FAIL: the phone stopped fetching during the quiet window")
             return 2
         chatter = matches("night=on") + matches("night=off")
         if chatter:
-            fails.append("a steady panel logged %d night= lines across two "
-                         "refreshes; the marker is a transition, not a "
-                         "heartbeat: %r" % (len(chatter), chatter[:3]))
+            fails.append("a steady panel outside the window logged %d night= "
+                         "lines; the marker is a transition, not a heartbeat: "
+                         "%r" % (len(chatter), chatter[:3]))
 
-        # --- the rising edge ----------------------------------------------
-        #
-        # A restart, which may or may not be long enough for the phone to
-        # notice. It does not matter here: a gap can only take the profile
-        # off, never put it on, so night=on cannot be forged by one.
-        adb("logcat", "-c")
-        server.stop()
-        night, _, night_seconds = windows(datetime.datetime.now())
-        print("    night window %s-%s, ending in %ds" % (night + (night_seconds,)))
-        expires_at = time.monotonic() + night_seconds
-        if not server.start(*night):
-            print("FAIL: the server did not answer /ping in the night profile")
+        if time.monotonic() - began > opens_in:
+            print("FAIL: settling took longer than the %ds lead, so the window "
+                  "opened before the quiet check was over. Raise LEAD_SECONDS."
+                  % opens_in)
             return 2
-        nudge()
-        line = wait_for_marker("night=on", args.wait)
+
+        # --- the window opens, and nothing else moves ----------------------
+        adb("logcat", "-c")
+        print("    waiting for the window to open")
+        line = wait_for_marker("night=on",
+                               opens_in - (time.monotonic() - began)
+                               + CYCLE_SECONDS * 2)
         if line is None:
-            fails.append("no night=on within %ds of a window that contains now"
-                         % args.wait)
-            # Nothing below can mean anything without this, and the falling
-            # edge costs three minutes to not find out.
+            fails.append("the window opened and the panel stayed in its day "
+                         "profile")
+            # Nothing below can mean anything without this, and waiting out
+            # the rest of the window to not find out costs minutes.
             return report(fails)
+        if preceded_by(line, "state=offline"):
+            fails.append("night=on came after a state=offline, which this "
+                         "scenario has no business producing at all")
         print("    %s" % line)
 
-        # Cleared again, and this is load-bearing rather than tidy: the
-        # restart above may well have been long enough for the phone to go
-        # offline and come back, and that state=offline would make the order
-        # check below reject a perfectly good falling edge. From here the
-        # buffer holds only what happened while the server sat still.
+        # --- and closes ---------------------------------------------------
         adb("logcat", "-c")
-
-        # --- the falling edge, with nothing moving but the clock -----------
-        #
-        # The server is left alone. The window ends, the next refresh finds
-        # itself outside it, and the profile comes off -- which is the same
-        # thing that happens at 07:00 every morning, and the only version of
-        # this assertion that a restart cannot answer by accident.
-        remaining = max(0, expires_at - time.monotonic())
-        print("    waiting up to %ds for the window to end and one refresh "
-              "to follow it" % (remaining + CYCLE_SECONDS * 2))
-        line = wait_for_marker("night=off", remaining + CYCLE_SECONDS * 2)
+        print("    waiting for the window to close")
+        line = wait_for_marker("night=off",
+                               closes_in - (time.monotonic() - began)
+                               + CYCLE_SECONDS * 2)
         if line is None:
-            fails.append("the window ended and the panel stayed in its night "
+            fails.append("the window closed and the panel stayed in its night "
                          "profile")
         elif preceded_by(line, "state=offline"):
-            # It has to be the window that did it. A state=offline before the
-            # marker means the PC went away and took the profile with it,
-            # which is correct behaviour and is not the answer being asked
-            # for -- the first cut of this file passed on exactly that.
+            # The failure the first two versions of this file shipped with: a
+            # PC going away takes the profile off too, correctly, and that is
+            # not the answer being asked for.
             fails.append("night=off came after a state=offline, so it was the "
-                         "PC leaving and not the window ending")
+                         "PC leaving and not the window closing")
         else:
             print("    %s" % line)
     finally:

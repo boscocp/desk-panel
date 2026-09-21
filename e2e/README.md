@@ -35,22 +35,17 @@ python e2e/check_night_marker.py
 ```
 
 It runs the PC server itself, under a temporary config, and asks three questions: a steady
-panel logs nothing across two refreshes, a window containing now turns the profile on, and the
-window *ending* turns it off. It needs port 8777 free and refuses to start if something is
-already listening, because changing that config means a restart and restarting somebody's
-running server is not a script's to do.
+panel outside the window logs nothing, the window opening turns the profile on, and the window
+closing turns it off. It needs port 8777 free and refuses to start if something is already
+listening, because it has to own the config the server reads and restarting somebody's running
+server is not a script's to do.
 
-The third question does **not** use a restart, and that is the one interesting thing in the
-file. A restart is a gap in the server's answers, and a gap the probe ladder notices is a
-logout as far as the phone is concerned — so the first version watched the PC leaving take the
-profile off and reported it as the window doing it. The rising edge is immune, because a gap
-can only ever clear the profile and never set it; the falling one now rides a ninety-second
-window that simply expires while the server sits there answering.
-
-The marker is emitted on transitions only, like every other marker here, which is why the
-window has to be driven rather than waited for. T6.4's task file records the acceptance it
-shipped with — `logcat -c && sleep 90 && grep night=on` — and why no correct implementation
-could ever have passed it.
+**Nothing in it restarts**, and that is the design rather than an omission. A restart is a gap
+in the server's answers, and a gap the probe ladder notices is a logout as far as the phone is
+concerned — so the first version watched the PC leaving take the profile off and reported it as
+the window doing it. The window is served once, before it opens, and the clock walks into it
+and back out on its own, which is what happens at 22:00 and 07:00 anyway. Budget twelve
+minutes; nothing here can be hurried, because what is being waited for is a clock.
 
 ## Why this does not read screen state from the OS
 
