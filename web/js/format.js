@@ -205,22 +205,46 @@ const SCROLL_SECONDS_PER_ROW = 16;
 // phone. `clientHeight` and `scrollHeight` are integers; the device lays out at
 // a device pixel ratio of 2.75, so a card whose rows exactly fill it can report
 // 102px of content in a 101px window. That is one hidden row by every count
-// above, and a travel of one pixel: the card would declare a scroll, hold a
-// compositor layer, and twitch a pixel back and forth every seventeen seconds
-// for as long as the panel is on. Nothing in e2e/layout would fail -- 1px is a
-// real overflow as far as the harness can tell -- so it would have shipped and
-// been visible only from the chair.
+// above, and the card would declare a scroll, hold a compositor layer, and move
+// for as long as the panel is on -- to reveal a pixel. Nothing in e2e/layout
+// would fail, because 1px is a real overflow as far as a measurement can tell,
+// so it would have shipped and been visible only from the chair.
 //
-// Four pixels, which is comfortably above the two a pair of integer roundings
-// can invent and far below the twenty-odd a genuinely hidden row is worth.
+// **T6.9 made the price of getting this wrong much higher, and the review of
+// T6.9 is what noticed.** Under T6.6 a card walked as far as its hidden pixels
+// and came back, so five pixels of phantom overflow bought five pixels of
+// twitch. The card now goes round: any overflow at all, however small, walks
+// the *entire list* past the window for ever. Four pixels was chosen as
+// "comfortably above the two a pair of integer roundings can invent and far
+// below the twenty-odd a genuinely hidden row is worth" -- deliberately letting
+// 5-20px through, because under the old design they were cheap. They are not
+// cheap any more.
+//
+// So the floor is a fraction of a row rather than a flat count of pixels, which
+// is what the sentence above was reaching for all along. Half a row is past
+// anything two integer roundings can invent at any dpr, and well under one
+// genuinely hidden row. The flat four stays as the floor for a caller that
+// cannot measure a row, which is the only case where a bare pixel count is
+// still the best available answer.
 const SCROLL_MIN_TRAVEL_PX = 4;
+const SCROLL_MIN_HIDDEN_ROWS = 0.5;
 
-// travelPx: how far the card would actually move, which only the theme can
-// measure. Pure and separate from scrollPlan because it is a different
-// question -- scrollPlan counts rows, this one asks whether the pixels those
-// rows came out to are worth moving for.
-function worthScrolling(travelPx) {
-    return Number.isFinite(travelPx) && travelPx >= SCROLL_MIN_TRAVEL_PX;
+// hiddenPx: how much of the list is out of sight, which only the theme can
+// measure. rowHeightPx: what one row of it is worth, for turning that into a
+// judgement rather than a number.
+//
+// Pure and separate from scrollPlan because it is a different question --
+// scrollPlan counts rows and says whether any are hidden, and this asks whether
+// what they came out to in pixels is worth putting a card in permanent motion
+// for.
+function worthScrolling(hiddenPx, rowHeightPx) {
+    if (!Number.isFinite(hiddenPx) || hiddenPx < SCROLL_MIN_TRAVEL_PX) {
+        return false;
+    }
+    if (!Number.isFinite(rowHeightPx) || rowHeightPx <= 0) {
+        return true;
+    }
+    return hiddenPx >= rowHeightPx * SCROLL_MIN_HIDDEN_ROWS;
 }
 
 // Returns null when nothing should move, or {hidden, seconds} when it should.
@@ -745,7 +769,7 @@ if (typeof module !== 'undefined' && module.exports) {
         offsetFor, burnInSchedule,
         BURN_IN_OFFSETS, BURN_IN_STEP_MINUTES, BURN_IN_AMPLITUDE_PX,
         overflowsBy, scrollPlan, worthScrolling,
-        SCROLL_SECONDS_PER_ROW, SCROLL_MIN_TRAVEL_PX,
+        SCROLL_SECONDS_PER_ROW, SCROLL_MIN_TRAVEL_PX, SCROLL_MIN_HIDDEN_ROWS,
         sparklinePath,
         formatBattery, batteryFields, tempClass, BATTERY_WARN_C, BATTERY_HOT_C,
     };

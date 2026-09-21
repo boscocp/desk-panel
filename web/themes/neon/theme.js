@@ -301,7 +301,7 @@
         // card twitching in the corner of someone's eye every seventeen
         // seconds -- with every check in e2e/layout passing, because a pixel of
         // overflow is a real overflow as far as a measurement can tell.
-        if (!plan || !worthScrolling(content - available)) {
+        if (!plan || !worthScrolling(content - available, rowHeight)) {
             // Both halves matter. The attribute is what the stylesheet keys the
             // animation off, so a card that stopped overflowing stops moving;
             // the property is removed with it so nothing is left pointing at a

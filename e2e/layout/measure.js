@@ -248,7 +248,7 @@ document.querySelectorAll('body *').forEach((el) => {
 // the T5.4 bug was in. So this compares what is actually drawn: the leaf
 // elements that carry text, and the <path> of each sparkline. Sharing empty
 // space is fine. Sharing a pixel that has a glyph or a line in it is not.
-// A ::before's ink, or null when the element has none.
+// A ::before's ink -- one rect per line it draws, or an empty list.
 //
 // **The harness could not see a card title until T6.11**, and the gap is the
 // kind this file exists to close: the four card headings are pseudo elements,
@@ -261,60 +261,88 @@ document.querySelectorAll('body *').forEach((el) => {
 //
 // There is no geometry API for a pseudo element, so the text is measured with
 // a probe: a span carrying the same computed font, size, weight, spacing and
-// transform, laid out absolutely so it disturbs nothing, measured, removed.
-// That gives the width exactly. The rest of the box is the element's own
-// content box -- the title is the first flex item in its card, so it starts at
-// the content top -- and the line height the pseudo computes.
+// transform, laid out in a box the same width as the element's content box,
+// measured, removed.
 //
-// The probe is appended to the element it is measuring rather than to <body>,
-// because `font` and `letter-spacing` can be inherited and a probe elsewhere
-// in the tree would inherit somebody else's.
+// **One rect per line, and that is the second cut.** The first laid the probe
+// out with `white-space: pre` and gave the result a single line-height, so a
+// title that wraps inside its own card was reported as one rect as wide as the
+// whole string -- a collision with whatever sits to the right of the card that
+// does not exist on screen, and, worse, a second line that nothing could see
+// at all. `getClientRects()` on an inline span returns one rect per line box,
+// which is exactly the shape of the answer: the ink of a wrapped title *is*
+// two rects, and the check below compares rects.
+//
+// The probe goes in a fixed-position holder rather than inside `el`, for two
+// reasons. Inside a flex container -- which every card here is -- a span is
+// blockified and stops producing per-line rects. And `position: fixed` is
+// viewport-relative, which is the coordinate system `getBoundingClientRect`
+// already answers in, so the rects come out in the right place with no
+// arithmetic. The panel is exactly one screen and never scrolls, so there is
+// no scroll offset to be wrong about.
 function pseudoInk(el) {
     const style = getComputedStyle(el, '::before');
     const content = style.content;
     if (!content || content === 'none' || content === 'normal') {
-        return null;
+        return [];
     }
     // The computed value of `content: attr(data-title)` is the resolved
     // string, quoted. Anything else -- a counter, an image -- is not text this
     // panel draws and is left alone.
     const text = /^"([\s\S]*)"$/.test(content) ? content.slice(1, -1) : '';
     if (!text.trim()) {
-        return null;
-    }
-
-    const probe = document.createElement('span');
-    probe.textContent = text;
-    probe.style.position = 'absolute';
-    probe.style.visibility = 'hidden';
-    probe.style.whiteSpace = 'pre';
-    // The longhands, not the `font` shorthand: Firefox computes `font` to the
-    // empty string on a pseudo element, so setting it copies nothing and the
-    // probe measures the text in whatever the document's default face is --
-    // which is a width, so nothing throws and the answer is quietly wrong.
-    probe.style.fontStyle = style.fontStyle;
-    probe.style.fontWeight = style.fontWeight;
-    probe.style.fontSize = style.fontSize;
-    probe.style.fontFamily = style.fontFamily;
-    probe.style.letterSpacing = style.letterSpacing;
-    probe.style.textTransform = style.textTransform;
-    el.appendChild(probe);
-    const width = probe.getBoundingClientRect().width;
-    probe.remove();
-    if (width < 0.5) {
-        return null;
+        return [];
     }
 
     const box = el.getBoundingClientRect();
     const own = getComputedStyle(el);
     const left = box.left + parseFloat(own.borderLeftWidth) + parseFloat(own.paddingLeft);
     const top = box.top + parseFloat(own.borderTopWidth) + parseFloat(own.paddingTop);
-    const height = parseFloat(style.lineHeight) || parseFloat(style.fontSize);
-    return {
-        r: { left: left, top: top, right: left + width, bottom: top + height,
-             width: width, height: height },
-        what: text.slice(0, 24),
-    };
+    const width = box.width
+        - parseFloat(own.borderLeftWidth) - parseFloat(own.paddingLeft)
+        - parseFloat(own.borderRightWidth) - parseFloat(own.paddingRight);
+
+    const holder = document.createElement('div');
+    holder.style.position = 'fixed';
+    holder.style.left = left + 'px';
+    holder.style.top = top + 'px';
+    holder.style.width = Math.max(0, width) + 'px';
+    holder.style.visibility = 'hidden';
+    holder.style.margin = '0';
+    holder.style.padding = '0';
+    holder.style.border = '0';
+    // The longhands, not the `font` shorthand: Firefox computes `font` to the
+    // empty string on a pseudo element, so setting it copies nothing and the
+    // probe measures the text in whatever the document's default face is --
+    // which is a width, so nothing throws and the answer is quietly wrong.
+    holder.style.fontStyle = style.fontStyle;
+    holder.style.fontWeight = style.fontWeight;
+    holder.style.fontSize = style.fontSize;
+    holder.style.fontFamily = style.fontFamily;
+    holder.style.lineHeight = style.lineHeight;
+    holder.style.letterSpacing = style.letterSpacing;
+    holder.style.wordSpacing = style.wordSpacing;
+    holder.style.textTransform = style.textTransform;
+    holder.style.textAlign = style.textAlign;
+    // Whatever the pseudo actually does about wrapping, rather than an
+    // assumption: a theme is free to set `nowrap` on its titles and this has
+    // to measure the theme in front of it.
+    holder.style.whiteSpace = style.whiteSpace;
+    holder.style.overflowWrap = style.overflowWrap;
+
+    const probe = document.createElement('span');
+    probe.textContent = text;
+    holder.appendChild(probe);
+    document.body.appendChild(holder);
+    const lines = Array.from(probe.getClientRects()).map((r) => ({
+        left: r.left, top: r.top, right: r.right, bottom: r.bottom,
+        width: r.width, height: r.height,
+    }));
+    holder.remove();
+
+    return lines
+        .filter((r) => r.width >= 0.5 && r.height >= 0.5)
+        .map((r) => ({ r: r, what: text.slice(0, 24) }));
 }
 
 function ink(root) {
@@ -334,8 +362,7 @@ function ink(root) {
     // collision names the two things in the order somebody would look for
     // them.
     [root].concat(Array.from(root.querySelectorAll('*'))).forEach((el) => {
-        const pseudo = pseudoInk(el);
-        if (pseudo) {
+        for (const pseudo of pseudoInk(el)) {
             found.push(pseudo);
         }
         // Leaves only: a container's rect covers its children, which would

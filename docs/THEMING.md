@@ -166,16 +166,20 @@ served and stress ones.
 The arithmetic is not yours to invent either. `overflowsBy(rowCount,
 visibleRows)` says how many rows are hidden, `scrollPlan(rowCount, visibleRows,
 secondsPerRow)` returns `null` or `{hidden, seconds}`, and
-`worthScrolling(travelPx)` says whether the pixels those rows came out to are
-worth moving for at all; you measure, they decide.
+`worthScrolling(hiddenPx, rowHeightPx)` says whether what those rows came out to in pixels is
+worth putting a card in permanent motion for; you measure, they decide.
 
 That last one is not optional politeness. `clientHeight` and `scrollHeight` are
 integers and the device lays out at a device pixel ratio of 2.75, so a card
 whose rows exactly fill it can measure a pixel over — one hidden row, one pixel
 of travel, and a card twitching in the corner of someone's eye for as long as
 the panel is on, with every check in `e2e/layout` passing because a pixel of
-overflow is a real overflow as far as a measurement can tell. Both are pure and tested, and the
-number you pass in is your own — read it off a custom property so it stays in your stylesheet
+overflow is a real overflow as far as a measurement can tell. **Pass it your row height as well
+as your overflow**: since T6.9 both shipped themes answer an overflow with a loop, so any
+overflow at all puts the card in motion for as long as the panel is on — and a flat pixel floor
+that was generous when five pixels bought five pixels of travel is not generous when five pixels
+buy a permanent pass over the whole list. The floor is half a row. Both are pure and tested, and
+the number you pass in is your own — read it off a custom property so it stays in your stylesheet
 next to the `@keyframes` block it describes, the way both themes do.
 
 ### If you answer the overflow with a loop
