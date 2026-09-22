@@ -3,6 +3,7 @@
 
     python scripts/after_update.py              # do it
     python scripts/after_update.py --dry-run    # say what it would do, touch nothing
+    python scripts/after_update.py --rebuilt    # the APK on the phone is this commit
     python scripts/after_update.py --self-test  # check the pure functions, no machine
 
 The problem this exists to solve is not "restart the server". It is that a pull
@@ -39,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import socket
 import subprocess
@@ -122,6 +124,37 @@ def parse_task_arguments(arguments):
         # this script should infer on a machine it is about to restart.
         return None
     return found
+
+
+def parse_exec_start(unit_text):
+    """`{python, server_py, config}` out of a systemd unit's `ExecStart=`, or None.
+
+    The Linux sibling of `parse_task_arguments`, and it exists for the same
+    reason: without it the Linux branch had a launcher and no config, so it
+    never reached a port, never reached the restart, and `restart_linux` was
+    unreachable code while the docs claimed it ran. Found by review.
+
+    `desk-panel.service.in` quotes all three paths -- systemd splits a command
+    line on whitespace, so a checkout under `~/My Projects` needs them -- which
+    is why this reads the unit **file** rather than `systemctl show -p
+    ExecStart`. That prints `argv[]=` space-separated with the quoting already
+    resolved, so a path with a space in it comes back indistinguishable from two
+    arguments.
+    """
+    match = re.search(r"^ExecStart=(.*)$", unit_text or "", re.MULTILINE)
+    if match is None:
+        return None
+    quoted = re.findall(r'"([^"]*)"', match.group(1))
+    config = re.search(r'--config\s+"([^"]*)"', match.group(1))
+    if len(quoted) < 2 or config is None:
+        return None
+    return {"python": quoted[0], "server_py": quoted[1], "config": config.group(1)}
+
+
+def unit_file_path():
+    """Where `install_user_unit.sh` writes the unit, same rule it uses."""
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "systemd" / "user" / UNIT_NAME
 
 
 def python_for(pythonw):
@@ -343,6 +376,12 @@ def restart_windows(port, timeout, dry_run):
     code, output = powershell(f"Stop-ScheduledTask -TaskName '{TASK_NAME}'")
     if code is None:
         return Step("restart", UNKNOWN, output)
+    if code != 0:
+        # Without this the refused stop fell through to the socket wait, which
+        # timed out on the server that was still running and blamed "something
+        # else owns it" -- a cause that is not the cause, with the actual error
+        # discarded. Found by review; the start below always checked its code.
+        return Step("restart", FAIL, f"could not stop the task: {output.strip()[:200]}")
 
     if not wait_for_port(port, listening=False, timeout=timeout):
         # Something is still holding it. Starting now would be the 10048 that
@@ -416,7 +455,12 @@ def step_tests():
     if code is None:
         steps.append(Step("tests: web", SKIP, "no node on PATH"))
     else:
-        steps.append(Step("tests: web", PASS if code == 0 else FAIL, ""))
+        # The failing line, not a bare FAIL: a report that says only "node
+        # --test failed" sends you off to run it again by hand, which is the
+        # opposite of this file's whole point. Found by review.
+        fails = [ln.strip() for ln in output.splitlines() if ln.strip().startswith("not ok")]
+        detail = fails[0][:120] if fails else ""
+        steps.append(Step("tests: web", PASS if code == 0 else FAIL, detail))
 
     steps.append(Step("tests: android", SKIP, "needs Docker -- make test-android"))
     return steps
@@ -464,6 +508,19 @@ def step_payload(port):
         return Step("payload", FAIL, f"/weather did not answer: {exc}")
 
     missing = sorted(expected - set(live))
+    if missing and live.get("stale"):
+        # The restart emptied the cache, so this call is the first fetch. If it
+        # failed, `App.weather` answers from a five-key fallback -- no `isDay`,
+        # no `precipProb` -- and the keys are missing for a reason that has
+        # nothing to do with which code is running. Calling that "older code"
+        # would be a confident wrong answer about the one condition this script
+        # exists to detect. Found by review.
+        return Step(
+            "payload",
+            UNKNOWN,
+            f"/weather is stale and missing {', '.join(missing)} -- the cache is cold or "
+            f"upstream is down, so this cannot tell which code is running. Run it again.",
+        )
     if missing:
         return Step(
             "payload",
@@ -515,8 +572,8 @@ def step_rebuild(head, previous_head):
     return Step(
         "apk",
         FAIL,
-        f"{len(changed)} file(s) changed since {previous_head}: {shown} -- "
-        f"the phone needs `make apk` and a reinstall",
+        f"{len(changed)} file(s) changed since {previous_head}: {shown} -- the phone needs "
+        f"`make apk` and a reinstall, then `after_update.py --rebuilt` to clear this",
     )
 
 
@@ -531,10 +588,36 @@ def main(argv=None):
     parser.add_argument(
         "--timeout", type=float, default=20.0, help="seconds to wait for the socket either way"
     )
+    parser.add_argument(
+        "--rebuilt",
+        action="store_true",
+        help="record that the APK was rebuilt and reinstalled at this commit, and exit",
+    )
     args = parser.parse_args(argv)
 
     if args.self_test:
         return self_test()
+
+    if args.rebuilt:
+        # The way out of the `apk` finding. It reports FAIL, which makes the run
+        # exit 1, which is what keeps the marker from advancing -- so without
+        # this flag rebuilding and reinstalling could not clear it and the
+        # script stayed red forever on the same commit. The docs claimed "only a
+        # reinstall settles it", which was not true of the code. Found by review.
+        #
+        # An explicit acknowledgement rather than something inferred: the repo
+        # cannot see what is installed on the phone, and a marker that advanced
+        # on its own would quietly turn "you still have to reinstall" into
+        # silence.
+        code, head = git(["rev-parse", "--short", "HEAD"])
+        if code != 0 or not head:
+            print("not a git checkout -- nothing recorded", file=sys.stderr)
+            return 2
+        if not write_state({"head": head, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "rebuilt": True}):
+            print(f"could not write {STATE_FILE}", file=sys.stderr)
+            return 2
+        print(f"recorded: the APK on the phone is {head}. `apk` compares against it from now on.")
+        return 0
 
     steps = []
     git_step, head = step_git_state()
@@ -569,6 +652,22 @@ def main(argv=None):
             )
         else:
             steps.append(Step("launcher", PASS, f"systemd user unit {UNIT_NAME}, {output.strip()}"))
+            # The paths come out of the unit, exactly as the Windows branch
+            # takes them out of the task action. Skipping this is what made the
+            # whole Linux path dead code.
+            unit = unit_file_path()
+            try:
+                parsed = parse_exec_start(unit.read_text(encoding="utf-8"))
+            except OSError as exc:
+                parsed = None
+                steps.append(Step("unit file", UNKNOWN, f"could not read {unit}: {exc}"))
+            if parsed is None:
+                steps.append(
+                    Step("unit file", UNKNOWN, f"no quoted --config in {unit}'s ExecStart")
+                )
+            else:
+                config_path, server_py = parsed["config"], parsed["server_py"]
+                python_exe = parsed["python"]
     elif platform == "darwin":
         # T3.10 is `blocked`, not done: the plist ships and has never run on a
         # Mac. Claiming a verdict here would be the one thing ADR 0010 asks this
@@ -621,6 +720,14 @@ def main(argv=None):
         if not args.dry_run:
             steps.append(step_payload(port))
             steps.append(step_login_scope(python_exe))
+        else:
+            # Without this a dry run printed "all clear" and exited 0 on the
+            # exact machine state this script was written for -- a server
+            # quietly serving last login's code. The one check that would have
+            # noticed is the one a dry run cannot make. Found by review.
+            steps.append(
+                Step("payload", UNKNOWN, "not run in --dry-run, and it is the deciding check")
+            )
     elif port is not None:
         steps.append(
             Step("restart", SKIP, f"{blockers[0].name} failed -- fix that, then run this again")
@@ -658,6 +765,15 @@ def main(argv=None):
 # --------------------------------------------------------------------------
 
 
+UNIT_SAMPLE = (
+    "[Service]\n"
+    "Type=exec\n"
+    'ExecStart="/usr/bin/python3" -u "/home/me/desk-panel/server/server.py"'
+    ' --config "/home/me/desk-panel/server/config.toml"\n'
+    "Restart=on-failure\n"
+)
+
+
 def self_test_cases():
     windows_args = (
         '"D:\\projetos-vscode\\desk-panel\\server\\server.py" '
@@ -693,6 +809,33 @@ def self_test_cases():
         ("task arguments: no --config is None, not a guess", lambda: parse_task_arguments('"x.py"') is None),
         ("task arguments: empty is None", lambda: parse_task_arguments("") is None),
         ("task arguments: unquoted is None", lambda: parse_task_arguments("server.py --config c.toml") is None),
+        (
+            "ExecStart: the three quoted paths come back",
+            lambda: parse_exec_start(UNIT_SAMPLE)["config"].endswith("config.toml"),
+        ),
+        (
+            "ExecStart: server.py is the second quoted run, after the interpreter",
+            lambda: parse_exec_start(UNIT_SAMPLE)["server_py"].endswith("server.py"),
+        ),
+        (
+            "ExecStart: the interpreter is the first",
+            lambda: parse_exec_start(UNIT_SAMPLE)["python"].endswith("python3"),
+        ),
+        (
+            "ExecStart: a path with a space survives, which is why the file is read",
+            lambda: parse_exec_start(
+                'ExecStart="/usr/bin/python3" -u "/home/me/My Projects/dp/server/server.py"'
+                ' --config "/home/me/My Projects/dp/server/config.toml"'
+            )["config"]
+            == "/home/me/My Projects/dp/server/config.toml",
+        ),
+        ("ExecStart: no ExecStart line is None", lambda: parse_exec_start("[Service]\nType=exec") is None),
+        (
+            "ExecStart: no --config is None, not a guess",
+            lambda: parse_exec_start('ExecStart="/usr/bin/python3" -u "/x/server.py"') is None,
+        ),
+        ("ExecStart: empty is None", lambda: parse_exec_start("") is None),
+        ("ExecStart: None is None", lambda: parse_exec_start(None) is None),
         (
             "python_for: pythonw.exe -> python.exe, same directory",
             lambda: python_for("C:\\Program Files\\Python313\\pythonw.exe")

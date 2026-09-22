@@ -9,6 +9,10 @@ That is the whole procedure. The script does the work and exits non-zero if anyt
 so there is nothing to read carefully and nothing to remember. The rest of this page is why each
 step is in it — read it when the script fails, not before.
 
+Two other modes, both explained where they matter below: `--dry-run` reports without touching
+anything (and never exits 0, because the check that decides cannot run in a dry run), and
+`--rebuilt` records that the APK on the phone is this commit.
+
 | Exit | Meaning |
 |---|---|
 | 0 | every check this OS could run passed |
@@ -50,9 +54,12 @@ is added to the payload the check starts requiring it without anybody editing th
    deleted makes the server exit 1 at every login, under `pythonw`, with no console to say why,
    and the phone reports offline forever — indistinguishable from the DHCP-drift failure.
 5. **`restart`** — stop, **wait for the socket to actually close**, start, wait for it to open.
-6. **`payload`** — `/weather` carries every key the tree's own code produces.
+6. **`payload`** — `/weather` carries every key the tree's own code produces. A payload that
+   comes back `stale` and short of keys is reported as undetermined, not as stale code — the
+   restart just emptied the cache, so a failed first fetch answers from a five-key fallback.
 7. **`login scope`** — `verify_login_scope.py`: not that it answers, but *why* it answers.
-8. **`apk`** — whether anything under `web/` or `android/` changed since the last clean run.
+8. **`apk`** — whether anything under `web/` or `android/` changed since the commit the phone
+   was last built from, which you record with `--rebuilt`.
 
 A red test suite does not block the restart, and that is deliberate. The new code is already on
 disk and the next login will load it whatever the script does; the pull deployed it, the restart
@@ -131,8 +138,19 @@ make apk            # docker compose -f docker/compose.yml run --rm build ./grad
 adb install -r out/desk-panel-debug.apk
 ```
 
-The script reports this against the last commit it saw run cleanly on this machine, recorded in
-`.after-update-state.json` (gitignored, per machine). The first run has no reference point and
-says so instead of claiming a verdict. It is a proxy for "what is installed on the phone", which
-the repo cannot know — if you rebuild without running the script, or run the script without
-rebuilding, the proxy drifts and only a reinstall settles it.
+Then tell the script, because it cannot see the phone:
+
+```bash
+python scripts/after_update.py --rebuilt
+```
+
+That records the commit the APK on the phone was built from, in `.after-update-state.json`
+(gitignored, per machine), and the `apk` check compares against it from then on. It is an
+explicit acknowledgement on purpose: a marker that advanced by itself would quietly turn "you
+still have to reinstall" into silence.
+
+Until you run it, `apk` keeps reporting the same change and the run keeps exiting 1 — which is
+the intended nagging, and was a trap before the flag existed. A failing run does not advance the
+marker, so without `--rebuilt` there was no way to clear it and the script stayed red forever on
+the same commit. The first run on a machine has no reference point at all and says so rather
+than claiming a verdict.
