@@ -132,6 +132,22 @@ quotes_interval_s = 600
 # not near any limit. Weather does not move faster than this anyway.
 weather_interval_s = 900
 
+# The moon's phase, from the US Naval Observatory
+# (aa.usno.navy.mil/api/moon/phases) -- no key, no registration. It is the
+# slowest thing this panel shows: the lit fraction moves about three points a
+# day, and what the API actually returns is a table of phase *instants* that
+# does not change between them at all. Six hours is four requests a day and a
+# stale answer is invisible.
+#
+# If the request fails the server falls back to arithmetic over the mean
+# synodic month and marks the answer `source = "mean"`. That names the phase
+# correctly -- checked against the USNO's own 2026 and 2027 tables, 99 primary
+# phases, none named wrong -- but its age can be most of a day out, which is a
+# visibly different moon on the nights either side of a quarter. There is
+# nothing to configure about the fallback; it is documented here so that a
+# payload reading `"source": "mean"` is not a mystery.
+moon_interval_s = 21600
+
 # The sparkline's series: daily closes, which change once a day, so this is on
 # a clock measured in hours. Six hours costs four requests a day per provider.
 history_interval_s = 21600

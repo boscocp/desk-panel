@@ -82,7 +82,7 @@ is:
   short, and wrong in the direction that looks like a pass. The harness measures what it got
   and refuses to run if it cannot converge.
 - **`check_layout.py` measures each pass at every burn-in position.** The panel shifts a few
-  pixels every four minutes (T6.2), so measuring it once means checking the worst position one
+  pixel every minute (T6.2, T6.14), so measuring it once means checking the worst position one
   run in seven, which is a check that fails on a Tuesday.
 - **`check_layout.py` pins the page's clock** to do that. Otherwise the panel puts itself back
   where the wall clock says a moment after the harness moves it — and the stress pass rendered

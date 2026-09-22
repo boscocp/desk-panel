@@ -234,7 +234,7 @@ def run(url, passes, viewport, extra_css, shot_dir, shot_tag=""):
     """One browser, every pass. Returns {pass name: measurement}.
 
     Each pass is measured once per position in the burn-in cycle (T6.2), not
-    once. The panel shifts a few pixels every four minutes so that one
+    once. The panel shifts one pixel every minute so that one
     unchanging layout does not etch itself into an AMOLED, which means a
     harness that measured whatever the wall clock happened to be showing would
     check the worst position one run in seven -- and a card that only escapes
@@ -401,7 +401,8 @@ def burn_in(result, viewport, already):
          sweep exists. Every offset is up and left, so the edges at risk are
          the top and the left: a card sitting 3px clear of the top of the
          viewport at (0,0) is over it at (-1,-4), and that is one position out
-         of seven. Measured once, it is a layout bug that fails on a Tuesday.
+         of twenty-two. Measured once, it is a layout bug that fails on a
+         Tuesday.
 
     `already` is what the reported position failed on, so a fault present at
     every offset -- a card that does not fit at all -- is said once rather than
@@ -525,7 +526,7 @@ def main():
     if query:
         url += "?" + urllib.parse.urlencode(query)
 
-    # Four passes, and only the first is the ordinary case. A typical tick
+    # Five passes, and only the first is the ordinary case. A typical tick
     # never breaks a layout; the widest case does. mock.js already ships the
     # long symbol, the six-figure price, the sub-1 price and the zero change
     # (that is what those fixtures are for -- see web/js/mock.js). stress.js
@@ -540,13 +541,19 @@ def main():
     # Cheap to keep and impossible to notice by eye -- 66 is freezing rain, on
     # a panel in Sao Paulo.
     #
-    # overflow.js is the fourth, and it is the one pass that asserts something
+    # night.js is the fourth. A clear sky after dark draws stars rather than a
+    # sun -- which is the bug T6.13 came from -- and it draws the moon at
+    # first quarter, the one phase whose terminator is a straight line and so
+    # the arc this geometry is most likely to get wrong.
+    #
+    # overflow.js is the fifth, and it is the one pass that asserts something
     # must happen rather than that nothing must: more rows than any card can
     # show, and the cards have to say they are scrolling through them (T6.6).
     # The flag is what turns the pass from "nothing escaped" -- which a card
     # that silently eats rows passes trivially -- into a check of the feature.
     passes = [("served", None, False), ("stress", "stress.js", False),
               ("unknown", "unknown.js", False),
+              ("night", "night.js", False),
               ("overflow", "overflow.js", True)]
 
     print("desk-panel layout check -- %s" % url)
