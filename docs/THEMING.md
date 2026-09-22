@@ -424,13 +424,15 @@ python e2e/layout/check_pulse.py --theme <name>    # only if your theme pulses
 ```
 
 The layout check drives a real browser at 872x392 — the phone's actual
-viewport — and runs three payloads: the served one from `mock.js`; the widest
+viewport — and runs four payloads: the served one from `mock.js`; the widest
 case the panel can legitimately be asked to show (`e2e/layout/stress.js`: the
 longest city, the longest weather label, a negative temperature, a six-figure
 price beside a sub-1 one, a ticker far longer than five characters, and the
-STALE badge shown); and more rows than any card can fit
+STALE badge shown); a weather code with no glyph, where a theme that draws the
+condition as a word must fit that word in the picture's slot
+(`e2e/layout/unknown.js`); and more rows than any card can fit
 (`e2e/layout/overflow.js`). The second is the one that fails on sizes. The
-third is the only pass that requires something to *happen* rather than
+fourth is the only pass that requires something to *happen* rather than
 requiring that nothing goes wrong — see the section above on saying so when a
 row is hidden.
 

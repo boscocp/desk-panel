@@ -142,7 +142,17 @@ step "Checking the config"
 # (The template quotes each value, which is the other half -- a path with a
 # space in it.)
 sed_escape() {
-    printf '%s' "$1" | sed -e 's/[\\&|]/\\\\&/g'
+    # One backslash before the match, not two, and the review caught the
+    # difference. The first cut wrote the replacement as `\\\\&`, which sed
+    # reads as two literal backslashes followed by the match -- so the escaped
+    # path carried a stray backslash into the outer `s|@PYTHON@|...|`, and
+    # /home/me/proj&panel rendered as /home/me/proj\@PYTHON@panel: the
+    # placeholder's own text spliced into the value meant to replace it. A `|`
+    # was worse -- the outer expression aborted with "unknown option to 's'"
+    # after the redirection had already truncated the unit file, leaving a
+    # zero-byte unit behind. A guard that produced the corruption it was added
+    # to prevent. Verified with all three characters before and after.
+    printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'
 }
 
 step "Writing $UNIT_DIR/$UNIT_NAME"
