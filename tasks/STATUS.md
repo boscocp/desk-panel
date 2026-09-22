@@ -72,10 +72,12 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 | T3.12 | **Config in TOML, with the catalogue in the file** | done | 2026-09-20. `server/config_format.py` (pure `parse`/`merge`/`format_for_path`, plus `ConfigError`, moved here from `server.py` and re-exported so every existing import still works) and `server/config.example.toml`, which is written as documentation rather than as a sample. **TOML, not the YAML that was asked for**, and the reason is in the file: stdlib-only is a hard constraint in `server/CLAUDE.md`, PyYAML is a dependency, and `tomllib` has been in the standard library since 3.11 — this project's floor. `load_config` dispatches on the suffix; the merge and both parsers are pure, so TT.2 covers every case without a filesystem. **The transition is real and was exercised in all four states** in a scratch rig (neither file, only `.json`, both, only `.toml`): `config.toml` wins, a lone `config.json` still loads and prints one line naming the replacement, and with neither present the not-found message names the `.toml`. **An explicit `--config` or `DESK_PANEL_CONFIG` is never second-guessed** — only the `script_dir` fallback chooses between the two names, because it is the only source that names a file rather than being handed one. Without that rule a launcher pointing at a deleted path would have silently started on whatever config sat in the repo: somebody else's tickers and somebody else's token. `exists` is injected into `config_search_paths`, so it stays pure and the whole matrix is a unit test. **Two things the task file got wrong, both corrected in the catalogue.** (a) "One paid ticker 401s the whole request, so a single unlisted symbol empties the card" is only true when `brapi_symbols_per_request` is raised; at the shipped value of 1 each ticker is its own request and a refused one costs its own row — `load` already works that way. (b) The two upstream catalogues are cited from endpoints that were *checked*, not from a docs page taken on trust: AwesomeAPI lists 540 pairs at `/json/available` and Binance 3,708 symbols at `/api/v3/ticker/price`, and every pair and coin named in the example was confirmed present. **`config.example.json` shipped `quotes_interval_s: 300` while the default was 600** — the arithmetic beside `DEFAULT_CONFIG` says 300 burns brapi's 15,000/month budget by the 17th, and copying that file was the documented first step. Fixed, the three keys it was missing added, and a test now asserts the example's key set equals `DEFAULT_CONFIG`'s in both directions and that neither example ships an interval below the default. The `theme` key is reserved and defaulted to `neon` for T6.7. `config.toml` inherits the gitignore rule and both agent denylists (`.claude/settings.json` and `reasonix.toml`, changed together). **`install_task.ps1` learned both formats and that half is unverified**: no PowerShell exists on this box, so `Resolve-DeskPanelConfig` and the TOML branch of `Get-ConfiguredPort` were reviewed, not run. The port scan is a line scan that stops at the first `[section]` and warns when it finds nothing, so a miss degrades to the 8777-plus-warning the function always had. All four acceptance commands exit 0 (re-run after the review's fixes); `make lint-tasks`, the web suite and the Android JVM suite are green. **Four review findings, all four applied before the merge** — see the wave 12 section below; the worst was the migration notice giving a launcher-started server advice that would have silently done nothing |
 | T3.6 | Serve the APK at `/app` | todo | |
 | T3.7 | `POST /action/{id}` stub returning 501 | done | 2026-09-19. Rode along with wave 8 because TT.3 was `blocked` on it as well as on T3.3, and stranding TT.3 a second time for a five-line route would have been the more expensive choice. Matched narrowly by a pure `action_id(path)`: one segment, non-empty, no nesting, no `..`, no query — which is the first half of the closed-allowlist promise in `server/CLAUDE.md`. 501 rather than 404 or 200, because the route exists and does nothing yet, and that is exactly what 501 says. `probe.py --serve --url /action/anything --method POST --expect-status 501` exits 0 |
+| T3.13 | **One command to run after a pull** | done | 2026-09-22, wave 20. `scripts/after_update.py` + `docs/UPDATING.md`. Written after an evening lost to a server that was **one minute older than the code it was serving**: the Scheduled Task had started at 00:31:18, the pull rewrote `server.py` at 00:32, and the phone's two new cards (T6.13, T6.15) were empty while every check this repo owns said the machine was healthy - `/ping` answered, the config was valid, the APK was current, `probe.py` would have exited 0. **A pull is not a deploy**, and "does it answer" cannot tell yesterday's server from today's. So the script's load-bearing step compares `/weather` against the key set the tree's own `normalise()` produces, imported rather than hardcoded, plus `moon` when `providers_usno.py` is present - a field added to the payload later starts being required with nobody editing the script. It **asks the launcher** on every OS and never spawns the server (invariant 2; the acceptance greps for `Popen` to keep it that way), takes every path out of the launcher's own action rather than the repo, and **waits for the socket between stop and start** - discovered the hard way, a back-to-back `Stop`/`Start` hit `WinError 10048` and took down the survivor too, because `allow_reuse_address` is off on Windows on purpose. **The test suite deliberately does not gate the restart** and the first cut had that backwards: the new code is already on disk and the next login loads it regardless, so refusing would leave the panel stale *and* the tree broken. A broken config does gate it. macOS reports `unknown` rather than guessing (T3.10 is `blocked`), and `docs/UPDATING.md` records the three things that join the script when a Mac exists. `--self-test` covers the pure functions on any box, 27 cases, and caught `python_for` corrupting `/usr/bin/python3` into `\usr\bin\python3` by round-tripping through `Path` |
 | TT.2 | Server unit tests + fixtures | done | 2026-09-19. Re-opened by wave 8, as its earlier note asked. 86 tests now, up from 32: every provider normaliser against a **real recorded response** in `server/tests/fixtures/`, plus the cache, the stale fallback and the payload assembly. The fixtures are captures, not hand-written shapes — which is the point, since the shapes for crypto and FX were not in anybody's documentation. `TimedCache` takes `now` as an argument and `App` takes its clock, so a 300s TTL expires in a function call rather than a sleep. **A test found a real defect**: after a failed refresh the cache did not move `fetched_at`, so every subsequent request retried — an upstream that is down would have become one outbound call per panel poll, the exact traffic the cache exists to prevent, arriving when the upstream can least afford it. A failure now spends the TTL like a success does. The acceptance's real check passes too: the whole suite is green inside a network namespace with no route out, proved by a `URLError` on a live URL from that same namespace |
 | TT.3 | Two HTTP integration tests on port 0 | done | 2026-09-19. Steps 5 and 6 landed, which is what it was `blocked` on: `/quotes` over a real socket asserting the T1.2 contract shape key by key, and `POST /action/x` returning 501 with `GET` to the same path still 404. Still no network — the provider modules' `load` is replaced, so the payload comes from the test file and `upstream.py` is never reached. A second server on its own port 0, built with `functools.partial(Handler, app=...)` rather than a class attribute, because a class attribute would be shared by every server in a process that starts more than one. Content-Length is asserted against the **byte** length on a payload carrying `São Paulo`, since a length computed on characters truncates the body and the client hangs |
 | TT.4 | Contract tests, opt-in | todo | |
 | TT.10 | Login-scope verifier tests, from fixtures | done | 2026-09-21. Makes T3.10 checkable without a Mac. 97 recorded cases now run under `unittest discover` as well as under `--self-test`, imported rather than copied; purity is asserted by nailing `run_command`, `read_registry_autologin`, `read_file` and `file_present` shut and re-running them all. Two rows of the task's fixture table were amended: the verifier proves the unit is outside `default.target`'s closure rather than checking `Linger`, which is the stronger property and is why T3.9 may pass with `Linger=yes`; and WSL is read from `/proc/sys/kernel/osrelease`, not `/proc/version`. Writing the named cases found that `detect_autologin` dispatches on `"win32"`, so a test spelling it `"windows"` silently tests the Linux branch |
+| TT.11 | The unit-rendering test skips a shell that cannot run it | done | 2026-09-22, wave 20. **Found by T3.13** on a clean `main`: the server suite was red on the Windows host with eight failures, and had been since wave 18 landed. Not the escaping, which is what it looks like and what the file's own docstring says has been wrong twice - read out of `install_user_unit.sh` and run through `sed -f`, the shipped `s/[\\&|]/\\&/g` is provably correct. **It is the transport**: Git Bash hands the `-e` argument to a native `sed.exe` through MSYS2's conversion, one backslash is eaten, and the escaping silently returns every path unchanged. Three reproductions were wrong before that landed, each mangled by a different quoting layer - including the agent's own shell collapsing `\\` in the diagnostic commands; only reading the bytes out of the file settled it. `shell_passes_backslash_to_sed()` hands sed a fixed `s/x/\\y/` and requires `\y` back, and **deliberately never calls `sed_escape`** - a skip keyed on "the escaping looks wrong" would have gone green for both historical bugs, so the acceptance asserts the probe does not call the function under test. Detected, never assumed from `sys.platform`, which would guess at which shells mangle arguments and lie the day MSYS2 fixes it. The suite is 191 tests, green, one skip; the escaping stays verified on Linux, where the installer actually runs |
 
 ## Phase 4 — The core behaviour
 
@@ -177,6 +179,73 @@ and the first line of each file says so.
 |---|---|---|---|
 | T9.1 | **The next meeting, under the clock** | todo | Google Calendar and Microsoft Outlook merged, the soonest event under the clock in the `#shortcuts` strip, between T8.2's two buttons. Blocked behind T8.2 for a layout reason and behind **ADR 0016** for a bigger one: this is the first feature that puts *personal data* on a panel whose server has no authentication, and the refresh tokens it needs are credentials sitting on a desktop PC. OAuth stays on the PC and never reaches the APK — two acceptance lines exist for exactly that. The merge is where the design is: the two providers disagree about all-day events, about time zones and about the word for "declined" |
 | T9.2 | **Spike: can the panel talk to an assistant for nothing?** | todo | A button to ask something out loud and hear an answer, with the whole pipeline on the PC — invariant 1 means the page cannot call anything. Time-boxed, produces `docs/spikes/2026-voice-assistant.md` and a throwaway prototype under `spikes/`, and is allowed to conclude *do not build this*. The unknown is whether offline STT, a small local model and offline TTS fit inside a latency a person will stand at a panel for; Claude and DeepSeek are the paid comparison, not the plan. Also has to answer the awkward ones: `RECORD_AUDIO` would be the app's first dangerous permission, and an unauthenticated LAN endpoint that runs a model and speaks in someone's room is not in ADR 0015's family |
+
+## Resuming after 2026-09-22 (wave 20)
+
+Wave 20 was not planned by wave 19. It came from the chair, and it started as a question — *do I
+have to update the server that starts with Windows?* — which turned out to have a more
+interesting answer than "no".
+
+**Next**: wave 19's recommendation still stands and is now the first thing due — it is in the
+wave 19 section below, unchanged by this one. Two things this wave surfaced belong near the top
+of whatever comes next:
+
+- **T3.10 (macOS) is still `blocked` and is now referenced by name in a shipped script.**
+  `after_update.py` reports `unknown` on Darwin and `docs/UPDATING.md` says what joins it. That
+  is honest today and becomes stale the moment a Mac exists.
+- **`config.json` is still what this desk runs.** The Scheduled Task bakes `--config
+  …\server\config.json`; migrating means re-running `install_task.ps1`, not copying a file.
+  `after_update.py` surfaces the server's own notice on every run, so it is no longer a thing
+  only the startup log knew.
+
+### A pull is not a deploy, and nothing in the repo knew it
+
+The phone had a fresh APK with two new cards and both were empty. Everything anybody would check
+was innocent: `/ping` answered, the panel was lit, the config was valid, the tests were green,
+the APK was current. The Scheduled Task had started at 00:31:18; the pull rewrote `server.py` at
+00:32.
+
+Every liveness check this repo owns asks *does it answer*. `probe.py` asks it, `/ping` asks it,
+`verify_login_scope.py` asks why it answers. **None of them can tell yesterday's server from
+today's**, and a launcher whose action points into the checkout makes that gap permanent rather
+than occasional. The fix is one check — compare the live payload against the key set the tree's
+own code produces — and it is worth more than the rest of the script.
+
+### The restart was the dangerous part, not the diagnosis
+
+Stopping and starting the Scheduled Task back to back took the server down completely:
+`WinError 10048`, and the process that survived was the one that had just been asked to die.
+That is `allow_reuse_address = False` working exactly as designed on Windows — a second server
+must fail loudly rather than quietly serve half the requests — and it means the obvious two
+cmdlets are the wrong way to restart this. The socket has to be watched in between. The
+installer already knew a version of this (it sleeps 2 seconds after its own stop); nothing had
+written it down where a human restarting by hand would find it.
+
+### The wave found a red suite that two waves had shipped over
+
+`make check` was red on the Windows host, eight failures, since wave 18. Both waves were judged
+on Linux, where it passes. It was not the escaping it appeared to be — it is Git Bash eating a
+backslash out of `sed`'s `-e` argument — but the finding underneath is about the loop, not about
+`sed`: **nothing in the harness runs the server suite on the primary host.** `after_update.py`
+now does, as a side effect of its own job, which is the only reason this was caught at all.
+
+Three reproductions were wrong before the real cause landed, each mangled by a different quoting
+layer — including the agent's own shell, which collapses a doubled backslash in the commands written to
+diagnose backslash handling. Reading bytes out of the file was the only thing that settled it,
+and that is the lesson worth keeping: when the bug is about escaping, every layer between you
+and the evidence is a suspect.
+
+### What the next wave inherits that is only true on this desk
+
+- **The unit-rendering test is skipped here**, so `install_user_unit.sh`'s escaping is unverified
+  on this machine. It is verified on the CachyOS box, which is also the only place the installer
+  runs.
+- **`after_update.py`'s restart path is exercised on Windows only.** The Linux branch
+  (`systemctl --user restart`) is written and has not been run; the macOS branch does not exist.
+- **The APK proxy is cold.** `.after-update-state.json` records the first clean run, so the first
+  report said `unknown` rather than naming files. It only starts answering from the second run.
+- **The panel was confirmed by eye, on the device**, after the restart: the chance of rain and
+  the moon both render. `/weather` was asserted by command; the two cards were not.
 
 ## Resuming after 2026-09-22 (wave 19)
 
