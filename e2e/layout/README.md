@@ -57,18 +57,25 @@ first:
 3. Every section's `scrollHeight` against its `clientHeight` — is the card on screen but its
    contents not. Cards use `overflow: hidden`, so this failure is completely silent.
 4. Every section's **ink** against every other section's — is one thing drawn on top of
-   another. Added in T5.4, which is the bug that earned it: the battery corner line is
-   positioned absolutely and was set to `nowrap`, so its longest variant grew out of its column
-   and painted an opaque black box over the bottom of the CRYPTO card, hiding a live price's
-   change and its sparkline. Everything fitted. Everything was on screen. Nothing clipped.
+   another. Added in T5.4, which is the bug that earned it: the battery line was then a corner
+   absolute set to `nowrap`, so its longest variant grew out of its column and painted an opaque
+   black box over the bottom of the CRYPTO card, hiding a live price's change and its sparkline.
+   Everything fitted. Everything was on screen. Nothing clipped.
 
-   Ink, not boxes, and the distinction is the whole design: `#battery` shares a rectangle with
-   the WEATHER card deliberately, and `#stale-badge` with `#panel`, so a box comparison would
-   either fail on both of those or have to allowlist the exact pair the bug was in. So it
-   compares the leaf elements that carry text and each sparkline's `<path>`. Sharing empty space
-   is fine. Sharing a pixel with a glyph in it is not.
+   Ink, not boxes, and the distinction is the whole design: `#stale-badge` shares a rectangle
+   with `#panel` deliberately, and the device line shared one with the WEATHER card until T6.12
+   moved it under the date — so a box comparison would either fail on those or have to
+   allowlist the exact pair the bug was in. So it compares the leaf elements that carry text and
+   each sparkline's `<path>`. Sharing empty space is fine. Sharing a pixel with a glyph in it is
+   not.
 
-It also fails if a section renders **empty**. That is not a nicety: an empty card always fits,
+It also fails if a section renders **empty** — unless the section says
+`data-reserved`, which is how `neon`'s AGENDA card declares that holding nothing is its
+intended state until T9.1 fills it (T6.12). Everything else about a reserved card is measured
+exactly like any other section: it has a border and a title, so it can escape the viewport and
+its heading can land on somebody else's ink.
+
+The empty check itself is not a nicety: an empty card always fits,
 and before T6.1 the panel looked acceptable on the device for exactly that reason — the cards
 were empty outlines, because `mock.js` only runs under `file://` and the APK serves over
 `https://appassets.androidplatform.net/`. Without this check the harness would be loudest
@@ -97,13 +104,18 @@ python e2e/layout/check_layout.py --extra-css /tmp/regress.css
 echo $?    # 1, reporting #clock content 710x192 in a box of 296x192
 ```
 
-For the overlap check, take the cap off the battery line — which is how the T5.4 bug looked:
+For the overlap check, walk the device line up into the date above it:
 
 ```bash
-printf '#battery { max-width: none; white-space: nowrap; }\n' > /tmp/regress2.css
+printf '#battery { margin-top: -24px; }\n' > /tmp/regress2.css
 python e2e/layout/check_layout.py --extra-css /tmp/regress2.css
-echo $?    # 1, on the stress pass: #crypto "-4.5%" overlaps #battery ... over 68x15px
+echo $?    # 1, on every pass: #date "segunda-feira, 23 de fev" overlaps #battery "87%" over 42x24px
 ```
+
+That recipe used to be `#battery { max-width: none; white-space: nowrap; }`, which grew the
+corner line out of its column and over the CRYPTO card — the T5.4 bug, exactly. It stopped
+reproducing anything in T6.12: the line is in the flow of the sidebar now, so there is no cap
+to take off and nothing under it but the ground.
 
 Worth doing after any change to `measure.js`.
 

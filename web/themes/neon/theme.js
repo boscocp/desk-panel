@@ -68,8 +68,16 @@
 
         const clock = el('div', 'clock');
         const date = el('div', 'date');
+        // The device line, under the date (T6.12). It used to sit in the foot
+        // of the weather card, which put the handset's temperature and the
+        // room's in one box -- two numbers in degrees, six lines apart, about
+        // different things. Read from the chair that is a question rather than
+        // a diagnostic, and the answer asked for was to move it to the one
+        // place on the panel that is already about the machine rather than
+        // about the world: under the clock.
+        const battery = el('section', 'battery');
         const clockContainer = el('div', 'clock-container');
-        clockContainer.append(clock, date);
+        clockContainer.append(clock, date, battery);
 
         // Reserved for the shortcut buttons: empty on purpose, so that adding
         // them later fills a space that already exists instead of forcing the
@@ -84,6 +92,15 @@
         const fx = el('section', 'fx', 'card-list');
         const crypto = el('section', 'crypto', 'card-list');
         const weather = el('section', 'weather', 'card');
+        // Reserved, visibly (T6.12). #shortcuts makes the same promise in the
+        // sidebar and makes it invisibly, which is right for a strip that will
+        // hold buttons; this one was asked for as a *card*, so the owner can
+        // see that the panel has somewhere to put a meeting before T9.1 puts
+        // one there. data-reserved is what tells e2e/layout/measure.js that
+        // holding no text is this card's intended state rather than the fault
+        // T6.1 added the empty-section check for.
+        const agenda = el('section', 'agenda', 'card');
+        agenda.setAttribute('data-reserved', '');
         // The titles are still drawn by ::before and they are no longer
         // written there (T6.11). `content: attr(data-title)` lets the word be
         // data while the box stays the stylesheet's, which is what keeps the
@@ -91,7 +108,7 @@
         // #weather on every payload, and a real <h2> in there would go with
         // it. Set here and refreshed in render(), because the language can
         // change under a running panel exactly as the theme can.
-        applyTitles({ quotes, fx, crypto, weather });
+        applyTitles({ quotes, fx, crypto, weather, agenda });
 
         // Each list is three elements, not one, and the nesting is what makes
         // T6.6's scroll possible at all:
@@ -115,19 +132,25 @@
             section.appendChild(body);
             lists[section.id] = { section, body, scroller };
         }
-        // Not a .card: the battery is a diagnostic, and T5.4 demotes it to a
-        // line in the corner rather than a fifth box with a title. The class
-        // is what carried the border, the padding and the DEVICE label.
-        const battery = el('section', 'battery');
         const stale = el('div', 'stale-badge');
         stale.textContent = words.stale;
         stale.hidden = true;
 
+        // The right-hand track, split down the middle (T6.12). A wrapper
+        // rather than two grid areas, because the two cards are meant to be
+        // exactly equal and the left column's rows are not: 1.3fr for the B3
+        // card against 1fr for the other two, so any pair of rows borrowed
+        // from that template would divide this column 58/42 and look like a
+        // mistake. Nested, the halves are 1fr and 1fr and the arithmetic is
+        // the browser's.
+        const side = el('div', 'side');
+        side.append(weather, agenda);
+
         const panel = el('div', 'panel');
-        panel.append(quotes, fx, crypto, weather, battery, stale);
+        panel.append(quotes, fx, crypto, side, stale);
 
         root.append(sidebar, panel);
-        els = { root, clock, date, lists, weather, battery, stale };
+        els = { root, clock, date, lists, weather, agenda, battery, stale };
     }
 
     // The four card titles, as data on the sections ::before reads them from.
@@ -483,8 +506,24 @@
         return r;
     }
 
-    function renderGlyph(name) {
-        return svgIcon(GLYPHS[name], 'w-glyph');
+    // The picture, and the words that go with it (T6.12).
+    //
+    // The condition used to be drawn under the range as a line of prose and is
+    // not drawn at all any more: the glyph beside the temperature says the same
+    // thing in a quarter of the room, and the right-hand column is now two
+    // cards deep rather than one. What the label still is, is the truth the
+    // picture rounds off -- seven glyphs cannot tell `Pancadas` from `Chuva`,
+    // and format.js keeps one name per WMO code. So it becomes the glyph's
+    // accessible name rather than disappearing: anything reading this DOM
+    // aloud, or reading it back in a test, still gets the exact condition.
+    function renderGlyph(name, label) {
+        const svg = svgIcon(GLYPHS[name], 'w-glyph');
+        if (svg && label) {
+            svg.removeAttribute('aria-hidden');
+            svg.setAttribute('role', 'img');
+            svg.setAttribute('aria-label', label);
+        }
+        return svg;
     }
 
     // The battery icon, with its charge drawn inside it (T6.10).
@@ -551,16 +590,15 @@
         return svg;
     }
 
-    // Four lines where there was one sentence (T6.8). The card is the tallest
-    // on the panel and held the least: the city, the temperature, the range
-    // and the condition were all 24px in one colour, so the number a person
-    // actually looks at was the same size as the name of the town they live
-    // in.
+    // Three lines where T6.8 made four and T6.3 found one (T6.12). The card is
+    // half the height it was -- the column it lives in is two cards deep now --
+    // and the line that went is the one the glyph was already drawing: the
+    // condition.
     //
-    // The order is the order it gets read in -- where, how warm, between what,
-    // and what it is doing -- and only the second of those is large. The
-    // glyph sits beside the temperature rather than above the city because
-    // the two of them are the glance: 23 degrees and a cloud.
+    // The order is the order it gets read in -- where, how warm, between what
+    // -- and only the second of those is large. The glyph sits beside the
+    // temperature rather than above the city because the two of them are the
+    // glance: 23 degrees and a cloud.
     //
     // One wrapper, because `.card > div` centres the card's only child in
     // whatever room is left under the title. Four children would each take an
@@ -588,27 +626,27 @@
         // exactly the case a reader would otherwise miss.
         pulseIfChanged(temp, before);
         const main = el('div', null, 'w-main');
-        const glyph = renderGlyph(weatherGlyph(weather.code));
+        const glyph = renderGlyph(weatherGlyph(weather.code),
+                                  words.weather[weather.code] || words.unknown);
         main.append(...(glyph ? [glyph] : []), temp);
 
         const range = el('div', null, 'w-range');
         range.textContent = formatRange(weather.minC, weather.maxC);
 
-        // Kept, not replaced. Seven glyphs cannot say "Trovoada com granizo
-        // forte", and the label is what makes the card readable when the
-        // picture is ambiguous -- rain and showers share one.
-        const cond = el('div', null, 'w-cond');
-        cond.textContent = words.weather[weather.code] || words.unknown;
-
-        body.append(city, main, range, cond);
+        body.append(city, main, range);
         els.weather.appendChild(body);
     }
 
-    // The one diagnostic on a panel of content, so it is a corner line rather
-    // than a card (T5.4 step 3): no title, no border, and nothing until there
-    // is something to say. An empty string leaves the corner genuinely empty,
-    // which is what the panel should look like before the first battery
-    // broadcast arrives.
+    // The one diagnostic on a panel of content, so it is a line rather than a
+    // card (T5.4 step 3): no title, no border, and nothing until there is
+    // something to say. An empty string leaves the space genuinely empty, which
+    // is what the panel should look like before the first battery broadcast
+    // arrives.
+    //
+    // Under the date since T6.12, where it used to be the weather card's foot.
+    // Nothing in this function changed with it -- the line is built the same
+    // way and says the same things -- but the two temperatures it used to sit
+    // beside are a card away now, which is the whole reason it moved.
     function renderBattery(battery) {
         els.battery.textContent = '';
         const fields = batteryFields(battery);
@@ -669,6 +707,7 @@
             fx: els.lists.fx.section,
             crypto: els.lists.crypto.section,
             weather: els.weather,
+            agenda: els.agenda,
         });
         els.stale.textContent = words.stale;
         if (!payload) {
