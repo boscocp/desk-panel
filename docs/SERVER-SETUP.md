@@ -272,7 +272,8 @@ WantedBy=graphical-session.target
   logind's default `KillUserProcesses=no`, a `WantedBy`-only unit survives logout and keeps
   answering. `PartOf=` is what makes logging out mean something.
 - **`Type=exec`**, so systemd considers the unit started when the process is actually executing
-  rather than merely forked.
+  rather than merely forked. It does *not* wait for the socket — only `Type=notify` would — so
+  `is-active` says the process is running and `probe.py` is what says the port is open.
 
 Never `systemctl enable` without `--user`, never `sudo systemctl enable`, and never
 `docker compose up` for the server. The toolchain is containerised (ADR 0003) and the reflex is
@@ -298,10 +299,12 @@ nobody's security policy. Two things it cannot do for you:
 sudo ufw allow from <the phone's subnet> to any port 8777 proto tcp
 ```
 
-Prove it from the phone's subnet, never from `localhost`:
+Prove it from the phone's subnet, never from `localhost` — and pass `--port` if the config
+moved it, because `probe.py` defaults to 8777 and a proof aimed at a closed port looks exactly
+like a firewall:
 
 ```bash
-python server/probe.py --host <this-pc-ip> --expect up
+python server/probe.py --host <this-pc-ip> --port 8777 --expect up
 ```
 
 ## macOS

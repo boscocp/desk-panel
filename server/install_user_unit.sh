@@ -133,15 +133,24 @@ step "Checking the config"
 "$PYTHON" "$SERVER_PY" --config "$CONFIG" --check-only || die "the config does not load; fix it before installing"
 
 # --- Render and install ----------------------------------------------------
+#
+# A path is not inert in a sed replacement: `&` stands for the whole match, `|`
+# would end the expression, and a backslash escapes whatever follows. A repo at
+# ~/proj&panel would otherwise render an ExecStart with the placeholder's own
+# text spliced into it, install cleanly, and fail at start. Nobody has such a
+# path today, which is exactly why nobody would look here when they did.
+# (The template quotes each value, which is the other half -- a path with a
+# space in it.)
+sed_escape() {
+    printf '%s' "$1" | sed -e 's/[\\&|]/\\\\&/g'
+}
+
 step "Writing $UNIT_DIR/$UNIT_NAME"
 mkdir -p "$UNIT_DIR"
-# One sed, and the replacement text is a path: `|` as the delimiter because a
-# path contains `/`, and the three values are this machine's own paths rather
-# than anything typed by a stranger.
-sed -e "s|@PYTHON@|$PYTHON|g" \
-    -e "s|@SERVER_PY@|$SERVER_PY|g" \
-    -e "s|@CONFIG@|$CONFIG|g" \
-    -e "s|@REPO@|$REPO_ROOT|g" \
+sed -e "s|@PYTHON@|$(sed_escape "$PYTHON")|g" \
+    -e "s|@SERVER_PY@|$(sed_escape "$SERVER_PY")|g" \
+    -e "s|@CONFIG@|$(sed_escape "$CONFIG")|g" \
+    -e "s|@REPO@|$(sed_escape "$REPO_ROOT")|g" \
     "$TEMPLATE" > "$UNIT_DIR/$UNIT_NAME"
 note "python  $PYTHON"
 note "server  $SERVER_PY"
@@ -209,4 +218,7 @@ else
     note "none of ufw, firewalld or nftables is installed, which is the usual desktop case."
 fi
 note "Whatever it says, prove it from the phone's subnet rather than from localhost:"
-note "  python server/probe.py --host <this-pc-ip> --expect up"
+# --port, because probe.py defaults to 8777 and this server may not be on it.
+# Printing the right ufw rule beside a proof that connects to the wrong port is
+# how somebody spends an evening on a firewall that was never in the way.
+note "  python server/probe.py --host <this-pc-ip> --port $PORT --expect up"

@@ -32,11 +32,21 @@ StartLimitIntervalSec=60
 StartLimitBurst=5
 
 [Service]
-# started == executing, rather than == forked. `simple` would report the unit
-# active before the socket is bound, and "it is active" is the only thing anyone
-# checks after an install.
+# started == executing, rather than == forked: `exec` waits for execve() to
+# succeed, so a unit pointing at an interpreter that is not there fails at start
+# instead of reporting active and dying a moment later.
+#
+# It does **not** wait for the socket, and the first version of this comment
+# said it did. Only Type=notify gives that, and the server does not speak
+# sd_notify. So `is-active` right after an install means the process is
+# running, not that the port is open -- which is why every acceptance here ends
+# at probe.py rather than at systemctl.
 Type=exec
-ExecStart=@PYTHON@ -u @SERVER_PY@ --config @CONFIG@
+# Quoted, all three. systemd splits a command line on whitespace, so a
+# checkout under "~/My Projects" would install cleanly, enable cleanly,
+# print "Installed" and then fail at start with No such file or directory
+# naming half a path. Quotes are systemd's own escape for exactly this.
+ExecStart="@PYTHON@" -u "@SERVER_PY@" --config "@CONFIG@"
 
 # on-failure, not always: a clean exit is the server being told to stop, and
 # restarting it then would fight whoever stopped it.
