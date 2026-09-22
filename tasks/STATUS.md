@@ -227,9 +227,11 @@ revisited — nobody here can measure AMOLED wear, and the burn-in argument is a
 
 ### What the next wave inherits that is only true on this desk
 
-- **`source: "mean"` has never been seen on the device.** The USNO fallback is unit-tested
-  against a dead upstream, a junk body and a window that misses; the real server has answered
-  `usno` every time.
+- **The fallback and the warm-up are both proven on the device**, which they were not when this
+  section was first drafted. Because the moon fetch is off the request path, the first
+  `/weather` after a restart answers `source: "mean"` and the next answers `usno`: 11.0 days and
+  85% from the USNO's lunation against 10.29 and 79% from the arithmetic, on the same instant.
+  That difference is the reason the API is the plan.
 - **The 34px moon and the 24px rain icon are held up by `check_layout.py` alone.** Between them
   they spend most of the card's 6.6px of slack, and the stress pass on all three variants is the
   only thing between them and an overflow in a language nobody looked at. Both were raised from
