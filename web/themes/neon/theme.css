@@ -195,13 +195,23 @@ body {
 #quotes  { grid-area: 1 / 1 / 2 / 2; }
 #fx      { grid-area: 2 / 1 / 3 / 2; }
 #crypto  { grid-area: 3 / 1 / 4 / 2; }
-/* All three rows, not two. DEVICE used to hold the bottom of this column as a
- * card of equal weight to the content, which contradicted T5.4's own "render
- * discreetly" and cost WEATHER the height it needs most: WEATHER is the
- * tightest card on the panel in the worst case, because a city is server
- * config and "Thunderstorm, heavy hail" is a real label. Free space inside it
- * goes from 29.4px to 87.3px, measured at 872x392 under the stress payload. */
-#weather { grid-area: 1 / 2 / 4 / 3; }
+
+/* The right-hand track, and all three rows of it. What sits in it is no longer
+ * one card (T6.12): WEATHER takes the top half and the reserved AGENDA box
+ * takes the bottom, and they are exactly halves because this is its own grid
+ * rather than two rows borrowed from #panel's -- those are 1.3fr, 1fr, 1fr for
+ * the left column's sake, and any pair of them would split this column 58/42.
+ *
+ * The gap matches #panel's, so the seam between the two cards is the same
+ * 8px as every other seam on the panel and nothing here looks nested. */
+#side {
+    grid-area: 1 / 2 / 4 / 3;
+    min-width: 0;
+    min-height: 0;
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+}
 
 .card-list,
 .card {
@@ -548,27 +558,38 @@ body {
     margin-bottom: auto;
 }
 
-/* --- The weather card, which had 87px of slack and one line in it (T6.8) ---
+/* --- The weather card, which is now half a column tall (T6.8, T6.12) -------
  *
- * T6.3 measured the free space -- more than twice any other card's -- and put
- * it there deliberately, because WEATHER is the card whose content varies
- * most: the city is server config and `Thunderstorm, heavy hail` is a real
- * label. The room was bought and never spent. These rules spend it on
- * hierarchy, and on nothing else: every value below was already on the panel.
+ * T6.8 spent this card's 87px of slack on hierarchy -- four lines where there
+ * had been one sentence -- in a card 370px tall. T6.12 halved the card: the
+ * right-hand column holds WEATHER above and the reserved AGENDA below, so what
+ * this stack has to fit in is 180px rather than 276.
  *
- * The sizes are a measurement rather than a taste, and these are the measured
- * numbers at 872x392 under the stress payload -- a two-line city and a two-line
- * condition, which is the tallest this card can be asked to be. The card is
- * 370px inside its border, of which 5 is padding, 62 is the foot reserved for
- * the battery line and 27 is the WEATHER title: 276 for the content. The stack
- * comes to 204 -- city 48, glyph and temperature 53, range 30, condition 54 --
- * so 72px is still free and the card is centring its content rather than
- * clipping it. T6.3 measured 87.3px free with the old one-line render, so the
- * hierarchy cost 15px and bought four lines out of one.
+ * Three things paid for that, all of them measured at 872x392 under the stress
+ * payload -- a two-line city and a negative temperature, which is the tallest
+ * this card can be asked to be:
  *
- * check_layout.py's stress pass is what keeps those numbers honest, and it is
- * run on both themes because a card that grows is how T2.3 put a section off
- * the bottom edge.
+ *   - the condition line went (54px, and the glyph was already saying it),
+ *   - the temperature came down from 48px to 44 (4px),
+ *   - the two internal margins gave up a pixel each.
+ *
+ * The card is 182px outside its border and 180 inside, of which 10 is padding
+ * and 27 is the title: **143px for the content**. Measured directly at
+ * 872x392, `.w-body` comes to **136.4px under the stress payload -- 6.6px
+ * free** -- and 112.4px under the one the panel actually shows, which leaves
+ * 30.6.
+ *
+ * Those are measurements of the body, taken over Marionette. `check_layout.py`
+ * reports neither: it answers whether the content fits, not by how much, and
+ * an earlier version of this comment claimed 12px of slack by reading a probe
+ * whose overflowing `scrollHeight` had dropped the card's own 5px bottom
+ * padding. Half the budget, in the optimistic direction, in the comment whose
+ * whole job is to be the budget. The review of T6.12 caught it.
+ *
+ * That is a tenth of the slack T6.8 had, and it is the right trade only
+ * because the check is run: a card that grows is how T2.3 put a section off
+ * the bottom edge, and the stress pass is what says whether the next change to
+ * these five rules still fits. Run it on both themes and both languages.
  */
 .w-body {
     min-width: 0;
@@ -601,12 +622,51 @@ body {
     overflow-wrap: anywhere;
 }
 
+/* The word, for a sky this set has no picture of (the review of T6.12). It
+ * stands where the glyph stands -- same slot, same colour, same job -- and it
+ * is allowed to wrap onto a second line, because 'Predominantemente limpo'
+ * does not fit 80px and two 20px lines are still shorter than the 44px
+ * temperature beside it. So the row keeps its height and the card keeps its
+ * budget. Unmapped codes are real: 56, 57, 66, 67, 77, 85 and 86 are all
+ * open-meteo values, and the server forwards the code it was given. */
+.w-label {
+    /* Basis zero, and it is the same trick -- and the same reason -- as the
+     * sparkline's `flex: 1 1 0` in a price row. The label contributes nothing
+     * to the row's natural width, so it can never be why the temperature has
+     * to give: it takes what is left after the number and wraps inside it.
+     *
+     * The first cut was `flex: 0 1 auto`, and the harness caught what that
+     * does. Both items then shrink proportionally, `.w-temp` carries
+     * `min-width: 0` for the glyph's sake, and `nowrap` means it cannot get
+     * narrower than its text -- so the 44px temperature was squeezed into 91px
+     * and drew 118px of digits out of the card. The number is the one thing on
+     * this card nobody may lose. */
+    flex: 1 1 0;
+    min-width: 0;
+    font-size: 20px;
+    line-height: 1.2;
+    letter-spacing: 0.02em;
+    color: var(--accent-dim);
+    overflow-wrap: anywhere;
+}
+
+/* And the number beside a word does not shrink at all. `.w-temp` is
+ * `flex: 1 1 auto` for the glyph case, where there is nothing else that can
+ * give; beside the label there is. */
+.w-label + .w-temp {
+    flex: 0 0 auto;
+}
+
 /* The glance: a number and a picture, on one line. */
 .w-main {
     display: flex;
     align-items: center;
     gap: 8px;
-    margin-top: 6px;
+    /* 4, not 6 (T6.12). The card is half the height it was and the stress
+     * payload -- a two-line city and a negative temperature -- came to 182px
+     * of content in a 180px box. The two internal margins gave up a pixel
+     * each; the type did the rest. */
+    margin-top: 4px;
     min-width: 0;
 }
 
@@ -634,7 +694,11 @@ body {
 .w-temp {
     flex: 1 1 auto;
     min-width: 0;
-    font-size: 48px;
+    /* 44, down from 48 (T6.12): the card that held this is half the height it
+     * was. Still the second largest thing on the panel after the 60px clock,
+     * still more than twice the 20px the city beside it takes, and the
+     * hierarchy T6.8 built is the same hierarchy -- one step shorter. */
+    font-size: 44px;
     line-height: 1.1;
     font-weight: 700;
     letter-spacing: -0.01em;
@@ -653,108 +717,66 @@ body {
  * hyphen, because `-12-42` is a string nobody can read and it was on this card
  * until T6.8. */
 .w-range {
-    margin-top: 8px;
+    margin-top: 6px;
     font-size: 24px;
     line-height: 1.25;
     color: var(--accent);
 }
 
-/* The only prose on the panel, so it takes the secondary colour and the
- * smallest size the panel allows, and it is allowed to wrap: the longest
- * label in format.js is `Thunderstorm, heavy hail`, which is two lines in a
- * 202px column and must not be cut to one. */
-.w-cond {
-    margin-top: 6px;
-    font-size: 22px;
-    line-height: 1.22;
-    color: var(--accent-dim);
-}
+/* `.w-cond` was here: the condition, as a line of prose under the range. It is
+ * gone with T6.12 -- the glyph beside the temperature says it, and a card half
+ * the height cannot say it twice. The words are still in format.js, one per WMO
+ * code, and theme.js hands them to the glyph as its accessible name. */
 
 #weather {
     font-size: 24px;
     line-height: 1.32;
     letter-spacing: 0.01em;
     color: var(--accent);
-
-    /* The foot the battery line sits in, reserved rather than shared. Deep
-     * enough for the two-line worst case (57px) plus the 1px inset, so the
-     * forecast is centred in what is left and the two can never meet --
-     * including for a longer city, which is server config and not a rebuild.
-     * This is what makes the corner line safe to position absolutely; without
-     * it the arrangement only works while the forecast happens to be short. */
-    padding-bottom: 62px;
+    /* No reserved foot any more (T6.12). It held 62px for the battery line,
+     * which is in the sidebar now -- and this card is half the height it was,
+     * so those 62px are the difference between the stress payload fitting and
+     * not. Nothing is positioned over this card except #stale-badge, which is
+     * pinned to #panel's own top corner and is 17px of it. */
 }
 
-/* --- The battery, demoted to a corner line (T5.4) -------------------------- *
+/* --- The device line, under the date (T5.4, moved by T6.12) --------------- *
  *
- * Not a card and not in the grid. It sits in the bottom-right corner of #panel,
- * in the foot of the WEATHER card -- and #weather reserves that foot with
- * padding-bottom, so the two cannot share it. Overlap is a real risk and not a
- * theoretical one: this line is out of the flow, so nothing about the layout
- * stops it landing on live content, and the first cut of it did exactly that.
- * `check_layout.py` now measures ink against ink for every pair of sections,
- * which is the check that catches it (measure.js, question 4).
+ * Not a card, and since T6.12 not a corner absolute either: it is a line in the
+ * flow of the sidebar, directly under the date.
  *
- * Out of the grid on purpose: leaving it as a grid item is what made it a card
- * of equal weight to the content, and a diagnostic sitting peer to the prices
- * is what T5.4 step 3 rules out. Taking it out of the flow is also what lets
- * WEATHER have the whole column.
+ * It spent T5.4 through T6.11 in the foot of the WEATHER card, positioned
+ * against #panel, and the arrangement worked -- #weather reserved a 62px foot,
+ * this line was capped at 222px and wrapped into it, and check_layout.py
+ * measured the two apart on every run. What it could not fix is what it *said*:
+ * a handset at 31 degrees and a city at 23 in one box, six lines apart, both in
+ * degrees and neither labelled. Read from the chair, that is a question.
  *
- * 20px is not "small" by accident either -- T6.3's legibility floor applies to
- * this line as much as to a price, so it is demoted by position, weight and
- * colour, never by shrinking below what can be read from across the desk.
+ * Under the clock there is nothing to confuse it with. The sidebar is the part
+ * of the panel that is about the machine -- the time it keeps and the charge it
+ * is on -- and the cards are the part that is about the world.
+ *
+ * Everything the old position needed is therefore gone: no `position:
+ * absolute`, no `max-width` cap fighting a containing block three times its
+ * width, no opaque ground to protect a card underneath. The line is as wide as
+ * the sidebar column and wraps in it like any other text.
+ *
+ * 20px is not "small" by accident -- T6.3's legibility floor applies to this
+ * line as much as to a price, so it is demoted by position, weight and colour,
+ * never by shrinking below what can be read from across the desk.
  */
 #battery {
-    position: absolute;
-    /* 1px, not 0. The corner it sits in is the WEATHER card's corner, and that
-     * card's border runs through exactly those two pixel rows -- at 0 the black
-     * background below would paint over the border and leave the card looking
-     * broken open at one end. Inside the border, the line reads as a caption in
-     * the card's empty foot, which is what it is. */
-    right: 1px;
-    bottom: 1px;
-    /* Enough of the ground to sit on, so the line stays readable even if the
-     * card behind it ever grows into this corner. On an AMOLED this costs
-     * nothing: --ground is #000000, which is a pixel switched off. */
-    background: var(--ground);
-    padding: 2px 9px 3px 8px;
+    margin-top: 10px;
     font-size: 20px;
     line-height: 1.3;
     letter-spacing: 0.04em;
     color: var(--accent-dim);
-
-    /* The column, and nothing wider. Both halves of this are load-bearing, and
-     * the first cut of this rule had neither.
-     *
-     * max-width, because the element is positioned against #panel -- which is
-     * 872px wide, the whole right side of the panel -- and not against the
-     * 224px track it appears to live in. Absolute positioning takes it out of
-     * the grid, so the track stops constraining it entirely.
-     *
-     * And wrapping rather than `white-space: nowrap`, because with a cap and no
-     * wrap the overflow just moves: the text would run out of the box to the
-     * left instead of stopping. The widest line the code can build is
-     * `BAT 100% - 42.5C - unplugged`, at 323px, which under the original rule
-     * grew out of the column and painted its opaque ground over the bottom of
-     * the CRYPTO card -- covering a live price's change and its sparkline, 68px
-     * of them, measured. Wrapped, the same string is two lines inside the
-     * column, which is why #weather reserves a foot deep enough for two. */
-    /* border-box, so 222 is the whole line and not 222 plus padding. Without
-     * it the box measured 239px -- 17px of padding outside the cap -- which put
-     * its left edge at x=622 against a CRYPTO card ending at x=630: inside the
-     * card, 3px clear of its rightmost glyph. Passing by 3px is not passing. */
-    box-sizing: border-box;
-    max-width: 222px;
-    text-align: right;
 }
 
-/* Above 40 degrees. Visible from across the room and still not an alarm: the
- * colour changes, nothing flashes, nothing moves, and the number that earned it
- * is right there in the same line. */
 /* --- The battery line's two icons (T6.10) -------------------------------- *
  *
  * The line was `BAT 87% · 31°C`; it is now two pictures and two numbers. Four
- * characters of the widest thing in this corner were spent saying what a
+ * characters of the widest thing in the line were spent saying what a
  * fourteen-pixel drawing says at a glance from across the room.
  *
  * Laid out as a flex row rather than left to the inline flow, because an
@@ -767,19 +789,20 @@ body {
     align-items: center;
     gap: 5px;
 
-    /* Wrapping, and right-aligned, because the rule above this one depends on
-     * it: #battery is capped at 222px and its overflow story is that the line
-     * *wraps* into the two-line foot #weather reserves for it, rather than
-     * running out of the box to the left over the CRYPTO card's prices. A
-     * flex row does not wrap by default, so turning this div into one took
-     * that away -- and check_layout.py caught it immediately, at 289px of
-     * content in a 222px box with `unplugged` 52px outside the viewport.
+    /* Still wrapping, and now from the left -- as a guard rather than as a
+     * described case. The widest line the code can build today, a battery
+     * icon, `100%`, a thermometer, `42.5°C` and `na bateria`, fits the 296px
+     * sidebar on one line with room to spare; it did not fit the 222px column
+     * this line used to live in, which is where the wrapping came from
+     * (T6.10). It stays because a flex row does not wrap unless told to and
+     * the widest line is not fixed -- a third language's word for `unplugged`
+     * is somebody else's choice, and the failure mode without this is text
+     * running out of the column rather than onto a second line.
      *
-     * flex-end rather than the inherited `text-align: right`, which a flex
-     * container does not pass to its items: without it the second line would
-     * start at the left edge of a right-aligned box. */
+     * flex-start rather than the flex-end the corner position wanted: this line
+     * sits under the date now and shares its left edge. */
     flex-wrap: wrap;
-    justify-content: flex-end;
+    justify-content: flex-start;
 }
 
 /* 22px against the line's 20px type, which is smaller than the floor T6.3 sets
@@ -824,7 +847,7 @@ body {
     margin-left: 5px;
 }
 
-/* The one word left in the corner. Dimmer than the numbers and never
+/* The one word left in the line. Dimmer than the numbers and never
  * coloured by the temperature bands: it is about the charger, not the heat,
  * and a red "unplugged" would read as a second alarm (ADR 0014). */
 .b-note {
@@ -832,6 +855,10 @@ body {
     letter-spacing: 0.06em;
 }
 
+/* Above 40 degrees. Visible from across the room and still not an alarm: the
+ * colour changes, nothing flashes, nothing moves, and the number that earned it
+ * is right there in the same line. (This comment described this rule and had
+ * been left three rules above it since T6.10 split the block.) */
 #battery .warm {
     color: var(--warn);
 }

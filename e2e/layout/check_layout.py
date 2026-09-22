@@ -465,6 +465,14 @@ def report(name, result, bad):
           % (len(swept),
              " ".join("(%d,%d)" % tuple(r["_offset"]) for r in swept)))
     for section, box in sorted(result["sections"].items()):
+        # A section measure.js could not find is None, and the finding that says
+        # so is already in `bad`. Printing it as "not in the DOM" rather than
+        # indexing None keeps the report readable on exactly the run where the
+        # panel is most broken -- this line used to raise TypeError and take the
+        # harness down instead of reporting the fault it had just found.
+        if box is None:
+            print("    %-9s not in the DOM" % section)
+            continue
         print("    %-9s x %4d-%-4d y %4d-%-4d  %s"
               % (section, box["left"], box["right"], box["top"], box["bottom"],
                  box["text"][:46]))
@@ -517,7 +525,7 @@ def main():
     if query:
         url += "?" + urllib.parse.urlencode(query)
 
-    # Three passes, and only the first is the ordinary case. A typical tick
+    # Four passes, and only the first is the ordinary case. A typical tick
     # never breaks a layout; the widest case does. mock.js already ships the
     # long symbol, the six-figure price, the sub-1 price and the zero change
     # (that is what those fixtures are for -- see web/js/mock.js). stress.js
@@ -525,12 +533,20 @@ def main():
     # negative temperature, the date as the panel's language renders it, and
     # the stale badge shown.
     #
-    # overflow.js is the third, and it is the one pass that asserts something
+    # unknown.js is the third and it measures one card: a WMO code with no
+    # glyph, where the neon theme draws the *word* in the picture's slot. That
+    # slot had never held text before T6.12, and the first cut of it squeezed
+    # the 44px temperature into 91px and drew 118px of digits out of the card.
+    # Cheap to keep and impossible to notice by eye -- 66 is freezing rain, on
+    # a panel in Sao Paulo.
+    #
+    # overflow.js is the fourth, and it is the one pass that asserts something
     # must happen rather than that nothing must: more rows than any card can
     # show, and the cards have to say they are scrolling through them (T6.6).
     # The flag is what turns the pass from "nothing escaped" -- which a card
     # that silently eats rows passes trivially -- into a check of the feature.
     passes = [("served", None, False), ("stress", "stress.js", False),
+              ("unknown", "unknown.js", False),
               ("overflow", "overflow.js", True)]
 
     print("desk-panel layout check -- %s" % url)

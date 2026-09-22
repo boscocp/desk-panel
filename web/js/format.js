@@ -333,7 +333,14 @@ const LANGUAGES = {
         // first as a network having dropped -- the wrong alarm entirely on a
         // panel whose other states are about the PC being away.
         unplugged: 'na bateria',
-        titles: { quotes: 'B3', fx: 'CÂMBIO', crypto: 'CRIPTO', weather: 'TEMPO' },
+        // `agenda` names a card that holds nothing yet: the reserved box T9.1
+        // will fill with the next meeting (T6.12). The word is here rather
+        // than in the theme for the same reason every other title is -- a
+        // panel in another language is a restart of the PC's server, never a
+        // rebuild -- and having it here is what makes the key-set test above
+        // ask the next language for it too.
+        titles: { quotes: 'B3', fx: 'CÂMBIO', crypto: 'CRIPTO', weather: 'TEMPO',
+                  agenda: 'AGENDA' },
         weather: {
             0: 'Céu limpo',
             1: 'Predominantemente limpo',
@@ -363,7 +370,10 @@ const LANGUAGES = {
         unknown: 'Unknown',
         stale: 'STALE',
         unplugged: 'unplugged',
-        titles: { quotes: 'B3', fx: 'FX', crypto: 'CRYPTO', weather: 'WEATHER' },
+        // SCHEDULE, not AGENDA: in English an agenda is the list of items
+        // for one meeting, and what this card will show is the next one.
+        titles: { quotes: 'B3', fx: 'FX', crypto: 'CRYPTO', weather: 'WEATHER',
+                  agenda: 'SCHEDULE' },
         weather: {
             0: 'Clear sky',
             1: 'Mainly clear',
@@ -480,7 +490,7 @@ function weatherGlyph(code) {
 const BATTERY_WARN_C = 40;
 
 // battery: {level, tempC, charging} from the payload, or undefined before the
-// first broadcast. Returns the whole corner line, or '' when there is nothing
+// first broadcast. Returns the whole device line, or '' when there is nothing
 // worth saying -- app.js renders nothing at all for '', rather than an empty
 // box with a label in it.
 //
