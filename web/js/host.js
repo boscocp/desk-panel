@@ -121,16 +121,23 @@
     // would be a second motion on a panel that already has one and that T6.6's
     // notes ask not to fight -- and a transition is not an animation, so
     // css/style.css's `animation-play-state: paused` would not stop one that
-    // was in flight when the panel went dark. A 4px step every four minutes is
-    // below what the eye catches in peripheral vision; a 4px glide is exactly
-    // what it catches.
+    // was in flight when the panel went dark.
+    //
+    // The second half of the argument used to be "a 4px step every four minutes
+    // is below what the eye catches in peripheral vision; a 4px glide is
+    // exactly what it catches". The first clause was wrong and T6.14 measured
+    // it wrong -- the step was reported from the chair as a jolt and then seen
+    // in two screenshots 28s apart, the whole panel moving (-8, +2) physical
+    // pixels at once. The step is 1px a minute now, which is below what the eye
+    // reports at all, so the conclusion survives with a better reason: there is
+    // nothing left to glide.
     let applied = null;
 
     function shift(now) {
         const offset = offsetFor(now);
         const next = offset.x + ',' + offset.y;
-        // Called once a second and changes once every four minutes, so 239 of
-        // every 240 calls are a string compare and nothing else. Writing the
+        // Called once a second and changes once a minute, so 59 of every 60
+        // calls are a string compare and nothing else. Writing the
         // same two values into an inline style is cheap but not free: it is
         // still a style invalidation on the root element, which is the one
         // element every rule on the page hangs off.

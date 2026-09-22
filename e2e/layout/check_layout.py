@@ -237,7 +237,7 @@ def run(url, passes, viewport, extra_css, shot_dir, shot_tag=""):
     once. The panel shifts one pixel every minute so that one
     unchanging layout does not etch itself into an AMOLED, which means a
     harness that measured whatever the wall clock happened to be showing would
-    check the worst position one run in seven -- and a card that only escapes
+    check the worst position one run in twenty-two -- and a card that only escapes
     the viewport at (-4,-3) would be a check that fails on a Tuesday. The sweep
     makes it a certainty instead.
 
@@ -394,8 +394,8 @@ def burn_in(result, viewport, already):
 
       1. does core's offset actually reach the glass? The panel is moved by two
          custom properties on <html> and one rule in css/style.css, and if
-         either goes the sweep below still runs, still measures seven times,
-         and still reports a pass -- having measured one position seven times.
+         either goes the sweep below still runs, still measures every position,
+         and still reports a pass -- having measured one position over and over.
          So every position is checked against where the panel actually went.
       2. does the panel still fit at every position? This is the reason the
          sweep exists. Every offset is up and left, so the edges at risk are
@@ -406,7 +406,7 @@ def burn_in(result, viewport, already):
 
     `already` is what the reported position failed on, so a fault present at
     every offset -- a card that does not fit at all -- is said once rather than
-    seven times.
+    every position once.
     """
     bad = []
     shifted = result.get("_shifted", [])

@@ -368,10 +368,6 @@ class OpenMeteoTests(unittest.TestCase):
             providers_openmeteo.load("Atlantis", "UTC", get=get)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class PrecipitationProbabilityTests(unittest.TestCase):
     """T6.15: the day's chance of rain, and which day it is."""
 
@@ -419,3 +415,6 @@ class PrecipitationProbabilityTests(unittest.TestCase):
         # And in the daily list rather than the current one.
         daily = seen[0].split("&daily=")[1].split("&")[0]
         self.assertIn("precipitation_probability_max", daily)
+
+if __name__ == "__main__":
+    unittest.main()

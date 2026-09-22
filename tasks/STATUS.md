@@ -184,9 +184,14 @@ Wave 19 is **T6.13 + T6.14 + T6.15**, on `wave/19-the-moon-the-jump-and-the-loop
 from the chair, in Portuguese, with the panel lit — the session ran from the evening of the 21st
 into the small hours of the 22nd.
 
-**Next: T6.6** is done, T6.7 is done, so the first row that is not: read the `Prereqs:` lines
-rather than the phase order. T3.9's human half (the SSH round trip, the graphical logout) and
-T3.8's Windows half are both still blocked on hardware rather than on work.
+**Next: T0.6** — the two-agent setup, the oldest row in the table that is not `done` and the one
+still carrying the `start here` marker from the bootstrap. Everything scheduled in phase 6 is
+finished; T6.9 through T6.15 all arrived from the chair instead, so the backlog is where it was.
+Read the `Prereqs:` lines rather than the phase order.
+
+Two rows are blocked on hardware rather than on work and stay that way until it is here:
+**T3.9**'s human half (the SSH round trip needs a second device, the login/lock/logout sequence
+needs a graphical logout) and **T3.8**'s Windows half (no PowerShell on this machine).
 
 ### Read the switch before the mechanism
 

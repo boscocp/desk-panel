@@ -180,9 +180,9 @@ judging it, so a row waiting its turn below the fold is not reported as a card e
 screen — scoped to `[data-scroll]` deliberately, because clipping every rect against every
 `overflow: hidden` ancestor would quietly gut the "outside the viewport" question.
 
-## Every pass is measured seven times, once per burn-in position
+## Every pass is measured at every burn-in position
 
-T6.2 made the panel move. It shifts a few pixels every four minutes so that one unchanging
+T6.2 made the panel move. It shifts a few pixels every minute so that one unchanging
 layout does not etch itself into an AMOLED, which means "where is this card" now has seven
 answers and a harness that took one of them would be checking the worst case one run in
 seven. A card that only escapes the viewport at `(-4,-3)` would have been a check that failed
@@ -198,7 +198,7 @@ Two things are asserted that a single measurement cannot be:
 
 - **the offset reaches the glass.** The shift is two custom properties on `<html>` and one
   rule in `web/css/style.css`; if either goes, the sweep still runs, still measures seven
-  times, and would still report a pass — having measured one position seven times. Every
+  times, and would still report a pass — having measured one position over and over. Every
   position is therefore checked against where the panel actually went.
 - **the panel moves at all.** If every position in the cycle is the same offset, nothing is
   protecting the display, and that is a failure rather than a very stable panel.
