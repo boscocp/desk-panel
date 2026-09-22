@@ -297,7 +297,7 @@ test('formatTemp keeps one decimal and does not round a real zero away', () => {
     assert.equal(formatTemp(-3.2), '-3.2');
 });
 
-// --- The battery corner line (T5.4) ---------------------------------------
+// --- The battery line (T5.4; under the date since T6.12) ------------------
 //
 // This is a diagnostic, so the thing worth testing is that it never says
 // something confidently wrong: a missing reading has to read as missing, and
