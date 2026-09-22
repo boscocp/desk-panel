@@ -27,3 +27,7 @@ tools/
 # --- OS noise ---
 Thumbs.db
 .DS_Store
+
+# scripts/after_update.py records the last clean run here. Per machine:
+# two boxes on the same commit have rebuilt different things.
+.after-update-state.json

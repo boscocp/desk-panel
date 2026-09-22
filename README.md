@@ -68,6 +68,7 @@ See [docs/INSTALL-PHONE.md](docs/INSTALL-PHONE.md).
 | [BUILD.md](docs/BUILD.md) | Containerised toolchain, building, signing |
 | [INSTALL-PHONE.md](docs/INSTALL-PHONE.md) | Installing, and the MIUI toggles that matter |
 | [SERVER-SETUP.md](docs/SERVER-SETUP.md) | Login-scoped autostart on Windows, Linux and macOS; firewall, static IP, BIOS |
+| [UPDATING.md](docs/UPDATING.md) | What to run after a pull, and why a restart is not optional |
 | [DEVICE-CARE.md](docs/DEVICE-CARE.md) | Battery, heat and burn-in — and the honest limits |
 | [TESTING.md](docs/TESTING.md) | Five test layers, and which of them install anything |
 | [LOCAL-MODELS.md](docs/LOCAL-MODELS.md) | Driving the repo with a local model instead of Opus — which one, and its limits |
