@@ -11,10 +11,10 @@
 //      some of it is underneath the rest).
 // T2.3 shipped a panel that passed a screenshot and failed the first three.
 // Question 4 arrived later, in T5.4, and it arrived the hard way: the battery
-// corner line is positioned absolutely and set to nowrap, so its longest
-// variant grew out of its own column and painted an opaque black box over the
-// bottom of the CRYPTO card -- hiding a live price's change and sparkline. The
-// harness passed. Nothing here was looking, and a comment in style.css claimed
+// line was then a corner absolute set to nowrap, so its longest variant grew
+// out of its own column and painted an opaque black box over the bottom of the
+// CRYPTO card -- hiding a live price's change and sparkline. The harness
+// passed. Nothing here was looking, and a comment in style.css claimed
 // otherwise.
 //
 // T6.11 found two more of the same shape, both in `ink` below: a ::before has
@@ -23,8 +23,17 @@
 // and all four card titles invisible to the overlap check -- in the file
 // whose entire purpose is to catch two things drawn in one place.
 
-const SECTIONS = ['clock', 'date', 'quotes', 'fx', 'crypto', 'weather', 'battery',
-                  'stale-badge'];
+const SECTIONS = ['clock', 'date', 'quotes', 'fx', 'crypto', 'weather', 'agenda',
+                  'battery', 'stale-badge'];
+
+// Measured when it is there, and not required to be (T6.12). `agenda` is the
+// reserved card the neon theme puts under its forecast; `plain` has no such
+// box and is not wrong to have none -- docs/THEMING.md says the conventional
+// ids are how a theme opts *in* to this harness, not a list it owes. Every
+// other id in SECTIONS is one both themes carry and one whose absence would be
+// a regression rather than a design, so the missing-from-the-DOM finding still
+// applies to all of them.
+const OPTIONAL = ['agenda'];
 
 const out = {
     viewport: [window.innerWidth, window.innerHeight],
@@ -75,10 +84,11 @@ const out = {
 // positioned descendant whose containing block is outside that ancestor: such
 // an element paints outside the card and would be intersected back inside it
 // and reported as fine. Nothing in either theme is positioned inside a list
-// card -- but #battery is exactly that kind of element elsewhere on the panel,
-// and it is the fault that earned question 4 in the first place (T5.4). A
-// future "+3 more" badge pinned inside a scrolling card is the shape to watch
-// for.
+// card -- #stale-badge is the one absolute left on the panel and it is pinned
+// to #panel rather than to a card. A future "+3 more" badge pinned inside a
+// scrolling card is the shape to watch for, and it is the shape that earned
+// question 4 in the first place (T5.4, when the battery line was a corner
+// absolute in the weather card's foot).
 function paintedRect(el) {
     let r = el.getBoundingClientRect();
     const scope = el.parentElement && el.parentElement.closest('[data-scroll]');
@@ -116,8 +126,10 @@ function outside(r) {
 for (const id of SECTIONS) {
     const el = document.getElementById(id);
     if (!el) {
-        out.sections[id] = null;
-        out.outsideViewport.push('#' + id + ' is missing from the DOM');
+        if (!OPTIONAL.includes(id)) {
+            out.sections[id] = null;
+            out.outsideViewport.push('#' + id + ' is missing from the DOM');
+        }
         continue;
     }
     const r = el.getBoundingClientRect();
@@ -128,7 +140,18 @@ for (const id of SECTIONS) {
         width: Math.round(r.width), height: Math.round(r.height),
         text: text.slice(0, 80),
     };
-    if (!text) {
+    // An empty section is a fault -- see check_layout.py -- unless the theme
+    // says it is the point. `#agenda` is a card with a border, a title and
+    // nothing in it until T9.1 fills it (T6.12), and it is measured here like
+    // any other section because it can still escape the viewport and its title
+    // can still land on somebody else's ink. What it must not do is fail the
+    // "this pass measured nothing" check, which exists to catch a panel whose
+    // cards are empty outlines because the fixtures never loaded.
+    //
+    // The attribute is the whole of the exemption, and it is deliberately not a
+    // list of ids here: a theme that reserves a different box says so in its own
+    // markup, and a theme that forgets the attribute gets the old failure.
+    if (!text && !el.hasAttribute('data-reserved')) {
         out.emptySections.push(id);
     }
     // scrollHeight > clientHeight means the box is on screen but its content
@@ -242,10 +265,10 @@ document.querySelectorAll('body *').forEach((el) => {
 // Question 4: does one section's ink land on another's?
 //
 // Boxes are the wrong thing to compare. Two sections are allowed to share a
-// rectangle -- #battery deliberately sits in the foot of the WEATHER card, and
-// #stale-badge deliberately sits over the corner of #panel -- and a check on
-// boxes would either fail on both of those or have to allowlist the exact pair
-// the T5.4 bug was in. So this compares what is actually drawn: the leaf
+// rectangle -- #stale-badge deliberately sits over the corner of #panel, and
+// the battery line deliberately sat in the foot of the WEATHER card until
+// T6.12 moved it under the date -- and a check on boxes would either fail on
+// those or have to allowlist the exact pair the T5.4 bug was in. So this compares what is actually drawn: the leaf
 // elements that carry text, and the <path> of each sparkline. Sharing empty
 // space is fine. Sharing a pixel that has a glyph or a line in it is not.
 // A ::before's ink -- one rect per line it draws, or an empty list.

@@ -465,6 +465,14 @@ def report(name, result, bad):
           % (len(swept),
              " ".join("(%d,%d)" % tuple(r["_offset"]) for r in swept)))
     for section, box in sorted(result["sections"].items()):
+        # A section measure.js could not find is None, and the finding that says
+        # so is already in `bad`. Printing it as "not in the DOM" rather than
+        # indexing None keeps the report readable on exactly the run where the
+        # panel is most broken -- this line used to raise TypeError and take the
+        # harness down instead of reporting the fault it had just found.
+        if box is None:
+            print("    %-9s not in the DOM" % section)
+            continue
         print("    %-9s x %4d-%-4d y %4d-%-4d  %s"
               % (section, box["left"], box["right"], box["top"], box["bottom"],
                  box["text"][:46]))

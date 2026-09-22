@@ -135,9 +135,20 @@ the phone's real viewport.
   land on another's — and a theme that renames them opts out of the only check
   that has ever caught a layout bug here.
 
+  `agenda` is in the harness's list too and is the one id that is **optional**:
+  `neon` reserves a card under its forecast for T9.1's next meeting, `plain` has
+  no such box, and a theme without one is not failed for the absence (T6.12).
+  Every other id there is one both themes carry, so a missing one is a
+  regression and is reported as such.
+
   `shortcuts` is **not** in that list, and both themes still use the name: it is
   the reserved strip in the sidebar that T8.2's buttons will fill, and it holds
   nothing to measure until they do.
+- **A card you are holding empty on purpose says `data-reserved`.** The harness
+  fails a section that renders with no text — an empty card always fits, and
+  before T6.1 the panel looked acceptable on the device for exactly that reason.
+  A box reserved for a feature that does not exist yet is the one honest
+  exception, and it declares itself rather than being allowlisted by id.
 
 ## A card that hides a row has to say so
 
@@ -269,9 +280,9 @@ things not to do:
 One consequence that is not a rule but will surprise somebody: a `transform` makes an element
 the containing block for its absolutely positioned descendants. Every direct child of `body` is
 therefore one, whether or not you gave it `position: relative`. Neither theme notices — `neon`
-positions `#battery` and `#stale-badge` against `#panel`, which was already `relative` — but a
-theme that positioned something against the page itself would find it positioned against that
-child instead.
+positions `#stale-badge` against `#panel`, which was already `relative` — but a theme that
+positioned something against the page itself would find it positioned against that child
+instead. (`#battery` was the other one until T6.12 moved it into the flow of the sidebar.)
 
 The amplitude and the cycle are `offsetFor` in `js/format.js`, which is a pure function of the
 clock and tested as one. It is not in the list of formatters above because there is nothing for
