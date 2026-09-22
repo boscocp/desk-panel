@@ -622,6 +622,77 @@ body {
     overflow-wrap: anywhere;
 }
 
+/* No box of its own. The chance of rain beside it is floated, so the city is
+ * plain inline text that flows around it -- see below. */
+
+/* --- The chance of rain (T6.15) -------------------------------------------
+ *
+ * A drop and a number, no word. Asked for from the chair, and the alignment is
+ * half the request: it is right-aligned on the city's line and the moon is
+ * right-aligned on the range's, so the card's two percentages sit in a column
+ * and read as a pair.
+ *
+ * Today's chance, not the current hour's -- see the note in
+ * providers_openmeteo.normalise. The two are not close and mixing the scales
+ * between two lines of one card is the kind of thing nobody reports and
+ * everybody misreads. */
+/* **Floated, not a flex item, and that is the whole of the layout.** The first
+ * cut made `.w-city` a flex row with the drop at its far end, and
+ * check_layout.py's stress pass failed it: `SAO JOSE DOS CAMPOS` wraps to two
+ * lines at this size, the drop and `100%` took about 60px of the card's 204,
+ * and with 144px left the city needed a third line. The card ran 201px of
+ * content into a 180px box and the range line was drawn over the AGENDA card
+ * below -- at seven of the burn-in cycle's offsets, which is the sweep earning
+ * its keep.
+ *
+ * A float takes width out of the *first line only*: the city flows beside it
+ * there and uses the full column underneath. So the card keeps its height
+ * whatever the city is called, which is the one thing this card cannot
+ * negotiate -- its whole argument is that the city is server config. */
+.w-chance {
+    float: right;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 8px;
+    color: var(--accent-dim);
+}
+
+.w-chance-glyph {
+    /* 24px, up from the 18 it started at -- reported from the chair as too
+     * small, and it was: the shape is a cloud with three strokes of rain under
+     * it, and at 18px the strokes were two pixels each.
+     *
+     * **24 and not more, and the reason is the float rather than the card's
+     * slack.** The city's line is 20px type at line-height 1.2, so 24px tall.
+     * A float only takes width out of the lines it overlaps, so at 24px this
+     * costs the first line and nothing else; at 26 it reached into the second,
+     * `SAO JOSE DOS CAMPOS` needed a third, and the stress pass failed with
+     * 201px of content in a 180px box and the range drawn over the AGENDA card
+     * at seven of the burn-in offsets. Tried, measured, backed off by 2px.
+     *
+     * Stroked rather than filled, because it is the set's own `rain` path and
+     * that path is drawn the way every other weather glyph is. The filled
+     * treatment belongs to the moon, where the fill *is* the information. */
+    width: 24px;
+    height: 24px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.w-chance-pct {
+    font-size: 17px;
+    line-height: 1;
+    letter-spacing: 0.02em;
+    /* The same size and tracking as the moon's percentage below it, which is
+     * what makes the two look like a column rather than two numbers that
+     * happen to be near each other. */
+    font-variant-numeric: tabular-nums;
+}
+
 /* The word, for a sky this set has no picture of (the review of T6.12). It
  * stands where the glyph stands -- same slot, same colour, same job -- and it
  * is allowed to wrap onto a second line, because 'Predominantemente limpo'
@@ -716,11 +787,102 @@ body {
 /* The day's low and high. formatRange joins them with ` / ` rather than a
  * hyphen, because `-12-42` is a string nobody can read and it was on this card
  * until T6.8. */
+/* The min/max and the moon, on one line (T6.13). A row rather than a block
+ * because the moon sits at its right-hand end, and `space-between` rather than
+ * a margin because the two halves are not the same width from one payload to
+ * the next -- `-10 / 42` is wider than `18.3 / 28.5`. */
 .w-range {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
     margin-top: 6px;
     font-size: 24px;
     line-height: 1.25;
     color: var(--accent);
+}
+
+/* The numbers keep the line's colour and size; the moon beside them is
+ * deliberately quieter. `min-width: 0` so the temperatures wrap rather than
+ * push the moon out of the card -- they are the half nobody may lose. */
+.w-range-temps {
+    min-width: 0;
+}
+
+/* --- The moon, permanently (T6.13) ----------------------------------------
+ *
+ * Asked for from the chair: the phase and how much of it is lit, on the card
+ * all the time rather than only after dark. It is the slowest-moving fact the
+ * panel shows -- about three points of illumination a day -- and the only one
+ * a reader can check by looking out of the window, which is what earns it a
+ * permanent place on a card that has 6.6px of slack.
+ *
+ * On the range's line and not a line of its own, for exactly that reason: this
+ * costs the card no height. */
+.w-moon {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--accent-dim);
+}
+
+.w-moon-glyph {
+    /* Smaller than the weather glyph's 46px, larger than the 22px it started
+     * at -- asked for from the chair, with the phase on screen. 22 was chosen
+     * as "a footnote with a shape" and that was one consideration too few: the
+     * shape is the information here, and a gibbous moon needs enough disc for
+     * the terminator's curve to be a curve rather than an edge.
+     *
+     * 34px, and that is past the free ceiling: the line it sits on is 24px type
+     * at line-height 1.25, so 30px tall, and anything above that grows the row
+     * and spends the card's slack. T6.12 left 6.6px in the worst case, so 34
+     * spends four of them and leaves about two and a half.
+     *
+     * Which means this number is held up by `e2e/layout/check_layout.py` and by
+     * nothing else -- the stress pass is the one that would fail, and it is run
+     * on every variant (default, --lang en, --theme plain) precisely so a
+     * number chosen by eye cannot quietly overflow the card in a language
+     * nobody looked at. Raised twice from the chair, 22 -> 28 -> 34, each time
+     * with the panel lit and the check re-run. */
+    width: 34px;
+    height: 34px;
+}
+
+/* Filled, and this is the one glyph in the set that is. A circle with an
+ * outline is a circle: what says *moon* is the lit part being solid and the
+ * dark part not being there at all. The path is two arcs and theme.js builds
+ * it from the illuminated fraction. */
+.w-moon-lit {
+    fill: currentColor;
+    stroke: none;
+}
+
+/* The whole disc, behind the lit part, always. This is what makes the phase
+ * legible instead of decorative: measured on the device, an 85% gibbous drawn
+ * on its own is 16 units wide against a full 18 and reads as a plain oval at
+ * 22px. With the ring behind it the eye has the circle to compare against.
+ *
+ * It also makes the new moon stop being a special case -- a ring with nothing
+ * filled in is exactly what a new moon is.
+ *
+ * Dimmer than the lit part rather than the same colour, so the two are a
+ * figure and a ground and not one shape with a line through it. */
+.w-moon-disc {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.2;
+    opacity: 0.4;
+}
+
+/* The number. Smaller than the range beside it and in the dim accent, so the
+ * line reads as "these are the temperatures, and by the way the moon is 84%"
+ * rather than as three numbers of equal weight. */
+.w-moon-pct {
+    font-size: 17px;
+    line-height: 1;
+    letter-spacing: 0.02em;
+    font-variant-numeric: tabular-nums;
 }
 
 /* `.w-cond` was here: the condition, as a line of prose under the range. It is

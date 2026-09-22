@@ -1,0 +1,72 @@
+{
+  "apiversion": "4.0.1",
+  "day": 18,
+  "month": 8,
+  "numphases": 9,
+  "phasedata": [
+    {
+      "day": 20,
+      "month": 8,
+      "phase": "First Quarter",
+      "time": "02:46",
+      "year": 2026
+    },
+    {
+      "day": 28,
+      "month": 8,
+      "phase": "Full Moon",
+      "time": "04:18",
+      "year": 2026
+    },
+    {
+      "day": 4,
+      "month": 9,
+      "phase": "Last Quarter",
+      "time": "07:51",
+      "year": 2026
+    },
+    {
+      "day": 11,
+      "month": 9,
+      "phase": "New Moon",
+      "time": "03:27",
+      "year": 2026
+    },
+    {
+      "day": 18,
+      "month": 9,
+      "phase": "First Quarter",
+      "time": "20:44",
+      "year": 2026
+    },
+    {
+      "day": 26,
+      "month": 9,
+      "phase": "Full Moon",
+      "time": "16:49",
+      "year": 2026
+    },
+    {
+      "day": 3,
+      "month": 10,
+      "phase": "Last Quarter",
+      "time": "13:25",
+      "year": 2026
+    },
+    {
+      "day": 10,
+      "month": 10,
+      "phase": "New Moon",
+      "time": "15:50",
+      "year": 2026
+    },
+    {
+      "day": 18,
+      "month": 10,
+      "phase": "First Quarter",
+      "time": "16:12",
+      "year": 2026
+    }
+  ],
+  "year": 2026
+}

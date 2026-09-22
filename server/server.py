@@ -31,7 +31,8 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from server import providers_awesomeapi, providers_binance, providers_brapi, providers_openmeteo  # noqa: E402
+from server import (providers_awesomeapi, providers_binance, providers_brapi,  # noqa: E402
+                    providers_openmeteo, providers_usno)
 from server.config_format import ConfigError, format_for_path, merge, parse  # noqa: E402
 from server.upstream import UpstreamError  # noqa: E402
 
@@ -72,6 +73,8 @@ DEFAULT_CONFIG = {
     # 600s it is 12,960 with the PC logged in around the clock.
     "quotes_interval_s": 600,
     "weather_interval_s": 900,
+    # The moon: the slowest thing on the panel. See config.example.toml.
+    "moon_interval_s": 21600,
     # Daily closes change once a day, so the sparkline's series is fetched on
     # a clock measured in hours rather than minutes. Six is arbitrary and
     # generous: it costs four requests a day across two providers.
@@ -403,6 +406,13 @@ class App:
             "crypto": TimedCache(),
         }
         self.weather_cache = TimedCache()
+        # Its own cache and its own interval. The moon's phase is the slowest
+        # thing on this panel -- the lit fraction moves about three points a
+        # day -- and the USNO's answer is a table of instants that does not
+        # change at all between them. Six hours is four requests a day against
+        # an endpoint with no quota published, and a stale answer here is
+        # invisible: nobody can see three points of illumination.
+        self.moon_cache = TimedCache()
         # Its own clock, and a much slower one: the series is daily closes,
         # which do not move between refreshes of the prices beside them.
         self.history_caches = {
@@ -412,6 +422,8 @@ class App:
         }
         self._history_lock = threading.Lock()
         self._history_refreshing = set()
+        self._moon_lock = threading.Lock()
+        self._moon_refreshing = False
         # Coordinates never change, so the geocode is cached for the life of
         # the process rather than on a TTL (T3.4 step 1).
         self.coords = None
@@ -611,7 +623,7 @@ class App:
             self._refresh_history_async(market)
 
     def weather(self):
-        """`{tempC, minC, maxC, code, city, stale}` for the configured city."""
+        """`{tempC, minC, maxC, code, isDay, moon, city, stale}` for the city."""
         config = self.config
         ttl = config.get("weather_interval_s", 900)
 
@@ -640,7 +652,64 @@ class App:
             "code": None, "city": config.get("city", ""),
         })
         payload["stale"] = stale
+        # The moon rides inside the weather object and that is deliberate:
+        # DataPayload.merge on the Android side copies this object whole and
+        # only strips its `stale`, so a key added here reaches the page with no
+        # Java change. A key at the payload's top level is the three-edit trap
+        # that cost T6.4 an evening -- `theme`, `night` and `language` each had
+        # to be added to `merge` by hand.
+        #
+        # Cached separately from the forecast, and asked for separately: a
+        # forecast outage must not take the moon with it, because the moon is
+        # arithmetic over a table and is right even when the weather is
+        # unknown. `moon_phase` never raises -- it falls back to the mean
+        # synodic model and says `source: "mean"` when it does.
+        # **Never on the request path**, which is the other half of what the
+        # review found. `weather()` is served synchronously, `upstream`'s
+        # timeout is 10s and DataPoller's is 5s, and `DataPayload.merge`
+        # returns null if either body fails -- so a slow USNO would have
+        # dropped the *whole* payload for that cycle, quotes and fx and crypto
+        # and an already-fresh weather with it, to fetch the thing this
+        # module's own docstring calls the least important on the panel.
+        #
+        # Same shape as the sparkline histories: serve what is cached, start a
+        # background refresh when it has aged out, and never block. The moon
+        # can afford it more than they can -- it moves three points a day.
+        moon = self.moon_cache
+        ttl = config.get("moon_interval_s", 21600)
+        if not moon.fresh_at(self.clock(), ttl):
+            self._refresh_moon_async(ttl)
+        # And the fallback is here rather than inside the provider, so the
+        # cache can record a failure, keep retrying, and say `mean` only for as
+        # long as it has nothing better.
+        payload["moon"] = moon.value or providers_usno.synodic_phase()
         return payload
+
+    def _refresh_moon_async(self, ttl):
+        """One background refresh of the moon, or leave the running one alone.
+
+        TimedCache's lock would make the second caller wait for the first
+        rather than letting it through, which is exactly the blocking this
+        exists to avoid.
+        """
+        with self._moon_lock:
+            if self._moon_refreshing:
+                return
+            self._moon_refreshing = True
+
+        def run():
+            try:
+                self.moon_cache.get(self.clock(), ttl, providers_usno.moon_phase)
+            except Exception:
+                # TimedCache already keeps the error and the last good value;
+                # a thread that dies loudly here would only print a traceback
+                # into a journal nobody reads for a moon.
+                pass
+            finally:
+                with self._moon_lock:
+                    self._moon_refreshing = False
+
+        threading.Thread(target=run, name="moon", daemon=True).start()
 
 
 def _bare(symbol):

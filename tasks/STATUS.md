@@ -137,7 +137,9 @@ something wider, so its text widths are a conservative estimate rather than the 
 | T6.10 | **The battery corner draws its two labels** | done | 2026-09-21, wave 17. Asked for from the chair. `BAT 87% · 31°C` spent four characters of the widest thing in that corner saying what a picture says at a glance. `batteryFields` splits the line and `formatBattery` composes its string from it, so the two cannot drift. The battery draws its own charge, to the body's **inner** edge — a 1.6-unit stroke sits half outside its path, so a bar drawn to the coordinates vanishes under its own outline above about 80%. `unplugged` stays a word: there is no picture for "this phone is running its own battery down" that a stranger reads the way they read a battery outline. Turning the line into a flex row took its wrapping away and `check_layout.py` caught it at once |
 | T6.11 | **Every word the panel shows, in the panel's own language** | done | 2026-09-21, wave 17. Asked for from the chair, after `Light drizzle`. A table per language in `format.js`; `language` rides `/quotes` beside `theme` and `night`, so a panel in another country is a restart of the server and never a rebuild. The fallback is **pt-BR and not English**, and the device's own locale is deliberately not consulted. `DEFASADO` rather than `DESATUALIZADO`, and the badge from 20px to 17: it shares a strip with the weather card's title and neither word is fixed any more. **It also found two blind spots in `measure.js`** — a `::before` has no DOM node, and the ink walk started at a section's *descendants*, so the clock, the date, the badge and all four card titles were invisible to the overlap check |
 | T6.12 | **The right column becomes two cards, and the device line moves under the date** | done | 2026-09-21, wave 18. Asked for from the chair, three complaints about one card. The condition line went — the glyph beside the temperature was already saying it, and the words stay in `format.js` as the glyph's `aria-label` rather than being deleted. The battery and the handset's temperature left the weather card's foot for a line under the date: two temperatures in one box is a question, not a diagnostic, and the sidebar is the part of the panel that is about the machine. The right-hand track is a nested `1fr 1fr` grid holding WEATHER and a reserved AGENDA card for T9.1 — nested, because #panel's own rows are 1.3fr/1fr/1fr and any pair of them would split that column 58/42. **The card lost half its height and the type paid for it**: the temperature is 44px rather than 48, and the stress payload leaves **6.6px free** where T6.8 had 72 — `.w-body` measures 136.4px in the card's 143px content box, over Marionette. The row first said 12px, from a probe whose overflowing `scrollHeight` had dropped the card's own 5px bottom padding; the review of the wave caught it in `theme.css` and this row carried the optimistic number a commit longer. `measure.js` measures `#agenda` like any other section but lets a `data-reserved` one hold no text, and `agenda` is the first **optional** id in that list: `plain` has no such card and is not failed for it. Two harness faults found on the way — `report()` crashed with a `TypeError` on a section measure.js could not find, i.e. exactly when the panel is most broken; and the README's overlap regression recipe had stopped reproducing anything, because the line it grows out of its column is in the sidebar now |
-| T6.13 | **At night the sky is not a sun, and the moon has a shape** | wip | Asked for from the chair on 2026-09-21 at 21:20, with the panel lit: the weather card drew a **sun** for `Predominantemente limpo`, after dark. `is_day` rides the weather object (`DataPayload.merge` copies it whole, so no Java change) and **step 1 is done and green** — `normalise` answers a real bool, absent *and* explicit `null` both mean daylight, which the wave-18 review caught. Steps 2–5 are open: `moonPhase(date)` in `format.js`, `weatherGlyph(code, isDay)`, the filled moon paths, and a night case in `stress.js`. The model is checked against the USNO's 2026 and 2027 tables — **99 primary phases, none named wrong, worst error 0.87 d against a 1.85 d bucket half-width**. The task file's original cross-check was wrong and is corrected in place: its 9.85 days is moongiant's page for the **21st**, not the 22nd, so the model looked old when it actually runs ~0.6 d young |
+| T6.13 | **At night the sky is not a sun, and the moon has a shape** | done | 2026-09-21, wave 19. Asked for from the chair with the panel lit: the card drew a **sun** for `Predominantemente limpo` in the dark. `is_day` rides the weather object, and so does the moon — both inside `weather`, so `DataPayload.merge` carries them with no Java change. **The phase comes from the USNO** (`aa.usno.navy.mil/api/moon/phases/date`, no key), asked for as an API rather than as arithmetic; the mean synodic model survives as the fallback and says `source: "mean"` out loud. Measured against two outside sources for 2026-09-22T00:27Z: USNO 10.875 d, moongiant 10.77 d / 83%, this 10.88 d / 84%, fallback 10.16 d / 78%. **The moon ended up permanent** rather than night-only, also from the chair — the phase as a filled path over a ring of the whole disc, plus the lit percentage, on the min/max line where the card had width to spare and so costs it no height. Raised 22 → 28 → 34px across three deploys with the check re-run each time. A clear night draws **stars**, not a moon, because drawing it twice would be the card saying one thing in two sizes. Two window constants were wrong first: six phases from 45 days back spans 44, so the window could end before today and every panel would have run on the fallback looking exactly as if it had not |
+| T6.14 | **The jump, and the loop at night** | done | 2026-09-21, wave 19. Two complaints from the chair, neither a bug: the panel doing what it was written to do, decided for a panel this is not. **The "pulada" was the anti-burn-in shift** — measured, not guessed: eleven screenshots 28s apart, the whole panel moving (-8, +2) physical px in one frame, every four minutes. Not the scroll's seam, which was the first guess and was ruled out by logging the pitch on the device for six minutes at a constant `94.00`. The table is now 22 steps over 20 positions with **every step exactly 1px, the wrap included**; the band is 5x4 because a closed tour of a 5x5 grid cannot exist, and it is 22 steps rather than 20 because 20 minutes divides a day and the panel would have stood at the same offset at the same hour for ever. **The night rule went**: `[data-night] body * { animation: none }` stopped the cards at 22:00, the owner took it for a fault, and invariant 3 means the dark room it protected has somebody awake at a machine in it. `check_night.py`'s question 2 was **inverted rather than deleted** — a card that stops at night is now a regression. The value pulse fires at night as a side effect, which the old rule had suppressed entirely |
+| T6.15 | **The chance of rain, beside the city** | done | 2026-09-22, wave 19. Asked for from the chair with the moon already on the card: a percentage beside the city, right-aligned into a column with the moon's, **no word, with a rain icon**. The data exists but not where you would look: `current` has `precipitation`, `rain` and `showers` — millimetres already fallen — and **no forecast at all**; the probability is a `daily` field, checked against the live endpoint. Today's max rather than the current hour, and the two are not close (98% against 31% at 2026-09-22T00:00): the card is already day-scoped and a glance must not change the scale of its numbers between lines. **The float is the whole of the layout** — a flex row failed the stress pass, because the drop took 60px of the first line and `SAO JOSE DOS CAMPOS` then needed a third, running 201px of content into a 180px box and drawing the range over the AGENDA card at seven burn-in offsets. A float costs only the lines it overlaps, which is also why the icon is 24px and not 26: at 26 it reached into the second line and the same failure came back. Two rounds of feedback from the chair — the icon was too small, and a bare drop "fica parecendo umidade", so it reuses the set's own cloud-and-rain shape. `formatIllum` became `formatPercent`: two formatters with one body is two places for the `--%` decision to drift |
 
 ## Phase 7 — Packaging
 
@@ -175,6 +177,69 @@ and the first line of each file says so.
 |---|---|---|---|
 | T9.1 | **The next meeting, under the clock** | todo | Google Calendar and Microsoft Outlook merged, the soonest event under the clock in the `#shortcuts` strip, between T8.2's two buttons. Blocked behind T8.2 for a layout reason and behind **ADR 0016** for a bigger one: this is the first feature that puts *personal data* on a panel whose server has no authentication, and the refresh tokens it needs are credentials sitting on a desktop PC. OAuth stays on the PC and never reaches the APK — two acceptance lines exist for exactly that. The merge is where the design is: the two providers disagree about all-day events, about time zones and about the word for "declined" |
 | T9.2 | **Spike: can the panel talk to an assistant for nothing?** | todo | A button to ask something out loud and hear an answer, with the whole pipeline on the PC — invariant 1 means the page cannot call anything. Time-boxed, produces `docs/spikes/2026-voice-assistant.md` and a throwaway prototype under `spikes/`, and is allowed to conclude *do not build this*. The unknown is whether offline STT, a small local model and offline TTS fit inside a latency a person will stand at a panel for; Claude and DeepSeek are the paid comparison, not the plan. Also has to answer the awkward ones: `RECORD_AUDIO` would be the app's first dangerous permission, and an unauthenticated LAN endpoint that runs a model and speaks in someone's room is not in ADR 0015's family |
+
+## Resuming after 2026-09-22 (wave 19)
+
+Wave 19 is **T6.13 + T6.14 + T6.15**, on `wave/19-the-moon-the-jump-and-the-loop`. All three came
+from the chair, in Portuguese, with the panel lit — the session ran from the evening of the 21st
+into the small hours of the 22nd.
+
+**Next: T0.6** — the two-agent setup, the oldest row in the table that is not `done` and the one
+still carrying the `start here` marker from the bootstrap. Everything scheduled in phase 6 is
+finished; T6.9 through T6.15 all arrived from the chair instead, so the backlog is where it was.
+Read the `Prereqs:` lines rather than the phase order.
+
+Two rows are blocked on hardware rather than on work and stay that way until it is here:
+**T3.9**'s human half (the SSH round trip needs a second device, the login/lock/logout sequence
+needs a graphical logout) and **T3.8**'s Windows half (no PowerShell on this machine).
+
+### Read the switch before the mechanism
+
+The wave's expensive hour is worth more than its code. A live report — "câmbio e cripto pararam
+de girar" — was chased through four hypotheses, three of them built and installed on the device,
+before the cause turned out to be `data-night=on`: every measurement had been taken after 22:00,
+inside the panel's own night window, where `css/style.css` removed every CSS animation.
+
+That one rule explains every observation, including the two that looked most like engine bugs —
+an inline `animation` failed because `!important` beats it, and the Web Animations API worked
+because the cascade cannot reach a WAAPI animation. **A whole task file and implementation were
+written on the false premise and discarded unmerged.**
+
+The lesson is not "measure more". A great deal was measured, carefully, and most of it was the
+wrong thing. It is that this panel has three documented rules that can stop an animation — the
+blackout, the night profile, `prefers-reduced-motion` — and reading those three costs one probe.
+**Check what is switched off before instrumenting how it works.** The attribute had even been
+seen: a Firefox probe printed `night: true` mid-session and the line was walked past.
+
+### Two decisions were the owner's and were put to them as such
+
+Both of tonight's complaints turned out to be the panel doing what it was written to do, decided
+for a panel this is not:
+
+- **The jump** is the anti-burn-in shift, 4px every 4 minutes, instantaneous by design. The
+  table's comment argued for big steps as "the least relief per move"; that is true of one move
+  and the wrong quantity. The one-pixel path was chosen from the chair with the trade-off stated.
+- **The night stillness** was a promise about a dark bedroom, and invariant 3 means the room has
+  somebody awake at a logged-in machine in it. Removed, with the cost recorded where the rule was.
+
+Neither was changed without asking, and `docs/adr/0008` should be re-read before either is
+revisited — nobody here can measure AMOLED wear, and the burn-in argument is an argument.
+
+### What the next wave inherits that is only true on this desk
+
+- **The fallback and the warm-up are both proven on the device**, which they were not when this
+  section was first drafted. Because the moon fetch is off the request path, the first
+  `/weather` after a restart answers `source: "mean"` and the next answers `usno`: 11.0 days and
+  85% from the USNO's lunation against 10.29 and 79% from the arithmetic, on the same instant.
+  That difference is the reason the API is the plan.
+- **The 34px moon and the 24px rain icon are held up by `check_layout.py` alone.** Between them
+  they spend most of the card's 6.6px of slack, and the stress pass on all three variants is the
+  only thing between them and an overflow in a language nobody looked at. Both were raised from
+  the chair until the check refused.
+- `server/config.json` is still mode 0644 and holds the brapi token. One `chmod 600`; T7.3 wants it.
+- The moon's southern-hemisphere convention is a constant. Every phase mirrors north of the equator.
+- **The pulse has never been seen firing on the device.** It is 280ms and the night rule had
+  suppressed it entirely until tonight, so it has had no chance to be watched.
 
 ## Resuming after 2026-09-21 (wave 18)
 

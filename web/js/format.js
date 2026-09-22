@@ -321,6 +321,22 @@ const LANGUAGES = {
         // `strings` knows that its caller does not.
         tag: 'pt-BR',
         unknown: 'Desconhecido',
+        // Never drawn: the accessible name of the rain drop beside the city.
+        rainChance: 'Chance de chuva',
+        // The eight phases, in the order a lunation visits them. The panel
+        // draws a shape and these are its accessible name -- eight glyphs
+        // cannot tell a waxing crescent from a waning one at 24px, and the
+        // difference is the half somebody can check by looking up.
+        moon: {
+            'new': 'Lua nova',
+            'waxing-crescent': 'Lua crescente',
+            'first-quarter': 'Quarto crescente',
+            'waxing-gibbous': 'Crescente gibosa',
+            'full': 'Lua cheia',
+            'waning-gibbous': 'Minguante gibosa',
+            'last-quarter': 'Quarto minguante',
+            'waning-crescent': 'Lua minguante',
+        },
         // "DEFASADO", not "DESATUALIZADO", and the difference is five
         // characters the badge does not have. It is drawn in the top corner
         // of the weather card, where the card's own title already is: at
@@ -368,6 +384,17 @@ const LANGUAGES = {
     en: {
         tag: 'en',
         unknown: 'Unknown',
+        rainChance: 'Chance of rain',
+        moon: {
+            'new': 'New moon',
+            'waxing-crescent': 'Waxing crescent',
+            'first-quarter': 'First quarter',
+            'waxing-gibbous': 'Waxing gibbous',
+            'full': 'Full moon',
+            'waning-gibbous': 'Waning gibbous',
+            'last-quarter': 'Last quarter',
+            'waning-crescent': 'Waning crescent',
+        },
         stale: 'STALE',
         unplugged: 'unplugged',
         // SCHEDULE, not AGENDA: in English an agenda is the list of items
@@ -476,8 +503,135 @@ const WEATHER_GLYPHS = {
     95: 'storm', 96: 'storm', 99: 'storm',
 };
 
-function weatherGlyph(code) {
-    return WEATHER_GLYPHS[code] || 'unknown';
+// The two codes that are about the *sky* rather than about weather, and so the
+// only two that look different after dark. Rain at night is still rain; a clear
+// sky at night is not a sun, which is the complaint this came from -- the panel
+// drew a sun for `Predominantemente limpo` at 21:20 with the window dark.
+//
+// `clear` at night is stars and not a moon, deliberately. The moon has its own
+// permanent place on the card now, beside the temperature, with its phase and
+// how much of it is lit; drawing it twice would be the card telling you the
+// same thing in two sizes.
+const NIGHT_GLYPHS = {
+    clear: 'stars',
+    cloudy: 'cloudy-night',
+};
+
+// isDay defaults to true, so every existing caller keeps its meaning and a
+// server too old to send the field behaves exactly as it did. Absent means day
+// in the server's normalise too, and for the same reason: a panel drawing a sun
+// at midnight was the bug, and one drawing a moon at noon would be stranger.
+function weatherGlyph(code, isDay) {
+    const glyph = WEATHER_GLYPHS[code] || 'unknown';
+    if (isDay === false && NIGHT_GLYPHS[glyph]) {
+        return NIGHT_GLYPHS[glyph];
+    }
+    return glyph;
+}
+
+// The eight phase names, in the order a lunation visits them. The same list and
+// the same order as `server/providers_usno.PHASE_NAMES`, and a test asserts the
+// two agree: the server decides which name it is and this file decides what the
+// name is called, so a table that drifted would draw a waxing crescent and call
+// it waning.
+const MOON_PHASES = [
+    'new',
+    'waxing-crescent',
+    'first-quarter',
+    'waxing-gibbous',
+    'full',
+    'waning-gibbous',
+    'last-quarter',
+    'waning-crescent',
+];
+
+// Which limb is lit, and it is **not** read off the phase name.
+//
+// The first cut was `index >= 1 && index <= 3`, and the review caught what that
+// does around the two phases that are a name rather than a side. The buckets
+// are an eighth of a lunation wide, so `full` covers about 1.85 days either
+// side of the instant and arrives with `illum` as low as 96%. For the half of
+// that bucket the moon is still waxing, the name-based test said waning, the
+// lit limb flipped, and the four-percent dark sliver was drawn on the wrong
+// edge -- the one error on this card a reader can catch by looking up, which is
+// the entire reason the phase is drawn rather than written.
+//
+// The age is what actually knows: the first half of a lunation is growing and
+// the second is shrinking. `ageDays` and `lunationDays` both come from the
+// server (real values from the USNO's table, or the mean model's), so this is a
+// division rather than a guess.
+//
+// The name is the fallback for a server too old to send them, where being right
+// three-quarters of the month is better than not drawing a moon.
+function isWaxing(moon, index) {
+    const age = moon.ageDays;
+    const lunation = moon.lunationDays;
+    if (Number.isFinite(age) && Number.isFinite(lunation) && lunation > 0) {
+        return ((age / lunation) % 1.0) < 0.5;
+    }
+    return index >= 1 && index <= 3;
+}
+
+// moon: the payload's `weather.moon`, or undefined before the first broadcast
+// and on a server too old to send it. Returns `{phase, illum, waxing, label}`
+// or null when there is nothing worth drawing.
+//
+// `waxing` is derived rather than carried because it is a property of the name:
+// the first half of the cycle is growing and the second is shrinking, and the
+// theme needs it to decide which limb of the moon is lit. The southern
+// hemisphere sees the terminator on the opposite side from the northern one --
+// this panel is in Sao Paulo and draws the southern convention, which is a
+// known simplification for a panel that travels (docs/THEMING.md).
+function moonFields(moon, words) {
+    if (!moon || typeof moon !== 'object') {
+        return null;
+    }
+    const index = MOON_PHASES.indexOf(moon.phase);
+    if (index < 0) {
+        return null;
+    }
+    const illum = Number.isFinite(moon.illum)
+        ? Math.max(0, Math.min(100, Math.round(moon.illum))) : null;
+    const table = (words && words.moon) || {};
+    return {
+        phase: moon.phase,
+        illum: illum,
+        waxing: isWaxing(moon, index),
+        label: table[moon.phase] || moon.phase,
+    };
+}
+
+// weather.precipProb -> a whole percentage in [0, 100], or null.
+//
+// Clamped rather than trusted: the field comes from a provider and a panel that
+// drew `140%` would be wrong in the one way nobody would report, because it
+// looks like a bug in the number rather than in the panel.
+//
+// There is no wording anywhere near this. Asked for from the chair as "sem
+// palavra, com icone de chuva": a drop and a number, and the card stays
+// readable in a language nobody has translated it into.
+function chanceOfRain(weather) {
+    const value = weather && weather.precipProb;
+    if (!Number.isFinite(value)) {
+        return null;
+    }
+    return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+// A whole percentage, or null. Two callers and the same rule for both: the lit
+// fraction of the moon, and the day's chance of rain.
+//
+// One function rather than two identically-shaped ones, which is what the first
+// cut had. The semantics differ and the formatting does not, and a second copy
+// is a second place for the `--%` decision to be made differently.
+//
+// Never `--%`. That pattern is right for a temperature, where the number *is*
+// the statement and a missing one has to be visible as missing; here the icon
+// beside it carries the meaning on its own -- a moon with no number is still a
+// moon at a phase, and a rain drop with no number is still "rain is the thing
+// this card has an opinion about". null asks the theme to draw the icon alone.
+function formatPercent(value) {
+    return Number.isFinite(value) ? `${Math.round(value)}%` : null;
 }
 
 // Above this, the panel says so. Lithium ageing is dominated by heat, and the
@@ -657,10 +811,15 @@ const BURN_IN_AMPLITUDE_PX = 4;
 
 // How long the panel holds one offset.
 //
-// Four minutes: long enough that the step is not something you catch out of
-// the corner of your eye every time you look up, short enough that the ink
-// has moved fifteen times an hour.
-const BURN_IN_STEP_MINUTES = 4;
+// One minute, and the reason is the table below rather than the clock. Four
+// minutes was chosen when a step was up to four pixels and the argument was
+// that you would not catch it every time you looked up. **You do**: it was
+// reported from the chair as "uma pulada", and measured on the device -- the
+// whole panel moving (-8, +2) physical pixels between one screenshot and the
+// next, instantaneously, with the eye pointed straight at it. A step that is
+// one pixel does not need to be rare, so it can be frequent instead, and the
+// ink now moves sixty times an hour rather than fifteen.
+const BURN_IN_STEP_MINUTES = 1;
 
 // The cycle, and every number in it is negative or zero. **That is not a
 // stylistic choice and it must stay true.**
@@ -674,27 +833,78 @@ const BURN_IN_STEP_MINUTES = 4;
 // genuinely scrollable and give a card somewhere to hide a row. Up and left
 // costs nothing: the ground behind the panel is black either way.
 //
-// Seven positions rather than a rectangle's four, and in an order that never
-// takes two short steps in a row: a four-cycle settles into a shape the eye
-// learns, and a slow raster leaves each position adjacent to the last, which
-// is the least relief per move.
+// Twenty-two steps over twenty positions, and **every step moves exactly one
+// pixel -- the one that wraps back to the start included.** That is the whole
+// design, and it replaces a seven-position table whose steps were up to four.
 //
-// Two properties of the table, both asserted in web/test/format.test.js rather
-// than only claimed here -- an earlier version of this comment promised a third
-// that seven entries cannot have, which is what earned the test:
+// The old ordering was deliberate and its stated reason was that "a slow raster
+// leaves each position adjacent to the last, which is the least relief per
+// move". True of one move, and the wrong quantity: what spares an AMOLED is how
+// long any single pixel stays lit across hours, which is coverage over time,
+// and coverage here is better -- twenty positions of the band in twenty-two
+// minutes against seven in twenty-eight. What the big steps bought was a
+// visible jolt four times an hour. It was reported from the chair as "uma
+// pulada" and then measured on the device: the whole panel moving (-8, +2)
+// physical pixels between one screenshot and the next, instantaneous, with the
+// eye pointed straight at it. Changed from the chair with the trade-off put in
+// those terms.
 //
-//   - every value in [-4, 0] appears in each axis, so the whole of the band is
-//     used and not just its corners,
-//   - each axis sums to -14, which is a mean of exactly -2: the middle of the
-//     band, so the panel has no standing offset in either direction.
+// Three things about the shape of the table are arithmetic rather than taste,
+// and each one cost an attempt:
+//
+//   - **The band is 5 wide by 4 tall, not 5 by 5.** A grid graph is bipartite,
+//     a 5x5 grid splits 13 / 12, and a closed tour of an odd number of its
+//     nodes cannot exist -- so the wrap from the last position to the first
+//     would have been a three-pixel jump: the exact thing being removed. An
+//     even side makes the tour closeable. The cost is one pixel of vertical
+//     relief, which still clears an antialiased edge of one or two pixels.
+//   - **Twenty-two steps, not twenty.** A closed tour of the 5x4 band is twenty
+//     positions long, and at a minute each that is a twenty-minute cycle --
+//     which divides 1440, so the panel would stand at the same offset at the
+//     same time every day and etch the same pattern night after night. That is
+//     the property `offsetFor does not put the panel in the same place at the
+//     same time tomorrow` has always asserted, and twenty would have broken it
+//     silently. 1440 % 22 is 10, so the phase walks.
+//   - **The two extra steps are a one-pixel detour**, not a jump: the tour
+//     bounces between (-4, 0) and (-3, 0) once. Those two positions are
+//     therefore held twice per cycle and the other eighteen once.
+//
+// Four properties, all asserted in web/test/format.test.js rather than claimed
+// here -- an earlier version of this comment promised something seven entries
+// could not have, which is what earned the tests:
+//
+//   - consecutive positions differ by exactly one pixel, the wrap included,
+//   - all twenty positions of the 5x4 band appear,
+//   - the cycle length does not divide a day,
+//   - each axis's mean is within a fifth of a pixel of the middle of its band
+//     (-2 in x, -1.5 in y), so the panel has no standing offset worth the name.
+//     Not exactly the midpoint: the detour above visits two positions twice,
+//     and a table that hit the midpoints exactly needed a cycle of 26 whose
+//     dwell was three times longer on some positions than others. An eighth of
+//     a pixel of bias is cheaper than that.
 const BURN_IN_OFFSETS = [
     { x: 0, y: 0 },
-    { x: -3, y: -1 },
-    { x: -1, y: -4 },
-    { x: -4, y: -3 },
-    { x: -2, y: -2 },
-    { x: 0, y: -4 },
+    { x: -1, y: 0 },
+    { x: -2, y: 0 },
+    { x: -3, y: 0 },
     { x: -4, y: 0 },
+    { x: -3, y: 0 },
+    { x: -4, y: 0 },
+    { x: -4, y: -1 },
+    { x: -3, y: -1 },
+    { x: -2, y: -1 },
+    { x: -1, y: -1 },
+    { x: -1, y: -2 },
+    { x: -2, y: -2 },
+    { x: -3, y: -2 },
+    { x: -4, y: -2 },
+    { x: -4, y: -3 },
+    { x: -3, y: -3 },
+    { x: -2, y: -3 },
+    { x: -1, y: -3 },
+    { x: 0, y: -3 },
+    { x: 0, y: -2 },
+    { x: 0, y: -1 },
 ];
 
 // now: Date. Returns {x, y} in CSS px, both <= 0.
@@ -721,10 +931,19 @@ function offsetFor(now) {
         return { x: 0, y: 0 };
     }
     // Counted from the epoch and not from midnight, and the difference is the
-    // whole reason this is not a rota. A day is 360 steps against a cycle of
-    // seven; 360 mod 7 is 3, so the phase advances three positions a night and
-    // the panel is not where it was at this time yesterday until the seventh
-    // day. Counting from midnight was the first cut and it fails the thing the
+    // whole reason this is not a rota. A day is 1440 one-minute steps against a
+    // cycle of twenty-two, and 1440 mod 22 is 10, so the phase advances ten
+    // steps a night and the cycle index is somewhere new for eleven days before
+    // it comes back round.
+    //
+    // The *index*, not the offset. Two positions in the table are visited
+    // twice -- the one-pixel detour above -- so for four of the twenty-two
+    // phases the offset after two days is genuinely the same one. The review
+    // caught that: the test asserting otherwise passed in America/Sao_Paulo
+    // and failed in Europe/Lisbon, because which index a fixed local hour
+    // lands on depends on the machine's timezone.
+    //
+    // Counting from midnight was the first cut and it fails the thing the
     // task file asks for in one sentence: the PC is on for roughly the same
     // hours every day, so every offset would land under the same glyphs at the
     // same hour, for ever -- a cycle that has itself become a pattern, which is
@@ -750,7 +969,7 @@ function offsetFor(now) {
 //
 // It exists for `e2e/layout/check_layout.py`. Without it that harness measures
 // the panel at whichever offset the wall clock happened to land on, which
-// means the worst case is measured one run in seven and a layout that only
+// means the worst case is measured one run in twenty-two and a layout that only
 // fails at (-4,-3) is a check that fails on a Tuesday. With it the harness
 // drives the panel through every position and measures each -- and a shift
 // that pushed a card off the edge would be a certainty rather than a chance.
@@ -774,6 +993,7 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         formatPrice, formatRate, formatPair, formatTemp, formatChange, changeClass,
         weatherLabel, weatherGlyph, formatRange,
+        moonFields, formatPercent, chanceOfRain, MOON_PHASES,
         strings, LANGUAGES, FALLBACK_LANGUAGE,
         isNight,
         offsetFor, burnInSchedule,

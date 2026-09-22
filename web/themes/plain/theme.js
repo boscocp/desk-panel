@@ -198,6 +198,30 @@
         const cond = el('div', null, 'w-cond');
         cond.textContent = words.weather[weather.code] || words.unknown;
         els.weather.append(city, temp, range, cond);
+        // The chance of rain as a sentence (T6.15). The neon theme draws a
+        // drop and a number and was asked for without a word; this theme has
+        // no pictures on purpose, so here the word is the whole of it -- which
+        // is why `rainChance` is in format.js as wording rather than only as an
+        // accessible label.
+        const chance = chanceOfRain(weather);
+        if (chance !== null) {
+            const rain = el('div', null, 'w-chance');
+            rain.textContent = `${words.rainChance}: ${formatPercent(chance)}`;
+            els.weather.appendChild(rain);
+        }
+        // The moon as a sentence, because this theme draws no pictures on
+        // purpose (T6.13). The neon theme spends a filled path on the phase
+        // and puts the name in the glyph's accessible label; here the name
+        // *is* the panel, so it is written out with the percentage beside it.
+        // A theme is free to answer the data however it likes, and "in words"
+        // is an answer.
+        const moon = moonFields(weather.moon, words);
+        if (moon) {
+            const line = el('div', null, 'w-moon');
+            const pct = formatPercent(moon.illum);
+            line.textContent = pct ? `${moon.label}, ${pct}` : moon.label;
+            els.weather.appendChild(line);
+        }
     }
 
     function renderBattery(battery) {

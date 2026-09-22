@@ -63,7 +63,22 @@
         { symbol: 'SHIBAINU-VERYLONGNAME', price: 0.00081, changePct: -4.5 },
     ];
 
-    const BASE_WEATHER = { tempC: 23, minC: 18, maxC: 27, code: 2, city: 'Sao Paulo' };
+    // isDay and moon are what the server sends since T6.13. They are in the
+    // served payload rather than only in a stress fixture because the moon is
+    // *permanent* on the card: a check that never saw it would be measuring a
+    // panel the device does not have.
+    //
+    // 84% waxing gibbous is the real answer for 2026-09-22T00:27Z, derived
+    // from the USNO's own table -- the evening the task was asked for.
+    const BASE_WEATHER = {
+        tempC: 23, minC: 18, maxC: 27, code: 2, city: 'Sao Paulo',
+        isDay: true,
+        // The day's chance of rain (T6.15), as a daily max like the
+        // temperatures beside it. 98 is what the live endpoint answered for
+        // Sao Paulo on 2026-09-22.
+        precipProb: 98,
+        moon: { phase: 'waxing-gibbous', illum: 84, source: 'usno' },
+    };
     const BASE_BATTERY = { level: 87, tempC: 31, charging: true };
     const NIGHT = { start: '22:00', end: '07:00' };
 

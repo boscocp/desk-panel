@@ -112,56 +112,52 @@ body {
  * somewhere to hide a row.
  *
  * No `will-change`. It would ask for a compositor layer and hold it for the
- * life of the panel, for a property that changes once every four minutes.
+ * life of the panel, for a property that changes once a minute.
  *
  * T6.6 faced the same choice on the scroll's transform and answered it the
  * other way, and the difference is the reason: it declares `will-change` but
  * only under `[data-scroll]`, so the layer is held by a card that is actually
  * moving and released when it stops. There is no equivalent here -- every
  * child of the body carries this rule, all of the time -- so the whole panel
- * would sit on held layers for four minutes of stillness at a stretch.
+ * would sit on held layers for a minute of stillness at a stretch.
  */
 body > * {
     transform: translate(var(--burn-in-x, 0px), var(--burn-in-y, 0px));
 }
 
-/* --- The night profile: nothing moves in a dark room (T6.4) ---------------
+/* --- The night profile: dimmer, and still moving (T6.4, then T6.14) -------
  *
  * Set by js/app.js through host.night() whenever the device's own clock is
  * inside the window server/config.toml describes. The attribute means "the
- * panel is running its night profile"; this file owns one half of what that
- * costs and the live theme owns the other.
+ * panel is running its night profile"; the live theme owns what that looks
+ * like, and core no longer takes anything away from it.
  *
- * This half is core's for the reason the two rules above it are: it is a
- * promise about the room the panel is in rather than a matter of taste, and a
- * theme that forgot it would look perfectly fine in a screenshot while walking
- * a card across a dark bedroom all night. Peripheral vision is more sensitive
- * to motion than to detail and more sensitive still in the dark, so at 03:00 a
- * card giving up its hidden rows is the one thing on this panel that can
- * actually wake somebody -- and the panel at that hour is a clock first.
+ * **There used to be a rule here and it was removed on purpose.** It was:
  *
- * `animation: none`, not `animation-play-state: paused`, and the difference
- * from the blackout rule above is the whole reason this is a second rule
- * rather than another selector on that one:
+ *     :root[data-night] body * { animation: none !important; }
  *
- *   - The panel is *visible* here. A paused animation holds whatever frame it
- *     was on, so T6.2's value pulse -- 280ms of colour, fired the moment a
- *     price changes -- would be frozen mid-flash and leave one number sitting
- *     at --accent-hi until morning. Under the blackout nobody can see that;
- *     here it is the brightest thing on a dimmed panel.
- *   - `none` also returns the scroller to the top of its card, which is the
- *     readable position to spend a night in rather than whatever row the
- *     animation happened to be halfway through.
+ * and its argument was a promise about the room -- peripheral vision is more
+ * sensitive to motion in the dark, so a card giving up its hidden rows at
+ * 03:00 is the one thing on this panel that can wake somebody.
  *
- * The two rules never apply at once. js/app.js only sets the night attribute
- * while the panel is visible, so a card blacked out at night is paused and
- * comes back where it was, and is not reset by this.
+ * What that argument did not weigh is invariant 3. This panel is lit *only*
+ * while the PC is on and logged in; when the PC goes away the screen sleeps.
+ * So the dark room the rule was protecting is a room whose occupant is sitting
+ * at a logged-in machine -- awake, at the desk, looking at the thing. The rule
+ * was answering a question about a bedside panel, and this is not one.
  *
- * A theme owes this rule nothing except not overriding `animation` on
- * something inside a panel at night (docs/THEMING.md).
+ * Removed from the chair, with that stated: the owner watched the cards stop at
+ * 22:00, reported it as a fault, and asked for the loop back the whole time.
+ * The cost is real and is theirs to carry -- a PC left logged in overnight now
+ * has a card walking in the dark, and the way back is this comment.
+ *
+ * The blackout rule above is untouched and still pauses everything, which is
+ * the case that was never about taste: offline or over the thermal ceiling,
+ * nobody can see the panel and a moving card is only costing battery.
+ *
+ * One thing the deletion gives back rather than takes: the value pulse now
+ * fires at night. `animation: none` had suppressed it entirely, which is why
+ * this was never `paused` -- a paused pulse freezes mid-flash and leaves one
+ * number sitting at --accent-hi until morning. Removing the rule has neither
+ * problem: the pulse runs its 280ms and ends.
  */
-:root[data-night] body *,
-:root[data-night] body *::before,
-:root[data-night] body *::after {
-    animation: none !important;
-}
