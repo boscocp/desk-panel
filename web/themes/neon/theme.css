@@ -574,11 +574,17 @@ body {
  *   - the two internal margins gave up a pixel each.
  *
  * The card is 182px outside its border and 180 inside, of which 10 is padding
- * and 27 is the title: 143 for the content. The stack comes to 141 -- city 48,
- * glyph and temperature 52, range 36 -- and the whole card measures 168px of
- * content in its 180px box, so **12px is free in the worst case** and 36px in
- * the one the panel actually shows. Both numbers are read off
- * `check_layout.py`, not computed here.
+ * and 27 is the title: **143px for the content**. Measured directly at
+ * 872x392, `.w-body` comes to **136.4px under the stress payload -- 6.6px
+ * free** -- and 112.4px under the one the panel actually shows, which leaves
+ * 30.6.
+ *
+ * Those are measurements of the body, taken over Marionette. `check_layout.py`
+ * reports neither: it answers whether the content fits, not by how much, and
+ * an earlier version of this comment claimed 12px of slack by reading a probe
+ * whose overflowing `scrollHeight` had dropped the card's own 5px bottom
+ * padding. Half the budget, in the optimistic direction, in the comment whose
+ * whole job is to be the budget. The review of T6.12 caught it.
  *
  * That is a tenth of the slack T6.8 had, and it is the right trade only
  * because the check is run: a card that grows is how T2.3 put a section off
@@ -614,6 +620,41 @@ body {
      * something longer than the worst case anyone has written down, and
      * check_layout.py's stress pass is what says where that line is. */
     overflow-wrap: anywhere;
+}
+
+/* The word, for a sky this set has no picture of (the review of T6.12). It
+ * stands where the glyph stands -- same slot, same colour, same job -- and it
+ * is allowed to wrap onto a second line, because 'Predominantemente limpo'
+ * does not fit 80px and two 20px lines are still shorter than the 44px
+ * temperature beside it. So the row keeps its height and the card keeps its
+ * budget. Unmapped codes are real: 56, 57, 66, 67, 77, 85 and 86 are all
+ * open-meteo values, and the server forwards the code it was given. */
+.w-label {
+    /* Basis zero, and it is the same trick -- and the same reason -- as the
+     * sparkline's `flex: 1 1 0` in a price row. The label contributes nothing
+     * to the row's natural width, so it can never be why the temperature has
+     * to give: it takes what is left after the number and wraps inside it.
+     *
+     * The first cut was `flex: 0 1 auto`, and the harness caught what that
+     * does. Both items then shrink proportionally, `.w-temp` carries
+     * `min-width: 0` for the glyph's sake, and `nowrap` means it cannot get
+     * narrower than its text -- so the 44px temperature was squeezed into 91px
+     * and drew 118px of digits out of the card. The number is the one thing on
+     * this card nobody may lose. */
+    flex: 1 1 0;
+    min-width: 0;
+    font-size: 20px;
+    line-height: 1.2;
+    letter-spacing: 0.02em;
+    color: var(--accent-dim);
+    overflow-wrap: anywhere;
+}
+
+/* And the number beside a word does not shrink at all. `.w-temp` is
+ * `flex: 1 1 auto` for the glyph case, where there is nothing else that can
+ * give; beside the label there is. */
+.w-label + .w-temp {
+    flex: 0 0 auto;
 }
 
 /* The glance: a number and a picture, on one line. */
@@ -748,11 +789,15 @@ body {
     align-items: center;
     gap: 5px;
 
-    /* Still wrapping, and now from the left. The widest line the code can
-     * build is a battery icon, `100%`, a thermometer, `42.5` and `na bateria`,
-     * which does not fit 296px of sidebar in one line and must not be allowed
-     * to run out of the column -- a flex row does not wrap unless told to, and
-     * that was worth a finding the last time this div was touched (T6.10).
+    /* Still wrapping, and now from the left -- as a guard rather than as a
+     * described case. The widest line the code can build today, a battery
+     * icon, `100%`, a thermometer, `42.5°C` and `na bateria`, fits the 296px
+     * sidebar on one line with room to spare; it did not fit the 222px column
+     * this line used to live in, which is where the wrapping came from
+     * (T6.10). It stays because a flex row does not wrap unless told to and
+     * the widest line is not fixed -- a third language's word for `unplugged`
+     * is somebody else's choice, and the failure mode without this is text
+     * running out of the column rather than onto a second line.
      *
      * flex-start rather than the flex-end the corner position wanted: this line
      * sits under the date now and shares its left edge. */

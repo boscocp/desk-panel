@@ -626,9 +626,32 @@
         // exactly the case a reader would otherwise miss.
         pulseIfChanged(temp, before);
         const main = el('div', null, 'w-main');
-        const glyph = renderGlyph(weatherGlyph(weather.code),
-                                  words.weather[weather.code] || words.unknown);
-        main.append(...(glyph ? [glyph] : []), temp);
+        // The condition, as a picture when there is one and as the word when
+        // there is not.
+        //
+        // The second half is not a nicety and was found by the review of
+        // T6.12. `weatherGlyph` answers 'unknown' for any WMO code the set
+        // does not draw -- 56, 57, 66, 67, 77, 85 and 86 are all real
+        // open-meteo values, and the server forwards the raw code -- GLYPHS
+        // has no 'unknown' entry, so `renderGlyph` returns null and the label
+        // computed for it went nowhere. The card then said `3°C 1° / 5°` about
+        // freezing rain and nothing at all about the freezing. `.w-cond` used
+        // to carry that word; deleting the line deleted the fallback with it.
+        //
+        // In the glyph's own slot rather than on a line of its own, because a
+        // line of its own is the 33px this card no longer has (see the budget
+        // in theme.css). Two lines of 20px text is 48px against the
+        // temperature's 52, so the row does not grow -- verified in the
+        // harness, with an unmapped code, at 872x392.
+        const label = words.weather[weather.code] || words.unknown;
+        const glyph = renderGlyph(weatherGlyph(weather.code), label);
+        if (glyph) {
+            main.append(glyph, temp);
+        } else {
+            const named = el('div', null, 'w-label');
+            named.textContent = label;
+            main.append(named, temp);
+        }
 
         const range = el('div', null, 'w-range');
         range.textContent = formatRange(weather.minC, weather.maxC);
