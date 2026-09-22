@@ -67,6 +67,38 @@ def extract_sed_escape():
     return match.group(0)
 
 
+def shell_passes_backslash_to_sed():
+    """True if this shell can hand `sed` an `-e` argument containing a backslash.
+
+    Git Bash on Windows cannot. MSYS2 rewrites arguments on the way into a
+    native `sed.exe`, one backslash is eaten, and `sed_escape` then returns
+    every path unescaped -- so all four hostile cases here failed on the
+    Windows host while the shipped expression was provably correct. Read out of
+    the file and run through `sed -f`, which involves no argument passing, it
+    escapes `&`, `|` and `\\` exactly as intended.
+
+    The probe deliberately does **not** go through `sed_escape`. It is a fixed
+    expression with a fixed expected answer, so a genuinely broken escaping
+    still runs and still fails -- which is the whole point of this file, and a
+    skip keyed on "the escaping looks wrong" would have masked precisely the two
+    bugs it was written after.
+
+    `install_user_unit.sh` installs a systemd unit; it never runs on Windows, so
+    nothing is going untested in production. What this avoids is a red suite on
+    the primary host for a reason that is not about the code.
+    """
+    if shutil.which("bash") is None or shutil.which("sed") is None:
+        return False
+    # Bytes handed to sed: s/x/\\y/ -- a replacement of one literal backslash
+    # then `y`, so `x` becomes `\y`. Eat one backslash in transit and the
+    # replacement reads `\y`, which yields a bare `y`.
+    expr = "s/x/" + "\\" * 2 + "y/"
+    proc = subprocess.run(
+        ["bash", "-c", "printf '%s' x | sed -e '" + expr + "'"],
+        capture_output=True, text=True)
+    return proc.returncode == 0 and proc.stdout == "\\y"
+
+
 class UnitRenderingTests(unittest.TestCase):
     """Render the real template through the real escaping."""
 
@@ -74,6 +106,11 @@ class UnitRenderingTests(unittest.TestCase):
     def setUpClass(cls):
         if shutil.which("bash") is None or shutil.which("sed") is None:
             raise unittest.SkipTest("needs bash and sed, which is every Linux desk")
+        if not shell_passes_backslash_to_sed():
+            raise unittest.SkipTest(
+                "this shell cannot pass a backslash through to sed (Git Bash/MSYS "
+                "rewrites the argument); the escaping is exercised on Linux, where "
+                "the installer runs")
         cls.sed_escape = extract_sed_escape()
         with open(TEMPLATE, encoding="utf-8") as handle:
             cls.template = handle.read()
