@@ -220,12 +220,15 @@
     // this with it, and it is core's to set rather than the theme's to
     // remember.
     //
-    // What it means is split, and the split is the point. css/style.css owns
-    // the half that is a promise about the room -- nothing moves at night --
-    // because a theme that forgot it would look perfectly fine in a
-    // screenshot and keep a card walking across a dark bedroom all night. The
-    // theme owns the half that is taste: how much glow a dim panel has, which
-    // is a question only a theme can answer because only a theme has any glow
+    // What it means is now the theme's alone, and that is a change: core used
+    // to own a half of it -- `animation: none` on everything, so nothing moved
+    // at night -- and T6.14 removed that rule. The reasoning is in
+    // css/style.css where the rule used to be; the short version is that the
+    // panel is lit only while somebody is logged in at it, so the sleeping
+    // room the rule protected is not the room this panel is in.
+    //
+    // What is left is taste: how much glow a dim panel has, which is a
+    // question only a theme can answer because only a theme has any glow
     // (web/themes/neon/theme.css redefines three custom properties under this
     // attribute; plain has nothing to dim and does nothing).
     function night(on) {

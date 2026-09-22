@@ -8,6 +8,7 @@ const {
     sparklinePath, formatTemp, formatBattery, batteryFields, tempClass,
     BATTERY_WARN_C, BATTERY_HOT_C,
     formatRange, weatherGlyph, strings, LANGUAGES, FALLBACK_LANGUAGE,
+    moonFields, formatPercent, chanceOfRain, MOON_PHASES,
     overflowsBy, scrollPlan, worthScrolling,
     SCROLL_SECONDS_PER_ROW, SCROLL_MIN_TRAVEL_PX, SCROLL_MIN_HIDDEN_ROWS,
     offsetFor, burnInSchedule,
@@ -636,7 +637,7 @@ function at(hours, minutes, seconds = 0) {
 //
 // Steps are counted from the epoch, so a step boundary is a multiple of the
 // step length in UTC -- and local midnight is only one of those in a zone
-// whose offset happens to divide by four minutes. Anchoring a "holds for the
+// whose offset happens to divide by the step. Anchoring a "holds for the
 // whole step" loop to a wall-clock hour therefore passes in UTC and in -03 and
 // fails in +05:30, where midnight lands two minutes into a step. It did:
 // `TZ=Asia/Kolkata node --test` was 63 of 64 before this.
@@ -647,7 +648,7 @@ function stepBoundary(extraSteps = 0) {
 }
 
 test('offsetFor holds one position for the whole of a step', () => {
-    // Four minutes on one offset is the promise; a shift that changed with the
+    // One minute on one offset is the promise; a shift that changed with the
     // minute would be a panel twitching six times an hour more than it needs
     // to, and one that changed with the second would be an animation.
     const start = stepBoundary();
@@ -667,43 +668,100 @@ test('offsetFor moves to a different position at the next step', () => {
     assert.notDeepEqual(offsetFor(at(0, BURN_IN_STEP_MINUTES)), offsetFor(at(0, 0)));
 });
 
-test('the cycle has no resting bias, and uses the whole of its amplitude', () => {
-    // Both halves of this were a comment beside BURN_IN_OFFSETS and neither was
-    // true: seven entries cannot use five values once each, and the y column
-    // summed to -13 rather than -14, so the ink spent slightly longer in the
-    // lower half of the band than the table claimed. A property worth stating
-    // is a property worth asserting -- it is the fourth time in this repo that
-    // a claim with no check behind it has turned out to be wrong.
+test('every step in the cycle moves exactly one pixel, the wrap included', () => {
+    // The headline property of T6.14 and the reason the table was replaced. A
+    // four-pixel step is visible: it was reported from the chair as "uma
+    // pulada" and then measured on the device, the whole panel moving (-8, +2)
+    // physical pixels between two screenshots.
+    //
+    // The wrap is the half that is easy to lose. A path whose twenty positions
+    // are each one pixel from the last is easy to write; getting the last
+    // position back to the first in one pixel is what forces the band to have
+    // an even side, because a closed tour of an odd number of nodes on a grid
+    // cannot exist. A version of this table without the wrap step checked would
+    // have jolted once per cycle instead of four times an hour, which is
+    // exactly the kind of "mostly fixed" this assertion exists to refuse.
+    const n = BURN_IN_OFFSETS.length;
+    for (let i = 0; i < n; i += 1) {
+        const a = BURN_IN_OFFSETS[i];
+        const b = BURN_IN_OFFSETS[(i + 1) % n];
+        const distance = Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+        assert.equal(distance, 1,
+                     `step ${i} -> ${(i + 1) % n} moves ${distance}px, `
+                     + `from (${a.x}, ${a.y}) to (${b.x}, ${b.y})`);
+    }
+});
+
+test('the cycle has no resting bias, and uses the whole of each band', () => {
+    // Both halves of this were once a comment beside BURN_IN_OFFSETS and
+    // neither was true: seven entries cannot use five values once each, and the
+    // y column summed to -13 rather than -14. A property worth stating is a
+    // property worth asserting.
+    //
+    // The bands are no longer the same size in both axes -- 5 wide by 4 tall,
+    // for the reason the table's comment gives -- so each axis's band is taken
+    // from the table rather than from BURN_IN_AMPLITUDE_PX, and the amplitude
+    // is asserted separately below as the bound it actually is.
     for (const axis of ['x', 'y']) {
         const values = BURN_IN_OFFSETS.map((o) => o[axis]);
-        const sum = values.reduce((a, b) => a + b, 0);
-        // The mean sits exactly at the middle of [-amplitude, 0], so the panel
-        // has no standing offset in either direction.
-        assert.equal(sum * 2, -BURN_IN_AMPLITUDE_PX * BURN_IN_OFFSETS.length,
-                     `the ${axis} column is not centred in the band`);
+        const low = Math.min(...values);
+        const mean = values.reduce((a, b) => a + b, 0) / values.length;
+        // Within a fifth of a pixel of the middle of the band, not exactly on
+        // it: the cycle's one-pixel detour visits two positions twice. A table
+        // that hit the midpoints exactly needed 26 steps and a dwell three
+        // times longer on some positions than others, which is worse for the
+        // thing the shift is for.
+        assert.ok(Math.abs(mean - low / 2) <= 0.2,
+                  `the ${axis} column sits at ${mean}, not near the band's `
+                  + `midpoint of ${low / 2}`);
         // And every position in the band is visited by something in the cycle.
-        for (let v = 0; v >= -BURN_IN_AMPLITUDE_PX; v -= 1) {
+        for (let v = 0; v >= low; v -= 1) {
             assert.ok(values.includes(v), `no offset has ${axis} = ${v}`);
         }
+        assert.ok(low >= -BURN_IN_AMPLITUDE_PX,
+                  `the ${axis} band reaches ${low}, outside the amplitude`);
     }
-    // Distinct, which is what makes it seven positions rather than seven visits
-    // to fewer.
+});
+
+test('the cycle visits twenty distinct positions in twenty-two steps', () => {
+    // Not all distinct any more, and the difference is deliberate rather than
+    // sloppy: a closed one-pixel tour of the band is twenty steps long, twenty
+    // minutes divides a day, and the panel would then stand at the same offset
+    // at the same time every day -- which is the mitigation turning into a
+    // rota. The two extra steps are a one-pixel detour, so the cycle length
+    // stops dividing 1440 without any step growing.
     const keys = new Set(BURN_IN_OFFSETS.map((o) => o.x + ',' + o.y));
-    assert.equal(keys.size, BURN_IN_OFFSETS.length);
+    assert.equal(keys.size, 20, 'the table should cover the whole 5x4 band');
+    assert.equal(BURN_IN_OFFSETS.length, 22);
+    // The duplicates are the detour and nothing else: exactly two positions
+    // appear twice, and they are one pixel apart.
+    const counts = new Map();
+    for (const o of BURN_IN_OFFSETS) {
+        const k = o.x + ',' + o.y;
+        counts.set(k, (counts.get(k) || 0) + 1);
+    }
+    const twice = [...counts.entries()].filter(([, c]) => c === 2).map(([k]) => k);
+    assert.equal(twice.length, 2, `positions visited twice: ${twice.join(' ')}`);
+    assert.ok([...counts.values()].every((c) => c <= 2),
+              'no position may be visited more than twice');
+    const [a, b] = twice.map((k) => k.split(',').map(Number));
+    assert.equal(Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]), 1,
+                 'the two repeated positions are not a one-pixel detour');
 });
 
 test('offsetFor repeats after a full cycle and not before', () => {
     const cycle = BURN_IN_OFFSETS.length * BURN_IN_STEP_MINUTES;
     const start = offsetFor(at(0, 0));
     assert.deepEqual(offsetFor(at(0, cycle)), start);
-    // Every position in between is a different one, which is what makes the
-    // cycle seven positions rather than seven visits to fewer.
+    // And the whole band is walked on the way round: twenty distinct positions
+    // out of twenty-two steps, the two extra being the one-pixel detour that
+    // keeps the cycle length from dividing a day.
     const seen = new Set();
     for (let m = 0; m < cycle; m += BURN_IN_STEP_MINUTES) {
         const o = offsetFor(at(0, m));
         seen.add(o.x + ',' + o.y);
     }
-    assert.equal(seen.size, BURN_IN_OFFSETS.length);
+    assert.equal(seen.size, 20);
 });
 
 test('offsetFor never pushes the panel down or right', () => {
@@ -729,20 +787,39 @@ test('offsetFor does not put the panel in the same place at the same time tomorr
     // every day, so a count that restarted at midnight would put every offset
     // under the same glyphs at the same hour for the life of the panel -- a
     // rota, not a mitigation. Counting from the epoch instead, a day is 360
-    // steps against a cycle of seven and 360 mod 7 is 3, so the phase advances
+    // minutes against a cycle of twenty-two, so the phase advances ten
     // three positions a night.
     //
     // This is the assertion that failed the first implementation, which did
-    // index off minutes-of-day and passed every other test here.
+    // index off minutes-of-day and passed every other test here. It failed the
+    // one-pixel table's first draft too, for a different reason: a closed tour
+    // of the band is twenty steps, a step is a minute, and 1440 is twenty times
+    // seventy-two. The detour that makes the cycle twenty-two exists for this
+    // line.
     const cycle = BURN_IN_OFFSETS.length * BURN_IN_STEP_MINUTES;
     assert.notEqual((24 * 60) % cycle, 0);
+
+    // How many days until the phase comes back is arithmetic rather than a
+    // number to hardcode: a day advances the cycle by `(24 * 60) % cycle`
+    // steps, so the phase returns after cycle / gcd(advance, cycle) days. For
+    // twenty-two one-minute steps that is eleven, where the old table's seven
+    // twenty-eight-minute steps gave seven. Asserted as the computed value so
+    // that editing the table cannot quietly turn it into one.
+    const gcd = (a, b) => (b === 0 ? a : gcd(b, a % b));
+    const advance = (24 * 60) % cycle;
+    const days = cycle / gcd(advance, cycle);
+    assert.ok(days > 1, 'the panel stands in the same place every day');
     const today = at(9, 0);
-    for (let day = 1; day < BURN_IN_OFFSETS.length; day += 1) {
+    for (let day = 1; day < days; day += 1) {
         const later = new Date(today.getTime() + day * 24 * 60 * 60 * 1000);
         assert.notDeepEqual(offsetFor(later), offsetFor(today),
                             `the panel is back where it started after ${day} day(s)`);
     }
-    // And it does come back, on the seventh -- this is a cycle and not a drift.
+    const returns = new Date(today.getTime() + days * 24 * 60 * 60 * 1000);
+    assert.deepEqual(offsetFor(returns), offsetFor(today),
+                     `the phase should return after ${days} days`);
+    // And it does come back, on the eleventh -- a cycle and not a drift. The
+    // number is computed above rather than written here for the same reason.
     const week = new Date(today.getTime()
                           + BURN_IN_OFFSETS.length * 24 * 60 * 60 * 1000);
     assert.deepEqual(offsetFor(week), offsetFor(today));
@@ -793,4 +870,166 @@ test('burnInSchedule hands back copies of the table', () => {
     const was = burnInSchedule().offsets[0].x;
     burnInSchedule().offsets[0].x = 99;
     assert.equal(burnInSchedule().offsets[0].x, was);
+});
+
+// --- The moon and the night sky (T6.13) -------------------------------------
+//
+// The panel drew a **sun** for `Predominantemente limpo` at 21:20 with the
+// window dark, which is where all of this came from. Two separate answers came
+// out of it: the sky's glyph stops being a sun after dark, and the moon gets a
+// permanent place on the card with its phase and how much of it is lit.
+
+test('weatherGlyph only changes for the two codes that are about the sky', () => {
+    // Rain at night is still rain, and this is the assertion that says so. The
+    // temptation with a day/night flag is to give every code a second glyph;
+    // the panel has seven pictures and six of them mean the same thing at both
+    // hours.
+    assert.equal(weatherGlyph(1, true), 'clear');
+    assert.equal(weatherGlyph(1, false), 'stars');
+    assert.equal(weatherGlyph(2, true), 'cloudy');
+    assert.equal(weatherGlyph(2, false), 'cloudy-night');
+    for (const code of [45, 63, 73, 99]) {
+        assert.equal(weatherGlyph(code, false), weatherGlyph(code, true),
+                     `code ${code} should look the same at both hours`);
+    }
+});
+
+test('weatherGlyph treats an absent isDay as day', () => {
+    // A server too old to send the field, or a body cached from before it
+    // existed, has to behave exactly as it did. Absent means day in the
+    // server's normalise too, and for the same reason: a sun at midnight was
+    // the bug, and a moon at noon would be stranger.
+    assert.equal(weatherGlyph(1), 'clear');
+    assert.equal(weatherGlyph(1, undefined), 'clear');
+    assert.equal(weatherGlyph(1, null), 'clear');
+    // Only an explicit false is night. `0` is not: the server sends a real
+    // boolean and anything else reaching here is a bug worth not hiding.
+    assert.equal(weatherGlyph(1, 0), 'clear');
+    assert.equal(weatherGlyph(1, false), 'stars');
+});
+
+test('moonFields derives waxing from the phase name, not from a flag', () => {
+    const words = strings('pt-BR');
+    const waxing = ['waxing-crescent', 'first-quarter', 'waxing-gibbous'];
+    const waning = ['waning-gibbous', 'last-quarter', 'waning-crescent'];
+    for (const phase of waxing) {
+        assert.equal(moonFields({ phase, illum: 40 }, words).waxing, true, phase);
+    }
+    for (const phase of waning) {
+        assert.equal(moonFields({ phase, illum: 40 }, words).waxing, false, phase);
+    }
+    // new and full have no lit limb to put on a side, so the flag is not
+    // meaningful for either -- it must still be a boolean rather than throw.
+    for (const phase of ['new', 'full']) {
+        assert.equal(typeof moonFields({ phase, illum: 0 }, words).waxing,
+                     'boolean', phase);
+    }
+});
+
+test('moonFields refuses a phase it does not know', () => {
+    // The server decides the name and this file decides what the name is
+    // called, so a table that drifted would draw the wrong moon. null is what
+    // makes the theme draw nothing instead of a shape with no meaning.
+    const words = strings('pt-BR');
+    assert.equal(moonFields({ phase: 'gibbous', illum: 50 }, words), null);
+    assert.equal(moonFields({ illum: 50 }, words), null);
+    assert.equal(moonFields(undefined, words), null);
+    assert.equal(moonFields(null, words), null);
+    assert.equal(moonFields('full', words), null);
+});
+
+test('moonFields clamps the illumination and survives it missing', () => {
+    const words = strings('pt-BR');
+    assert.equal(moonFields({ phase: 'full', illum: 140 }, words).illum, 100);
+    assert.equal(moonFields({ phase: 'new', illum: -3 }, words).illum, 0);
+    assert.equal(moonFields({ phase: 'full', illum: 83.6 }, words).illum, 84);
+    // Missing is null and not zero. A moon with no percentage is still a moon
+    // and the shape still says which phase it is; `0%` would be a claim.
+    assert.equal(moonFields({ phase: 'full' }, words).illum, null);
+    assert.equal(moonFields({ phase: 'full', illum: 'lots' }, words).illum, null);
+});
+
+test('formatPercent writes a whole percentage or nothing at all', () => {
+    assert.equal(formatPercent(84), '84%');
+    assert.equal(formatPercent(0), '0%');
+    assert.equal(formatPercent(100), '100%');
+    assert.equal(formatPercent(83.6), '84%');
+    // Never `--%`: the dash pattern is right for a temperature, where the
+    // number is the whole point, and wrong here where the shape carries it.
+    assert.equal(formatPercent(null), null);
+    assert.equal(formatPercent(undefined), null);
+    assert.equal(formatPercent(NaN), null);
+});
+
+test('every language names all eight phases', () => {
+    // The same rule the weather tables live under: a half-translated table
+    // fails here rather than on a panel. The phase name is the glyph's
+    // accessible label, and eight shapes at 22px cannot tell a waxing crescent
+    // from a waning one -- which is the half somebody can check by looking up.
+    for (const [tag, table] of Object.entries(LANGUAGES)) {
+        assert.ok(table.moon, `${tag} has no moon table`);
+        for (const phase of MOON_PHASES) {
+            assert.equal(typeof table.moon[phase], 'string',
+                         `${tag} does not name ${phase}`);
+            assert.ok(table.moon[phase].length > 0,
+                      `${tag} names ${phase} as an empty string`);
+        }
+        assert.equal(Object.keys(table.moon).length, MOON_PHASES.length,
+                     `${tag} has a moon key that is not a phase`);
+    }
+});
+
+test('the phase order is the one a lunation actually visits', () => {
+    // Asserted rather than described because the server has the same list and
+    // the two must not drift: server/providers_usno.PHASE_NAMES is this array,
+    // in this order, and server/tests/test_providers_usno.py walks a real
+    // lunation to prove the server's copy. Waxing before full, waning after.
+    assert.deepEqual(MOON_PHASES, [
+        'new', 'waxing-crescent', 'first-quarter', 'waxing-gibbous',
+        'full', 'waning-gibbous', 'last-quarter', 'waning-crescent',
+    ]);
+    assert.equal(MOON_PHASES.indexOf('full'), 4);
+    assert.ok(MOON_PHASES.indexOf('waxing-gibbous') < MOON_PHASES.indexOf('full'));
+    assert.ok(MOON_PHASES.indexOf('waning-gibbous') > MOON_PHASES.indexOf('full'));
+});
+
+// --- The chance of rain (T6.15) ---------------------------------------------
+
+test('chanceOfRain clamps, rounds, and refuses anything that is not a number', () => {
+    assert.equal(chanceOfRain({ precipProb: 98 }), 98);
+    assert.equal(chanceOfRain({ precipProb: 0 }), 0);
+    assert.equal(chanceOfRain({ precipProb: 7.4 }), 7);
+    // Clamped rather than trusted. A panel drawing `140%` would be wrong in
+    // the one way nobody reports, because it reads as a bad number rather
+    // than as a bad panel.
+    assert.equal(chanceOfRain({ precipProb: 140 }), 100);
+    assert.equal(chanceOfRain({ precipProb: -5 }), 0);
+    // Absent is null and not zero. `0%` is a forecast; a server too old to
+    // send the field has not made one.
+    assert.equal(chanceOfRain({}), null);
+    assert.equal(chanceOfRain({ precipProb: null }), null);
+    assert.equal(chanceOfRain({ precipProb: 'lots' }), null);
+    assert.equal(chanceOfRain(undefined), null);
+    assert.equal(chanceOfRain(null), null);
+});
+
+test('formatPercent serves the moon and the rain with one rule', () => {
+    // One function for both, which is what the second caller made worth
+    // asserting: the two numbers sit in a column on the card and must not be
+    // formatted differently.
+    assert.equal(formatPercent(84), '84%');
+    assert.equal(formatPercent(98), '98%');
+    assert.equal(formatPercent(0), '0%');
+    assert.equal(formatPercent(null), null);
+});
+
+test('every language has a word for the chance of rain', () => {
+    // Never drawn by the neon theme -- it is the drop's accessible name there,
+    // because the ask was explicitly "sem palavra" -- and drawn in full by
+    // plain, which has no pictures. So it is wording, and wording is
+    // translated or the plain theme is half-English.
+    for (const [tag, table] of Object.entries(LANGUAGES)) {
+        assert.equal(typeof table.rainChance, 'string', `${tag} has no rainChance`);
+        assert.ok(table.rainChance.length > 0, `${tag} has an empty rainChance`);
+    }
 });

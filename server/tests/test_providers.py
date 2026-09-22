@@ -257,14 +257,50 @@ class OpenMeteoTests(unittest.TestCase):
     def test_a_list_body_normalises_to_empty_rather_than_raising(self):
         weather = providers_openmeteo.normalise([1, 2])
         self.assertIsNone(weather["tempC"])
-        self.assertEqual(set(weather), {"tempC", "minC", "maxC", "code", "city"})
+        self.assertEqual(set(weather), {"tempC", "minC", "maxC", "code", "isDay", "precipProb", "city"})
 
     def test_forecast_fixture_normalises_to_the_contract_shape(self):
         weather = providers_openmeteo.normalise(fixture("openmeteo_forecast.json"),
                                                 city="São Paulo")
-        self.assertEqual(set(weather), {"tempC", "minC", "maxC", "code", "city"})
+        self.assertEqual(set(weather), {"tempC", "minC", "maxC", "code", "isDay", "precipProb", "city"})
         self.assertIsInstance(weather["tempC"], float)
         self.assertIsInstance(weather["code"], int)
+
+    def test_is_day_survives_as_a_bool_and_defaults_to_daylight(self):
+        # The upstream sends 1/0 and the page asks `if (isDay)`, so the type
+        # is the assertion: 0 reaching the page as the number zero is the
+        # same on screen, but `isDay: 0` in a payload somebody is reading at
+        # 3am is not the answer to "is it day", it is the raw field.
+        #
+        # The real values come from the measurement T6.13 is built on:
+        # weather_code 1 with is_day 0, Sao Paulo, 21:15 on 2026-09-21 -- a
+        # clear sky after dark, which the panel was drawing as a sun.
+        night = providers_openmeteo.normalise(
+            {"current": {"time": "2026-09-21T21:15", "temperature_2m": 22.2,
+                         "weather_code": 1, "is_day": 0}})
+        self.assertIs(night["isDay"], False)
+
+        day = providers_openmeteo.normalise(
+            {"current": {"time": "2026-09-21T11:15", "temperature_2m": 22.2,
+                         "weather_code": 1, "is_day": 1}})
+        self.assertIs(day["isDay"], True)
+
+        # Absent is daylight, deliberately: an old server, or a body cached
+        # from before this key existed, then behaves exactly as it did before
+        # T6.13 rather than turning the whole panel nocturnal.
+        self.assertIs(providers_openmeteo.normalise({"current": {}})["isDay"], True)
+
+        # And an explicit null is absent, which the first cut got wrong: it
+        # defaulted only the missing key, so `bool(None)` made the one value
+        # that means "I cannot compute this" the decisive answer for night.
+        # open-meteo sends null for a current field it has no value for, and
+        # the panel would have drawn a moon at noon.
+        self.assertIs(
+            providers_openmeteo.normalise({"current": {"is_day": None}})["isDay"], True)
+
+        # Falsy-but-real still means night. The guard is about None only.
+        self.assertIs(
+            providers_openmeteo.normalise({"current": {"is_day": False}})["isDay"], False)
 
     def test_today_is_matched_by_date_not_taken_from_index_zero(self):
         # The bug this guards is the one T3.4 warns about: without the
@@ -334,3 +370,52 @@ class OpenMeteoTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PrecipitationProbabilityTests(unittest.TestCase):
+    """T6.15: the day's chance of rain, and which day it is."""
+
+    def test_the_probability_comes_from_the_matched_day_not_index_zero(self):
+        # The same trap T3.4 warned about and the same defence. Without the
+        # timezone parameter open-meteo cuts `daily` on UTC days, so after
+        # 21:00 in Sao Paulo index 0 is already tomorrow -- and a chance of
+        # rain taken from the wrong day is a wrong number rather than an
+        # error, which is the worst kind.
+        #
+        # 98 and 92 are real: the live endpoint answered them for Sao Paulo on
+        # 2026-09-22 and 2026-09-23.
+        weather = providers_openmeteo.normalise({
+            "current": {"time": "2026-09-23T00:00", "temperature_2m": 21.2,
+                        "weather_code": 2, "is_day": 0},
+            "daily": {"time": ["2026-09-22", "2026-09-23"],
+                      "temperature_2m_max": [26.0, 27.0],
+                      "temperature_2m_min": [15.0, 16.0],
+                      "precipitation_probability_max": [98, 92]},
+        })
+        self.assertEqual(weather["precipProb"], 92)
+        self.assertEqual(weather["maxC"], 27.0)
+
+    def test_a_missing_probability_is_none_rather_than_zero(self):
+        # An older server, or a provider that dropped the field, must not be
+        # reported as "no chance of rain". Zero is a forecast.
+        weather = providers_openmeteo.normalise({
+            "current": {"time": "2026-09-22T00:00", "weather_code": 2},
+            "daily": {"time": ["2026-09-22"], "temperature_2m_max": [26.0],
+                      "temperature_2m_min": [15.0]},
+        })
+        self.assertIsNone(weather["precipProb"])
+
+    def test_the_request_asks_for_the_daily_field(self):
+        # open-meteo's `current` block has no probability at all -- checked
+        # against the live endpoint, not the docs -- so this has to be in the
+        # daily list or the key never arrives. A grep is the honest assertion:
+        # the URL is built by string concatenation.
+        seen = []
+        providers_openmeteo.fetch_forecast(-23.5, -46.6, "America/Sao_Paulo",
+                                           get=lambda url: seen.append(url))
+        self.assertEqual(len(seen), 1)
+        self.assertIn("precipitation_probability_max", seen[0])
+        self.assertIn("&daily=", seen[0])
+        # And in the daily list rather than the current one.
+        daily = seen[0].split("&daily=")[1].split("&")[0]
+        self.assertIn("precipitation_probability_max", daily)

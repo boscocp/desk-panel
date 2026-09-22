@@ -251,7 +251,7 @@ it left off — you owe that rule only the courtesy of not overriding
 
 ## The burn-in shift is not yours either
 
-The panel moves. Every four minutes `js/host.js` writes a new offset into two custom
+The panel moves. Every minute `js/host.js` writes a new offset into two custom
 properties on `<html>`, and `css/style.css` translates every direct child of `body` by it:
 
 ```css
@@ -333,22 +333,29 @@ Inside the window `server/config.toml` describes — `night_start` and `night_en
 `<html>`. The window wraps midnight by default (22:00 to 07:00), and the predicate behind it
 is `isNight` in `js/format.js`.
 
-Core owns one half and it is not negotiable:
+Core used to own a half of it and no longer does. There was a rule:
 
 ```css
-:root[data-night] body * { animation: none !important; }
+:root[data-night] body * { animation: none !important; }   /* removed in T6.14 */
 ```
 
-Nothing moves at night. Peripheral vision is more sensitive to motion than to detail and more
-sensitive still in the dark, so a card walking through its hidden rows at 03:00 is the one
-thing on this panel that can wake somebody. You owe that rule only the courtesy of not
-overriding `animation` on something inside a panel at night.
+on the argument that peripheral vision is more sensitive to motion in the dark, so a card
+walking through its hidden rows at 03:00 is the one thing here that can wake somebody. It was
+removed from the chair. The panel is lit **only** while the PC is on and logged in (invariant
+3), so the dark room the rule protected has somebody awake at a machine in it — and the owner
+watched the cards stop at 22:00, took it for a fault, and asked for the loop back.
 
-Note that this is `animation: none` where the blackout above is `animation-play-state:
-paused`, and the two never apply together — core only sets `data-night` while the panel is
-visible. The difference matters if you animate anything: at night your animation is *removed*,
-so it restarts from its first frame in the morning, and an element mid-pass goes back to where
-the pass began.
+So at night the panel dims and keeps moving, and `e2e/layout/check_night.py` asserts that
+rather than the reverse. The value pulse also fires at night now, which the old rule had
+suppressed entirely.
+
+**The blackout is the one that still stops everything**, and it is untouched: offline or over
+the thermal ceiling nobody can see the panel, and a moving card is only spending battery.
+
+Only one rule reaches your animations now — the blackout's `animation-play-state: paused` —
+and core only sets `data-night` while the panel is visible, so the two were never stacked
+anyway. You owe the blackout rule the courtesy of not overriding `animation-play-state` on
+something inside a dark panel.
 
 The other half is yours, and it is taste:
 

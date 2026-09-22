@@ -16,12 +16,15 @@ perfectly fine on this desk in the afternoon:
      payload carries two strings and never a boolean, precisely so that the
      panel decides. A page that had let the server decide would pass every
      test that only ever ran in one timezone.
-  2. **nothing moves at night.** This is core's rule, not the theme's, and it
-     is the one with a consequence nobody can photograph: a card walking
-     through its hidden rows at 03:00 is the only thing on this panel that can
-     wake somebody. It is also `animation: none` rather than the blackout's
-     `animation-play-state: paused`, because the panel here is *visible* --
-     a paused pulse is one number frozen at its brightest until morning.
+  2. **the panel keeps moving at night, and that is the assertion.** It used
+     to be the opposite: core removed every animation under the attribute, on
+     the argument that a card walking through its hidden rows at 03:00 is the
+     only thing here that can wake somebody. T6.14 removed that rule from the
+     chair, because the panel is lit only while the PC is on and logged in
+     (invariant 3) -- the dark room it was protecting has somebody awake at a
+     machine in it. The check was inverted rather than deleted: a card that
+     stops at night is now a regression, and an assertion nobody inverts is
+     the one that hides a change.
   3. **the glow drops.** A theme's half, and the only question here that is
      about taste; `neon` halves three custom properties and `plain` has
      nothing to dim.
@@ -206,11 +209,19 @@ def check(m, theme, fails):
         fails.append("a window containing now did not put the panel in its night "
                      "profile: %s-%s" % inside)
 
+    # Inverted by T6.14, and the inversion is the assertion. Core used to
+    # remove every animation under data-night; it does not any more, because
+    # the panel is lit only while somebody is logged in at it (invariant 3) and
+    # the owner asked for the loop to keep running. The check has to say so out
+    # loud rather than simply stop asking: a card that stopped moving at night
+    # would now be a regression, and the shape of this file's history is that
+    # the assertion nobody inverted is the one that hid the change.
     if not scrolls:
         print("    note: %s answers an overflow without motion, so question 2 is not "
               "asked of it" % theme)
-    elif animating() != "none":
-        fails.append("a card kept animating at night: %r" % animating())
+    elif animating() == "none":
+        fails.append("a card stopped animating at night, which T6.14 removed: the "
+                     "night profile dims the panel and no longer freezes it")
 
     night_shadows = shadows()
     if theme == GLOWING_THEME:
@@ -306,7 +317,7 @@ def main():
     for line in fails:
         print("    FAIL %s" % line)
     print("FAIL: the night profile is broken" if fails
-          else "PASS: the panel dims inside its window, stops moving, and only "
+          else "PASS: the panel dims inside its window, keeps moving, and only "
                "while somebody can see it")
     return 1 if fails else 0
 

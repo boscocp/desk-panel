@@ -19,6 +19,7 @@
   "timezone": "America/Sao_Paulo",
   "quotes_interval_s": 600,
   "weather_interval_s": 900,
+  "moon_interval_s": 21600,
   "history_interval_s": 21600,
   "history_days": 30,
   "night_start": "22:00",
