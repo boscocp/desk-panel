@@ -220,8 +220,35 @@ does log the user off, so the logon trigger still has to fire.
 ## Linux
 
 `install_task.ps1` is Windows-only by nature. The Linux carrier is a systemd **user** unit,
-installed by `server/install_user_unit.sh` (T3.9) into `~/.config/systemd/user/`. Three fields
-are the invariant, and none of them is optional:
+rendered from `server/desk-panel.service.in` and installed by `server/install_user_unit.sh`
+(T3.9) into `~/.config/systemd/user/`:
+
+```bash
+sh server/install_user_unit.sh              # install, enable, start
+sh server/install_user_unit.sh --no-start   # install and enable; it starts at the next login
+sh server/install_user_unit.sh --uninstall  # stop, disable, remove
+```
+
+It finds `python3` and the config for you — `server/config.toml`, then `server/config.json`,
+then the same two under `~/.config/desk-panel/` — and writes both as **absolute** paths into the
+unit, because a unit does not start in your shell's working directory. `--config PATH` overrides
+the search, and `--python PATH` the interpreter.
+
+Before it writes anything it refuses three installations that would each produce a server
+answering with nobody at the desk, which is the one thing this design forbids:
+
+- **as root, or under `sudo`.** That installs into root's user manager, where nothing starts it
+  and where your own `systemctl --user` cannot see it.
+- **beside a system-scoped `desk-panel` unit.** That one answers at boot; the user unit would
+  then fail to bind the port for ever, and the panel would look perfect while reporting the
+  wrong thing. Remove the system unit first.
+- **where `graphical-session.target` is not active.** systemd does not start that target; the
+  desktop does. GNOME, KDE and anything launched through
+  [uwsm](https://github.com/Vladimir-csp/uwsm) do. A bare sway or i3 started from a TTY does
+  not, and an enabled unit would sit there and never run — the panel permanently offline, with
+  nothing in any log to say why.
+
+Three fields in the unit are the invariant, and none of them is optional:
 
 ```ini
 [Unit]
@@ -230,7 +257,7 @@ After=graphical-session.target
 
 [Service]
 Type=exec
-ExecStart=/usr/bin/python3 %h/desk-panel/server/server.py
+ExecStart=/usr/bin/python3 -u /home/you/desk-panel/server/server.py --config /home/you/desk-panel/server/config.toml
 
 [Install]
 WantedBy=graphical-session.target
@@ -247,12 +274,6 @@ WantedBy=graphical-session.target
 - **`Type=exec`**, so systemd considers the unit started when the process is actually executing
   rather than merely forked.
 
-Enable it without starting it, and let the next login start it:
-
-```bash
-systemctl --user enable desk-panel.service
-```
-
 Never `systemctl enable` without `--user`, never `sudo systemctl enable`, and never
 `docker compose up` for the server. The toolchain is containerised (ADR 0003) and the reflex is
 close at hand; a container answers with nobody logged in at all.
@@ -261,8 +282,27 @@ Lingering does **not** have to be off. Binding to `graphical-session.target` mak
 hold either way, and the verifier below proves the stronger property directly: the unit is not
 in the transitive closure of `default.target`.
 
-There is no firewall step here. Desktop distros usually ship no inbound filter, and when they
-do it is firewalld *or* ufw *or* nftables — T3.9 detects and instructs rather than configuring.
+### The firewall is detected, not configured
+
+Desktop distros usually ship no inbound filter, and when they do it is firewalld *or* ufw *or*
+nftables. The installer says which of the three is present and what the rule would be; it edits
+nobody's security policy. Two things it cannot do for you:
+
+- **read ufw's state, or nftables' ruleset, without root.** It says so rather than guessing —
+  an installer that reported "no firewall" on a machine that has one would send you looking
+  everywhere except at the thing that is blocking the phone. Run `sudo ufw status` yourself.
+- **know where the phone is.** If the phone sits behind a router's NAT it is on a different
+  subnet from this PC, and a rule scoped to the PC's own subnet will not let it in:
+
+```bash
+sudo ufw allow from <the phone's subnet> to any port 8777 proto tcp
+```
+
+Prove it from the phone's subnet, never from `localhost`:
+
+```bash
+python server/probe.py --host <this-pc-ip> --expect up
+```
 
 ## macOS
 

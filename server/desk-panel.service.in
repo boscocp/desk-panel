@@ -1,0 +1,52 @@
+# The Linux carrier for the login signal (T3.9). A template: install_user_unit.sh
+# substitutes @PYTHON@, @SERVER_PY@ and @CONFIG@ with absolute paths and writes the
+# result to ~/.config/systemd/user/desk-panel.service.
+#
+# Every field below that is not a description is load-bearing. The invariant this
+# unit exists to carry is invariant 2 in the root CLAUDE.md, stated in full in
+# docs/adr/0010-login-signal-is-session-scoped.md: the server answering has to mean
+# a human is logged in at the screen of this machine. A unit of system scope, or a
+# user unit reached from default.target, answers without anybody there -- and the
+# panel is then lit for an empty room, which is the one thing the design forbids.
+
+[Unit]
+Description=desk-panel login signal
+Documentation=file://@REPO@/docs/adr/0010-login-signal-is-session-scoped.md
+
+# The two halves of "as long as the graphical session, and no longer".
+#
+# After= alone orders the start. PartOf= is what propagates the *stop*: without
+# it the unit outlives logout, because logind ships KillUserProcesses=no and the
+# user manager keeps running. A WantedBy-only unit therefore starts with the
+# session and then answers all night with nobody at the desk -- the exact failure
+# this file is written to prevent, and one that looks perfect in `is-active`.
+PartOf=graphical-session.target
+After=graphical-session.target
+
+# A server that cannot start -- a port already taken by a hand-started copy is the
+# usual reason -- gives up after five attempts in a minute instead of retrying
+# every five seconds until the machine is turned off. systemd's own defaults
+# (5 starts in 10s) never trip at RestartSec=5, so the window has to be widened
+# here or the journal fills with a failure nobody is reading.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+# started == executing, rather than == forked. `simple` would report the unit
+# active before the socket is bound, and "it is active" is the only thing anyone
+# checks after an install.
+Type=exec
+ExecStart=@PYTHON@ -u @SERVER_PY@ --config @CONFIG@
+
+# on-failure, not always: a clean exit is the server being told to stop, and
+# restarting it then would fight whoever stopped it.
+Restart=on-failure
+RestartSec=5
+
+[Install]
+# graphical-session.target, **never** default.target. An SSH login reaches
+# default.target, and so does a lingering user manager at boot with nobody logged
+# in at all -- `loginctl enable-linger` is switched on for unrelated reasons all
+# the time (podman, pipewire, user timers). Either one would make the panel say
+# "somebody is at that desk" when nobody is.
+WantedBy=graphical-session.target
