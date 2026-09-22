@@ -641,8 +641,11 @@
         // In the glyph's own slot rather than on a line of its own, because a
         // line of its own is the 33px this card no longer has (see the budget
         // in theme.css). Two lines of 20px text is 48px against the
-        // temperature's 52, so the row does not grow -- verified in the
-        // harness, with an unmapped code, at 872x392.
+        // temperature's 48.4 -- 44px at line-height 1.1, since T6.12 -- so the
+        // row does not grow, verified in the harness with an unmapped code at
+        // 872x392. The margin is 0.4px, not the 4px an earlier draft of this
+        // comment claimed by quoting the old 48px type: nudge either number
+        // and this stops being true, so measure rather than assume.
         const label = words.weather[weather.code] || words.unknown;
         const glyph = renderGlyph(weatherGlyph(weather.code), label);
         if (glyph) {

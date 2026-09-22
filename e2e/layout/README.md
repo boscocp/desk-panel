@@ -127,7 +127,7 @@ and the width is **872 rather than 839** because `MainActivity` sets
 Measured on the device, not derived on paper. Do not round it off; if the cutout mode ever
 changes, this number changes with it and the layout has to be measured again.
 
-## The three passes
+## The four passes
 
 `served` runs the page as `mock.js` feeds it. `stress` then pushes the widest case the panel
 can legitimately be asked to show — the longest weather label in `format.js`, a long city name,
@@ -135,8 +135,23 @@ a negative temperature, a six-figure and a sub-1 crypto price together, a symbol
 than a ticker, a zero change, the STALE badge, a 23:59:59 clock and a pt-BR date as the phone
 renders it.
 
-All three matter. The typical tick is not what breaks a layout, and each fixture says beside
+All four matter. The typical tick is not what breaks a layout, and each fixture says beside
 its values why they are there.
+
+### `unknown`, which measures one card
+
+`unknown.js` sends a WMO code the glyph set has no picture for. That is not a hypothetical:
+56, 57, 66, 67, 77, 85 and 86 are all real open-meteo values — freezing drizzle, freezing rain,
+ice grains, snow showers — and `providers_openmeteo.normalise` forwards whatever code it was
+given. `weatherGlyph` answers `unknown` for every one of them, and the neon theme then draws
+the **word** where the picture would have gone.
+
+So that slot has to hold text, which is a width nothing here had ever measured. It earns its
+pass because the first cut of the fallback let both flex items shrink: the 44px temperature was
+squeezed into 91px and drew 118px of digits out of the card, on a panel in São Paulo, on a cold
+morning, with nothing on screen to say it had happened. The fixture pairs the unmapped code with
+the long city and a negative temperature for the same reason `stress.js` does — the fallback
+word has to fit *beside* the widest number the card can be asked to draw.
 
 ### `overflow`, which is the odd one out
 
