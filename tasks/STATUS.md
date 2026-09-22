@@ -137,6 +137,7 @@ something wider, so its text widths are a conservative estimate rather than the 
 | T6.10 | **The battery corner draws its two labels** | done | 2026-09-21, wave 17. Asked for from the chair. `BAT 87% · 31°C` spent four characters of the widest thing in that corner saying what a picture says at a glance. `batteryFields` splits the line and `formatBattery` composes its string from it, so the two cannot drift. The battery draws its own charge, to the body's **inner** edge — a 1.6-unit stroke sits half outside its path, so a bar drawn to the coordinates vanishes under its own outline above about 80%. `unplugged` stays a word: there is no picture for "this phone is running its own battery down" that a stranger reads the way they read a battery outline. Turning the line into a flex row took its wrapping away and `check_layout.py` caught it at once |
 | T6.11 | **Every word the panel shows, in the panel's own language** | done | 2026-09-21, wave 17. Asked for from the chair, after `Light drizzle`. A table per language in `format.js`; `language` rides `/quotes` beside `theme` and `night`, so a panel in another country is a restart of the server and never a rebuild. The fallback is **pt-BR and not English**, and the device's own locale is deliberately not consulted. `DEFASADO` rather than `DESATUALIZADO`, and the badge from 20px to 17: it shares a strip with the weather card's title and neither word is fixed any more. **It also found two blind spots in `measure.js`** — a `::before` has no DOM node, and the ink walk started at a section's *descendants*, so the clock, the date, the badge and all four card titles were invisible to the overlap check |
 | T6.12 | **The right column becomes two cards, and the device line moves under the date** | done | 2026-09-21, wave 18. Asked for from the chair, three complaints about one card. The condition line went — the glyph beside the temperature was already saying it, and the words stay in `format.js` as the glyph's `aria-label` rather than being deleted. The battery and the handset's temperature left the weather card's foot for a line under the date: two temperatures in one box is a question, not a diagnostic, and the sidebar is the part of the panel that is about the machine. The right-hand track is a nested `1fr 1fr` grid holding WEATHER and a reserved AGENDA card for T9.1 — nested, because #panel's own rows are 1.3fr/1fr/1fr and any pair of them would split that column 58/42. **The card lost half its height and the type paid for it**: the temperature is 44px rather than 48, and the stress payload leaves **6.6px free** where T6.8 had 72 — `.w-body` measures 136.4px in the card's 143px content box, over Marionette. The row first said 12px, from a probe whose overflowing `scrollHeight` had dropped the card's own 5px bottom padding; the review of the wave caught it in `theme.css` and this row carried the optimistic number a commit longer. `measure.js` measures `#agenda` like any other section but lets a `data-reserved` one hold no text, and `agenda` is the first **optional** id in that list: `plain` has no such card and is not failed for it. Two harness faults found on the way — `report()` crashed with a `TypeError` on a section measure.js could not find, i.e. exactly when the panel is most broken; and the README's overlap regression recipe had stopped reproducing anything, because the line it grows out of its column is in the sidebar now |
+| T6.13 | **At night the sky is not a sun, and the moon has a shape** | wip | Asked for from the chair on 2026-09-21 at 21:20, with the panel lit: the weather card drew a **sun** for `Predominantemente limpo`, after dark. `is_day` rides the weather object (`DataPayload.merge` copies it whole, so no Java change) and **step 1 is done and green** — `normalise` answers a real bool, absent *and* explicit `null` both mean daylight, which the wave-18 review caught. Steps 2–5 are open: `moonPhase(date)` in `format.js`, `weatherGlyph(code, isDay)`, the filled moon paths, and a night case in `stress.js`. The model is checked against the USNO's 2026 and 2027 tables — **99 primary phases, none named wrong, worst error 0.87 d against a 1.85 d bucket half-width**. The task file's original cross-check was wrong and is corrected in place: its 9.85 days is moongiant's page for the **21st**, not the 22nd, so the model looked old when it actually runs ~0.6 d young |
 
 ## Phase 7 — Packaging
 
@@ -174,6 +175,59 @@ and the first line of each file says so.
 |---|---|---|---|
 | T9.1 | **The next meeting, under the clock** | todo | Google Calendar and Microsoft Outlook merged, the soonest event under the clock in the `#shortcuts` strip, between T8.2's two buttons. Blocked behind T8.2 for a layout reason and behind **ADR 0016** for a bigger one: this is the first feature that puts *personal data* on a panel whose server has no authentication, and the refresh tokens it needs are credentials sitting on a desktop PC. OAuth stays on the PC and never reaches the APK — two acceptance lines exist for exactly that. The merge is where the design is: the two providers disagree about all-day events, about time zones and about the word for "declined" |
 | T9.2 | **Spike: can the panel talk to an assistant for nothing?** | todo | A button to ask something out loud and hear an answer, with the whole pipeline on the PC — invariant 1 means the page cannot call anything. Time-boxed, produces `docs/spikes/2026-voice-assistant.md` and a throwaway prototype under `spikes/`, and is allowed to conclude *do not build this*. The unknown is whether offline STT, a small local model and offline TTS fit inside a latency a person will stand at a panel for; Claude and DeepSeek are the paid comparison, not the plan. Also has to answer the awkward ones: `RECORD_AUDIO` would be the app's first dangerous permission, and an unauthenticated LAN endpoint that runs a model and speaks in someone's room is not in ADR 0015's family |
+
+## Resuming after 2026-09-21 (wave 18)
+
+Wave 18 is **T6.12 + T3.9**, on `wave/18-two-cards-and-linux-autostart`, PR #23. T6.12 came
+from the chair; T3.9 was the backlog's next row and the last platform missing its carrier for
+invariant 2.
+
+**Next: T6.13**, which is already `wip` — its step 1 is committed and green, and steps 2 to 5
+are open. Read the task file: it was written from the chair on the same evening and its own
+cross-check has been corrected once already.
+
+### The wave was interrupted, and the review did not survive it
+
+The PC locked up after the first review had been run and its fixes applied, but before the
+merge. The session went with it. What was left in the repository was a branch, three commits,
+and an uncommitted working tree — and **no record of what had produced the working tree.** The
+fixes were identifiable as review output only because the comments they add say so.
+
+They were reconstructed by reading the diff, which is a guess in a report's clothes, so the
+branch was reviewed again from scratch. That was the right call and not a formality: **four of
+the second review's five findings were in code the first review had written**, including a
+`sed_escape` that emitted one backslash too many and so spliced the placeholder's own text into
+the path it was escaping — a guard that produced exactly the corruption it was added to prevent,
+under a comment describing that corruption correctly.
+
+The lesson is cheap to act on and is now in the harness note: **write the note as the review
+lands, not after the merge.** The note is the only artefact of a review that outlives the
+session, and a session is not durable.
+
+### Two measurements outlived the thing they measured, again
+
+Findings 3 and 4 of the second review were a status row claiming 12px of slack that `theme.css`
+had already been corrected to 6.6, and a row-height argument computed against the 48px
+temperature T6.12 replaced with 44. Neither failed anything. Both were confident.
+
+This is wave 17's headline arriving for the second wave running, and it is now the thing to
+watch for rather than a coincidence: **a number written into a comment or a status row is a
+claim with no test behind it.** Where one matters, the cheap fix is the one T6.13 is already
+using — check it against a source outside this repository and say in the file where it came
+from.
+
+### What the next wave inherits that is only true on this desk
+
+- `server/config.json` is still mode 0644 and holds the brapi token; the server warns on every
+  start. One `chmod 600`, and T7.3 will want it done.
+- The running server on this desk has **not** been restarted onto the new provider code, so
+  `is_day` has not been seen arriving from the real upstream. T6.13's manual check needs that
+  restart and a clear night.
+- T3.9's human half is still open — the SSH round trip needs a second device, the login/lock/
+  logout sequence needs a graphical logout. The unit itself is installed, enabled and correctly
+  scoped on this machine.
+- The hostile-path substitution is tested but not lived: nobody has installed from a checkout
+  whose path contains `&`, `|`, `\` or a space.
 
 ## Resuming after 2026-09-21 (wave 17)
 
