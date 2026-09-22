@@ -786,43 +786,76 @@ test('offsetFor does not put the panel in the same place at the same time tomorr
     // itself settle into a pattern. The PC is on for roughly the same hours
     // every day, so a count that restarted at midnight would put every offset
     // under the same glyphs at the same hour for the life of the panel -- a
-    // rota, not a mitigation. Counting from the epoch instead, a day is 360
-    // minutes against a cycle of twenty-two, so the phase advances ten
-    // three positions a night.
+    // rota, not a mitigation. Counting from the epoch instead, a day is 1440
+    // one-minute steps against a cycle of 22, and 1440 mod 22 is 10, so the
+    // phase advances ten positions a night.
     //
-    // This is the assertion that failed the first implementation, which did
-    // index off minutes-of-day and passed every other test here. It failed the
-    // one-pixel table's first draft too, for a different reason: a closed tour
-    // of the band is twenty steps, a step is a minute, and 1440 is twenty times
-    // seventy-two. The detour that makes the cycle twenty-two exists for this
-    // line.
+    // **This test asserted the wrong thing and passed on one desk.** It
+    // compared *offsets* day by day and required all of them to differ until
+    // the cycle returned. Two positions in the table are visited twice -- the
+    // one-pixel detour that keeps the cycle length from dividing a day -- so
+    // two days' advance of 20 steps is a step of -2, and for the four phases
+    // that land on a repeated index the offset after two days is genuinely the
+    // same one. The review found it by running the suite in another timezone:
+    // green in America/Sao_Paulo, red in Europe/Lisbon and Pacific/Chatham,
+    // because `at(9, 0)` is a local instant and which index it lands on
+    // depends on the machine's zone.
+    //
+    // So the property is asserted where it is true -- on the cycle index, which
+    // advances every day without exception -- plus the two things that actually
+    // matter for the display: the panel is not where it was yesterday, and it
+    // visits most of the band across the days before the phase returns.
     const cycle = BURN_IN_OFFSETS.length * BURN_IN_STEP_MINUTES;
     assert.notEqual((24 * 60) % cycle, 0);
 
-    // How many days until the phase comes back is arithmetic rather than a
-    // number to hardcode: a day advances the cycle by `(24 * 60) % cycle`
-    // steps, so the phase returns after cycle / gcd(advance, cycle) days. For
-    // twenty-two one-minute steps that is eleven, where the old table's seven
-    // twenty-eight-minute steps gave seven. Asserted as the computed value so
-    // that editing the table cannot quietly turn it into one.
     const gcd = (a, b) => (b === 0 ? a : gcd(b, a % b));
     const advance = (24 * 60) % cycle;
-    const days = cycle / gcd(advance, cycle);
+    const days = BURN_IN_OFFSETS.length / gcd(advance, BURN_IN_OFFSETS.length);
     assert.ok(days > 1, 'the panel stands in the same place every day');
+
+    // The index, not the offset: a step of the cycle is a step of the cycle
+    // whatever two of its entries happen to look alike.
+    const indexAt = (date) => {
+        const step = Math.floor(date.getTime() / (BURN_IN_STEP_MINUTES * 60000));
+        return ((step % BURN_IN_OFFSETS.length) + BURN_IN_OFFSETS.length)
+               % BURN_IN_OFFSETS.length;
+    };
     const today = at(9, 0);
+    const seen = new Set([indexAt(today)]);
     for (let day = 1; day < days; day += 1) {
         const later = new Date(today.getTime() + day * 24 * 60 * 60 * 1000);
-        assert.notDeepEqual(offsetFor(later), offsetFor(today),
-                            `the panel is back where it started after ${day} day(s)`);
+        assert.notEqual(indexAt(later), indexAt(today),
+                        `the cycle index is back where it started after ${day} day(s)`);
+        seen.add(indexAt(later));
     }
-    const returns = new Date(today.getTime() + days * 24 * 60 * 60 * 1000);
-    assert.deepEqual(offsetFor(returns), offsetFor(today),
-                     `the phase should return after ${days} days`);
+    assert.equal(seen.size, days,
+                 'the days before the phase returns should each be a different step');
+
+    // Tomorrow is a different place on screen, which is the claim a reader
+    // could check. This one *is* true of the offsets: the repeated pair is two
+    // indices apart and a day advances ten, so no phase maps to its own
+    // offset a day later.
+    const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+    assert.notDeepEqual(offsetFor(tomorrow), offsetFor(today));
+
+    // And across those days the panel really does move around the band rather
+    // than alternating between two spots. Nine of the eleven steps land on
+    // distinct offsets in the worst case, which is the number the repeated
+    // pair costs.
+    const offsets = new Set();
+    for (let day = 0; day < days; day += 1) {
+        const when = new Date(today.getTime() + day * 24 * 60 * 60 * 1000);
+        const o = offsetFor(when);
+        offsets.add(o.x + ',' + o.y);
+    }
+    assert.ok(offsets.size >= days - 2,
+              `only ${offsets.size} distinct offsets across ${days} days`);
+
     // And it does come back, on the eleventh -- a cycle and not a drift. The
     // number is computed above rather than written here for the same reason.
-    const week = new Date(today.getTime()
-                          + BURN_IN_OFFSETS.length * 24 * 60 * 60 * 1000);
-    assert.deepEqual(offsetFor(week), offsetFor(today));
+    const returns = new Date(today.getTime() + days * 24 * 60 * 60 * 1000);
+    assert.equal(indexAt(returns), indexAt(today),
+                 `the cycle index should return after ${days} days`);
 });
 
 test('offsetFor answers the origin for a clock it cannot read', () => {

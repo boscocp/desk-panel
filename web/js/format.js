@@ -545,6 +545,33 @@ const MOON_PHASES = [
     'waning-crescent',
 ];
 
+// Which limb is lit, and it is **not** read off the phase name.
+//
+// The first cut was `index >= 1 && index <= 3`, and the review caught what that
+// does around the two phases that are a name rather than a side. The buckets
+// are an eighth of a lunation wide, so `full` covers about 1.85 days either
+// side of the instant and arrives with `illum` as low as 96%. For the half of
+// that bucket the moon is still waxing, the name-based test said waning, the
+// lit limb flipped, and the four-percent dark sliver was drawn on the wrong
+// edge -- the one error on this card a reader can catch by looking up, which is
+// the entire reason the phase is drawn rather than written.
+//
+// The age is what actually knows: the first half of a lunation is growing and
+// the second is shrinking. `ageDays` and `lunationDays` both come from the
+// server (real values from the USNO's table, or the mean model's), so this is a
+// division rather than a guess.
+//
+// The name is the fallback for a server too old to send them, where being right
+// three-quarters of the month is better than not drawing a moon.
+function isWaxing(moon, index) {
+    const age = moon.ageDays;
+    const lunation = moon.lunationDays;
+    if (Number.isFinite(age) && Number.isFinite(lunation) && lunation > 0) {
+        return ((age / lunation) % 1.0) < 0.5;
+    }
+    return index >= 1 && index <= 3;
+}
+
 // moon: the payload's `weather.moon`, or undefined before the first broadcast
 // and on a server too old to send it. Returns `{phase, illum, waxing, label}`
 // or null when there is nothing worth drawing.
@@ -569,10 +596,7 @@ function moonFields(moon, words) {
     return {
         phase: moon.phase,
         illum: illum,
-        // index 1..3 is waxing, 5..7 is waning; new and full are neither and
-        // the flag does not matter for either -- a full disc and an unlit one
-        // have no lit limb to put on a side.
-        waxing: index >= 1 && index <= 3,
+        waxing: isWaxing(moon, index),
         label: table[moon.phase] || moon.phase,
     };
 }
@@ -907,11 +931,19 @@ function offsetFor(now) {
         return { x: 0, y: 0 };
     }
     // Counted from the epoch and not from midnight, and the difference is the
-    // whole reason this is not a rota. A day is 360 steps against a cycle of
-    // twenty-two; 1440 mod 22 is 10, so the phase advances ten positions a
-    // night and the panel is not where it was at this time yesterday until the
-    // eleventh
-    // day. Counting from midnight was the first cut and it fails the thing the
+    // whole reason this is not a rota. A day is 1440 one-minute steps against a
+    // cycle of twenty-two, and 1440 mod 22 is 10, so the phase advances ten
+    // steps a night and the cycle index is somewhere new for eleven days before
+    // it comes back round.
+    //
+    // The *index*, not the offset. Two positions in the table are visited
+    // twice -- the one-pixel detour above -- so for four of the twenty-two
+    // phases the offset after two days is genuinely the same one. The review
+    // caught that: the test asserting otherwise passed in America/Sao_Paulo
+    // and failed in Europe/Lisbon, because which index a fixed local hour
+    // lands on depends on the machine's timezone.
+    //
+    // Counting from midnight was the first cut and it fails the thing the
     // task file asks for in one sentence: the PC is on for roughly the same
     // hours every day, so every offset would land under the same glyphs at the
     // same hour, for ever -- a cycle that has itself become a pattern, which is
@@ -937,7 +969,7 @@ function offsetFor(now) {
 //
 // It exists for `e2e/layout/check_layout.py`. Without it that harness measures
 // the panel at whichever offset the wall clock happened to land on, which
-// means the worst case is measured one run in seven and a layout that only
+// means the worst case is measured one run in twenty-two and a layout that only
 // fails at (-4,-3) is a check that fails on a Tuesday. With it the harness
 // drives the panel through every position and measures each -- and a shift
 // that pushed a card off the edge would be a certainty rather than a chance.

@@ -185,18 +185,31 @@ def synodic_phase(when=None):
 
 
 def moon_phase(when=None, get=get_json):
-    """The panel's answer: the USNO's lunation when it can be had, else mean.
+    """The USNO's answer, or **raise**. The caller owns the fallback.
 
-    Never raises. A moon is the least important thing on this panel and the
-    weather card has to draw regardless -- the same rule every other provider
-    here follows.
+    It used to swallow every failure and return `synodic_phase` itself, and the
+    review caught what that cost: the server caches this through `TimedCache`,
+    a function that never fails is always a success, and the arithmetic answer
+    was therefore recorded with `stale = False` and held for the full six-hour
+    interval. A PC that boots before its router -- the exact case
+    `TimedCache.fresh_at` was written for -- would have drawn a moon up to 0.9
+    days of age out for six hours after the network came back, with nothing
+    marked stale and no retry. The `or synodic_phase()` at the call site was
+    dead code for the same reason: a producer that cannot fail cannot leave the
+    cache empty.
+
+    So this raises and the caller falls back, which puts the retry path back in
+    reach and makes the staleness visible. A moon is still the least important
+    thing on this panel -- what changed is who decides that.
     """
     when = when or datetime.datetime.now(datetime.timezone.utc)
-    try:
-        answer = phase_at(normalise_phases(fetch_phases(when, get=get)), when)
-    except (UpstreamError, ValueError, TypeError):
-        answer = None
-    return answer or synodic_phase(when)
+    answer = phase_at(normalise_phases(fetch_phases(when, get=get)), when)
+    if answer is None:
+        # A body that parsed but does not bracket `when`. Not an outage, and
+        # not an answer either; the caller's fallback is the honest result and
+        # the cache should keep trying rather than hold this for six hours.
+        raise UpstreamError("the phase window does not bracket %s" % when)
+    return answer
 
 
 if __name__ == "__main__":

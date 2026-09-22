@@ -186,33 +186,52 @@ class CrossFileTests(unittest.TestCase):
 
 
 class DegradingTests(unittest.TestCase):
-    def test_a_dead_upstream_falls_back_rather_than_raising(self):
+    """It raises, and the caller owns the fallback. That split is the point.
+
+    `moon_phase` used to swallow everything and return `synodic_phase` itself.
+    The review of this wave caught what that cost: `server.py` caches it through
+    `TimedCache`, a function that never fails is always a success, so the
+    arithmetic answer was recorded with `stale = False` and held for the full
+    six-hour interval -- and the `or synodic_phase()` at the call site was dead
+    code, because a producer that cannot fail cannot leave the cache empty.
+
+    A PC that boots before its router is all it takes, which is the same case
+    `TimedCache.fresh_at`'s own docstring was written for.
+    """
+
+    def test_a_dead_upstream_raises_so_the_cache_can_retry(self):
         def boom(url, **kwargs):
             raise UpstreamError("no network")
 
-        answer = providers_usno.moon_phase(WHEN, get=boom)
-        self.assertEqual(answer["source"], "mean")
-        self.assertEqual(answer["phase"], "waxing-gibbous")
+        with self.assertRaises(UpstreamError):
+            providers_usno.moon_phase(WHEN, get=boom)
 
-    def test_a_junk_body_falls_back_rather_than_raising(self):
+    def test_a_junk_body_raises_rather_than_answering(self):
         for junk in ([1, 2], None, {}, {"phasedata": "nope"},
                      {"phasedata": [{"phase": "New Moon"}]}):
             with self.subTest(body=junk):
-                answer = providers_usno.moon_phase(WHEN, get=lambda u, **k: junk)
-                self.assertEqual(answer["source"], "mean")
+                with self.assertRaises(UpstreamError):
+                    providers_usno.moon_phase(WHEN, get=lambda u, **k: junk)
 
-    def test_a_window_that_misses_falls_back_rather_than_guessing(self):
-        # The honest half of the first implementation's bug: given a table it
-        # cannot bracket with, `phase_at` says None instead of inventing a
-        # lunation length, and `moon_phase` then says `mean` out loud.
+    def test_a_window_that_misses_raises_rather_than_guessing(self):
+        # A body that parsed and does not bracket the moment. Not an outage and
+        # not an answer: `phase_at` refuses to invent a lunation length, and
+        # this refuses to dress that up as a success the cache would keep.
         stale = {"phasedata": [
             {"day": 12, "month": 8, "phase": "New Moon", "time": "17:37",
              "year": 2026},
         ]}
-        answer = providers_usno.moon_phase(WHEN, get=lambda u, **k: stale)
-        self.assertEqual(answer["source"], "mean")
+        with self.assertRaises(UpstreamError):
+            providers_usno.moon_phase(WHEN, get=lambda u, **k: stale)
 
-    def test_the_fixture_path_is_marked_usno_so_the_two_are_told_apart(self):
+    def test_the_fallback_is_still_available_to_the_caller(self):
+        # The other half: whoever catches the raise has something to draw, and
+        # it says which model answered.
+        mean = providers_usno.synodic_phase(WHEN)
+        self.assertEqual(mean["source"], "mean")
+        self.assertEqual(mean["phase"], "waxing-gibbous")
+
+    def test_a_good_body_is_marked_usno_so_the_two_are_told_apart(self):
         answer = providers_usno.moon_phase(
             WHEN, get=recorded("usno_phases.json"))
         self.assertEqual(answer["source"], "usno")

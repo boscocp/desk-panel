@@ -13,6 +13,7 @@ import contextlib
 import io
 import unittest
 
+from server import providers_openmeteo, providers_usno
 from server.server import App, TimedCache, action_id, route
 from server.upstream import UpstreamError
 
@@ -637,3 +638,67 @@ class RouteWithoutAppTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MoonOffTheRequestPathTests(unittest.TestCase):
+    """T6.15's review: the moon may never block or fail a payload.
+
+    `weather()` is served synchronously. `upstream.TIMEOUT_S` is 10s,
+    `DataPoller.TIMEOUT_MS` is 5s, and `DataPayload.merge` returns null if
+    either body fails -- so a slow USNO would have dropped the whole payload
+    for that cycle, quotes and fx and crypto and an already-fresh weather with
+    it, to fetch the least important thing on the panel.
+    """
+
+    def setUp(self):
+        self.clock = FakeClock()
+        self.app = App(dict(CONFIG), clock=self.clock)
+        self.calls = []
+
+        def never_finishes(when=None, get=None):
+            self.calls.append(when)
+            raise AssertionError("the moon was fetched on the request path")
+
+        self.addCleanup(setattr, providers_usno, "moon_phase",
+                        providers_usno.moon_phase)
+        providers_usno.moon_phase = never_finishes
+        # The forecast is stubbed too: this class is about the moon, and a live
+        # geocode would be the same fault in a different provider.
+        self.addCleanup(setattr, providers_openmeteo, "fetch_geocode",
+                        providers_openmeteo.fetch_geocode)
+        self.addCleanup(setattr, providers_openmeteo, "fetch_forecast",
+                        providers_openmeteo.fetch_forecast)
+        providers_openmeteo.fetch_geocode = lambda city: {
+            "results": [{"name": city, "latitude": 0.0, "longitude": 0.0,
+                         "timezone": "UTC"}]}
+        providers_openmeteo.fetch_forecast = lambda *a, **k: {
+            "current": {"time": "2026-09-22T00:00", "temperature_2m": 21.0,
+                        "weather_code": 2, "is_day": 0},
+            "daily": {"time": ["2026-09-22"], "temperature_2m_max": [26.0],
+                      "temperature_2m_min": [15.0],
+                      "precipitation_probability_max": [98]}}
+
+    def test_the_payload_still_carries_a_moon_when_the_fetch_cannot_answer(self):
+        # `moon_phase` raising is the whole point of the change the review
+        # asked for -- it is what lets TimedCache record a failure and retry --
+        # so the card has to draw from the fallback at the call site rather
+        # than lose the key.
+        weather = self.app.weather()
+        self.assertIn("moon", weather)
+        self.assertEqual(weather["moon"]["source"], "mean")
+        self.assertIn(weather["moon"]["phase"], providers_usno.PHASE_NAMES)
+
+    def test_the_rest_of_the_card_is_untouched_by_the_moon_failing(self):
+        weather = self.app.weather()
+        self.assertEqual(weather["tempC"], 21.0)
+        self.assertEqual(weather["precipProb"], 98)
+        self.assertIs(weather["isDay"], False)
+        self.assertFalse(weather["stale"])
+
+    def test_the_fetch_is_not_awaited_by_the_caller(self):
+        # The background thread may or may not have run by the time this
+        # returns -- what matters is that `weather()` came back at all. The
+        # stub raises AssertionError, so if the refresh were awaited on this
+        # thread the call above would have propagated it.
+        self.app.weather()
+        self.app.weather()

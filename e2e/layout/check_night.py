@@ -151,6 +151,18 @@ def check(m, theme, fails):
         """
         return js("return %s.animationName || 'none';" % MOVING)
 
+    def play_state():
+        """Whether the moving element's animation is actually running.
+
+        Beside `animating()` because since T6.14 the two catch different
+        regressions, and the review of that wave found the gap. Core removes
+        nothing at night now, so the realistic way this comes back is
+        `animation-play-state: paused` under `[data-night]` -- which leaves the
+        animation *named* and present, and a name-based check passes a card
+        that has been frozen all night.
+        """
+        return js("return %s.animationPlayState || 'none';" % MOVING)
+
     def shadows():
         """Every rendered glow on the panel, as the strings the browser computes.
 
@@ -222,6 +234,13 @@ def check(m, theme, fails):
     elif animating() == "none":
         fails.append("a card stopped animating at night, which T6.14 removed: the "
                      "night profile dims the panel and no longer freezes it")
+    elif play_state() != "running":
+        fails.append("a card is animating but not running at night: %r -- a rule "
+                     "pausing rather than removing would leave the name in "
+                     "place and the card still" % play_state())
+    elif animating() != day_animation:
+        fails.append("the night profile changed which animation is on the card: "
+                     "%r in the day, %r at night" % (day_animation, animating()))
 
     night_shadows = shadows()
     if theme == GLOWING_THEME:

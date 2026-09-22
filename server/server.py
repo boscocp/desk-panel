@@ -422,6 +422,8 @@ class App:
         }
         self._history_lock = threading.Lock()
         self._history_refreshing = set()
+        self._moon_lock = threading.Lock()
+        self._moon_refreshing = False
         # Coordinates never change, so the geocode is cached for the life of
         # the process rather than on a TTL (T3.4 step 1).
         self.coords = None
@@ -662,10 +664,52 @@ class App:
         # arithmetic over a table and is right even when the weather is
         # unknown. `moon_phase` never raises -- it falls back to the mean
         # synodic model and says `source: "mean"` when it does.
-        payload["moon"] = self.moon_cache.get(
-            self.clock(), config.get("moon_interval_s", 21600),
-            providers_usno.moon_phase)[0] or providers_usno.synodic_phase()
+        # **Never on the request path**, which is the other half of what the
+        # review found. `weather()` is served synchronously, `upstream`'s
+        # timeout is 10s and DataPoller's is 5s, and `DataPayload.merge`
+        # returns null if either body fails -- so a slow USNO would have
+        # dropped the *whole* payload for that cycle, quotes and fx and crypto
+        # and an already-fresh weather with it, to fetch the thing this
+        # module's own docstring calls the least important on the panel.
+        #
+        # Same shape as the sparkline histories: serve what is cached, start a
+        # background refresh when it has aged out, and never block. The moon
+        # can afford it more than they can -- it moves three points a day.
+        moon = self.moon_cache
+        ttl = config.get("moon_interval_s", 21600)
+        if not moon.fresh_at(self.clock(), ttl):
+            self._refresh_moon_async(ttl)
+        # And the fallback is here rather than inside the provider, so the
+        # cache can record a failure, keep retrying, and say `mean` only for as
+        # long as it has nothing better.
+        payload["moon"] = moon.value or providers_usno.synodic_phase()
         return payload
+
+    def _refresh_moon_async(self, ttl):
+        """One background refresh of the moon, or leave the running one alone.
+
+        TimedCache's lock would make the second caller wait for the first
+        rather than letting it through, which is exactly the blocking this
+        exists to avoid.
+        """
+        with self._moon_lock:
+            if self._moon_refreshing:
+                return
+            self._moon_refreshing = True
+
+        def run():
+            try:
+                self.moon_cache.get(self.clock(), ttl, providers_usno.moon_phase)
+            except Exception:
+                # TimedCache already keeps the error and the last good value;
+                # a thread that dies loudly here would only print a traceback
+                # into a journal nobody reads for a moon.
+                pass
+            finally:
+                with self._moon_lock:
+                    self._moon_refreshing = False
+
+        threading.Thread(target=run, name="moon", daemon=True).start()
 
 
 def _bare(symbol):
