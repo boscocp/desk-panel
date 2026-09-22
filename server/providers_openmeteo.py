@@ -97,18 +97,48 @@ def fetch_forecast(lat, lon, timezone, get=get_json):
 
     return get(
         f"{FORECAST_URL}?latitude={lat}&longitude={lon}"
-        "&current=temperature_2m,weather_code"
-        "&daily=temperature_2m_max,temperature_2m_min"
+        # is_day is the sun's own answer for these coordinates (T6.13), and it
+        # is why the panel can stop drawing a sun after dark. Measured, not read
+        # off the docs: at 21:15 on 2026-09-21 in Sao Paulo this endpoint
+        # answered {"weather_code": 1, "is_day": 0} -- clear sky, no sun -- and
+        # the panel drew a sun because it had never been told the second half.
+        "&current=temperature_2m,weather_code,is_day"
+        # precipitation_probability_max is the day's chance of rain and is a
+        # *daily* field: open-meteo's `current` block has no probability at
+        # all, which was checked against the live endpoint rather than the
+        # docs. `hourly` has one too, and this deliberately does not use it --
+        # see normalise.
+        "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max"
         f"&timezone={quote(str(timezone), safe='')}"
     )
 
 
+def _is_day(raw):
+    """1/0 (or true/false) -> bool, with *anything unanswered* meaning daylight.
+
+    Not a general truthiness cast: None is the upstream declining to say, and
+    the safe direction is the one that leaves the panel behaving as it did
+    before T6.13 rather than turning it nocturnal on a missing field.
+    """
+    if raw is None:
+        return True
+    return bool(raw)
+
+
 def normalise(raw, city=""):
-    """Pure: the forecast response -> `{tempC, minC, maxC, code, city}`.
+    """Pure: the response -> `{tempC, minC, maxC, code, isDay, precipProb, city}`.
 
     Missing pieces come back as None rather than 0. A temperature of zero is
     a real reading in most of the world, so a zero standing in for "no data"
     is a lie the panel cannot detect; `format.js` renders None as a dash.
+
+    `isDay` is the exception and is a real bool, never None: the upstream
+    sends 1/0 and the page asks `if (isDay)`, where 0 and None are the same
+    answer anyway. Absent means **True**, which is the safe direction of the
+    two -- a panel drawing a sun at midnight is the complaint T6.13 came from,
+    and one drawing a moon at noon would be stranger still. It also means an
+    older server, or a cached body from before this key existed, keeps
+    behaving exactly as it did.
     """
     if not isinstance(raw, dict):
         raw = {}
@@ -122,6 +152,30 @@ def normalise(raw, city=""):
         "minC": _at(daily.get("temperature_2m_min"), index),
         "maxC": _at(daily.get("temperature_2m_max"), index),
         "code": _int(current.get("weather_code")),
+        # The chance of rain **today**, not in the current hour, and the two are
+        # not close: measured against the live endpoint at 2026-09-22T00:00 in
+        # Sao Paulo, the day's max was 98% while the hour ahead was 31%.
+        #
+        # The day, because this card is already day-scoped -- the min and max
+        # beside it are today's -- and a panel read at a glance must not change
+        # the scale of its numbers from one line to the next. The hourly series
+        # is the better answer to "should I leave now", which is a question a
+        # panel with no interaction cannot be asked.
+        #
+        # Indexed by the same matched date as the temperatures, never by [0]:
+        # without the timezone parameter the daily arrays are cut on UTC days,
+        # and after 21:00 in Sao Paulo index 0 is already tomorrow.
+        "precipProb": _int(_at(daily.get("precipitation_probability_max"), index)),
+        # Missing means daylight, and so does an explicit null. The first cut
+        # was `bool(current.get("is_day", 1))`, whose default covers only the
+        # absent key: a body carrying `"is_day": null` -- what open-meteo
+        # sends for a current field it cannot compute -- went through
+        # `bool(None)` and came out False, so the one value that means *no
+        # answer* became the decisive answer for night. A moon at noon, from
+        # the branch the docstring calls stranger still. Every other field
+        # here routes None through `_number`/`_int` and treats it as missing;
+        # this one has to do the same before it commits.
+        "isDay": _is_day(current.get("is_day")),
         "city": city,
     }
 

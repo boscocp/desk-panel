@@ -163,6 +163,23 @@ body {
     }
 }
 
+/* The chance of rain, in words (T6.15), and the moon under it. Both are
+ * context rather than the answer to "what is it like outside", so both are
+ * quieter than the condition above them. */
+.w-chance {
+    margin-top: 2px;
+    font-size: 13px;
+    color: #b9b9b9;
+}
+
+/* The moon, in words (T6.13). Quieter than the condition above it: the phase
+ * is context rather than the answer to "what is it like outside". */
+.w-moon {
+    margin-top: 2px;
+    font-size: 13px;
+    color: #b9b9b9;
+}
+
 /* --- Rows: label, change, value ------------------------------------------- */
 
 /* Two lines, and that is the answer to a four-column grid rather than a

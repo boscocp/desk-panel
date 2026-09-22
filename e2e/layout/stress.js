@@ -38,7 +38,21 @@ window.onData({
         { symbol: 'BTC', price: 341200, changePct: 2.8 },
         { symbol: 'SHIBAINU-VERYLONGNAME', price: 0.00081, changePct: -4.5 },
     ],
-    weather: { tempC: -10, minC: -12, maxC: 42, code: 99, city: 'Sao Jose dos Campos' },
+    // isDay: false and 100% on purpose (T6.13). This is the widest the moon can
+    // be: a three-digit percentage beside the widest range the card can draw,
+    // and the longest phase name in either language as the glyph's accessible
+    // label. `code: 99` is a thunderstorm, which looks the same at both hours
+    // -- rain at night is still rain -- so the night flag here is exercising
+    // the moon and the layout rather than the sky's glyph. `e2e/layout/night.js`
+    // is the fixture that draws a clear night.
+    weather: {
+        tempC: -10, minC: -12, maxC: 42, code: 99,
+        city: 'Sao Jose dos Campos',
+        isDay: false,
+        // 100 is the widest this number can be, like the moon's beside it.
+        precipProb: 100,
+        moon: { phase: 'waning-crescent', illum: 100, source: 'mean' },
+    },
     // charging: false on purpose. This is the widest battery line the code can
     // produce -- the 'unplugged' word is only in the discharging variant -- and
     // with charging: true it was never measured, which is how T5.4 shipped a

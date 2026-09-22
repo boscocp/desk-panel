@@ -410,6 +410,17 @@
              + 'M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3'
              + 'M5.4 5.4l2.1 2.1M16.5 16.5l2.1 2.1M18.6 5.4l-2.1 2.1M7.5 16.5l-2.1 2.1',
         cloudy: CLOUD,
+        // A clear sky after dark. Stars rather than a moon: the moon has its
+        // own permanent place on this card with its phase and its percentage,
+        // and drawing it twice would be the card saying one thing in two
+        // sizes. Three of them, unevenly placed -- an even row reads as a
+        // dotted line rather than as a sky.
+        stars: 'M7 7.5v3M5.5 9h3M16 5v2.5M15 6.25h2.5'
+             + 'M12.5 14v3.5M10.75 15.75h3.5',
+        // And a cloudy night: the cloud is the subject, so the moon behind it
+        // is small and is a crescent whatever tonight's phase is. This glyph
+        // answers "what is the sky doing", not "which moon is up".
+        'cloudy-night': CLOUD + 'M17.5 5.5a3 3 0 1 0 3 3 3.6 3.6 0 0 1-3-3',
         rain: CLOUD + 'M9 18.5l-1 3M12.5 18.5l-1 3M16 18.5l-1 3',
         snow: CLOUD + 'M8 20h2M9 19v2M14 20h2M15 19v2',
         storm: CLOUD + 'M13 17.5l-3.5 4h3l-1.5 3',
@@ -516,6 +527,115 @@
     // and format.js keeps one name per WMO code. So it becomes the glyph's
     // accessible name rather than disappearing: anything reading this DOM
     // aloud, or reading it back in a test, still gets the exact condition.
+    // --- The moon (T6.13) --------------------------------------------------
+    //
+    // The one shape in this set that cannot be a stroked outline. A circle with
+    // an outline is a circle; what says *moon* is the lit part being filled and
+    // the dark part not being drawn at all. So it is one filled path made of
+    // two arcs -- the limb and the terminator -- which is also why the same
+    // path draws every phase from a single number.
+    //
+    // Geometry, in the 24x24 box the rest of the set uses: centre (12, 12),
+    // radius 9. The limb is a semicircle on the lit side. The terminator is
+    // half an ellipse with the same vertical radius and a horizontal one of
+    // r * |1 - 2k| for a lit fraction k, which is the projection of the
+    // day/night line onto the disc:
+    //
+    //   k = 0.5  -> rx = 0, a straight edge, exactly half lit
+    //   k > 0.5  -> the terminator bulges away from the lit side (gibbous)
+    //   k < 0.5  -> it bulges into it (crescent)
+    //
+    // Whether it bulges in or out is the arc's sweep flag rather than a second
+    // path, which is what keeps this one `d` string.
+    const MOON_R = 9;
+
+    // **Southern hemisphere.** A waxing moon is lit on the *left* here, and on
+    // the right from Europe or North America. This panel is in Sao Paulo
+    // (server/config.toml's city is what the weather is for), so it draws the
+    // southern convention; on a panel moved north every phase would be
+    // mirrored. Documented rather than configured: it is one constant, and the
+    // day somebody runs this in Lisbon is the day to make it a setting.
+    const MOON_SOUTHERN = true;
+
+    function moonPath(illum, waxing) {
+        const k = Math.max(0, Math.min(1, (illum == null ? 50 : illum) / 100));
+        const cx = 12;
+        const top = 12 - MOON_R;
+        const bottom = 12 + MOON_R;
+        // Lit on the left for a waxing moon in the south, on the right for a
+        // waning one; mirrored in the north.
+        const litLeft = MOON_SOUTHERN ? waxing : !waxing;
+        // The limb: down the lit side. Sweep 0 goes counter-clockwise, which
+        // from the top of a circle is the left-hand side.
+        const limbSweep = litLeft ? 0 : 1;
+        const rx = Math.abs(1 - 2 * k) * MOON_R;
+        // The terminator bulges outward past the middle (gibbous) and inward
+        // before it (crescent). Outward means it keeps going the same way
+        // round as the limb.
+        const gibbous = k > 0.5;
+        const termSweep = gibbous ? limbSweep : 1 - limbSweep;
+        return `M ${cx} ${top}`
+             + ` A ${MOON_R} ${MOON_R} 0 0 ${limbSweep} ${cx} ${bottom}`
+             + ` A ${rx.toFixed(2)} ${MOON_R} 0 0 ${termSweep} ${cx} ${top}`
+             + ' Z';
+    }
+
+    // The whole element: the shape, filled, plus how much of it is lit.
+    //
+    // Permanent rather than only after dark, which is what was asked for from
+    // the chair: the phase is the slowest-moving fact on this panel and the one
+    // a reader can check against the sky. It sits on the min/max line because
+    // that line is the card's narrowest -- `18.3 / 28.5` leaves about half the
+    // width free -- so the moon costs the card no height at all, and the card
+    // has 6.6px of slack (see the budget in theme.css).
+    //
+    // A new moon is drawn as a thin outline rather than as nothing: an empty
+    // slot reads as a missing icon, and "the moon is not lit tonight" is a
+    // fact worth a shape.
+    function renderMoon(moon) {
+        if (!moon) {
+            return null;
+        }
+        const wrap = el('div', null, 'w-moon');
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('class', 'w-moon-glyph');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('role', 'img');
+        // The percentage beside it says how much; the name is the half no
+        // number carries, and at 24px a waxing crescent and a waning one are
+        // mirror images. Same reason the weather glyph kept its words in
+        // format.js when T6.12 took the condition line away.
+        svg.setAttribute('aria-label', moon.label);
+        // The whole disc first, as a thin ring, and then the lit part filled on
+        // top of it. Both, always -- and the ring is what makes the phase
+        // legible rather than decorative.
+        //
+        // The first cut drew only the lit shape and it was measured on the
+        // device: at 85% a gibbous moon is a disc with a shallow bite out of
+        // one side, 16 units wide against a full 18, and at 22px that reads as
+        // a plain oval. Nothing said *phase*. With the ring behind it the eye
+        // has the full circle to compare against, so 85% reads as almost full
+        // and 20% reads as a crescent inside a moon instead of as a sliver
+        // floating on its own.
+        //
+        // A new moon is then not a special case at all: it is the ring with
+        // nothing filled in, which is exactly what a new moon is.
+        svg.appendChild(svgPath(
+            'M 12 3 A 9 9 0 1 1 11.99 3 Z', 'w-moon-disc'));
+        if (moon.phase !== 'new') {
+            svg.appendChild(svgPath(moonPath(moon.illum, moon.waxing),
+                                    'w-moon-lit'));
+        }
+        wrap.appendChild(svg);
+        const pct = formatPercent(moon.illum);
+        if (pct) {
+            const text = el('span', null, 'w-moon-pct');
+            text.textContent = pct;
+            wrap.appendChild(text);
+        }
+        return wrap;
+    }
+
     function renderGlyph(name, label) {
         const svg = svgIcon(GLYPHS[name], 'w-glyph');
         if (svg && label) {
@@ -615,8 +735,41 @@
         }
         const body = el('div', null, 'w-body');
 
+        // The city, and the day's chance of rain at the other end of its line
+        // (T6.15). Asked for from the chair: a drop and a number, no word, and
+        // right-aligned so it sits directly above the moon's percentage -- the
+        // two are the card's only two percentages and they read as a column.
         const city = el('div', null, 'w-city');
-        city.textContent = weather.city;
+        const chance = chanceOfRain(weather);
+        if (chance !== null) {
+            const rain = el('div', null, 'w-chance');
+            // The `rain` glyph: a cloud with rain under it, the same shape
+            // the sky's own glyph uses for a rainy code.
+            //
+            // The first cut was a single filled drop, and it was reported from
+            // the chair: "gota fica parecendo umidade". Correct -- a drop on
+            // its own is what a hygrometer draws, and this number is about the
+            // sky. Reusing the set's rain shape also means the card says rain
+            // the same way twice rather than inventing a second vocabulary.
+            const drop = svgIcon(GLYPHS.rain, 'w-chance-glyph');
+            if (drop) {
+                drop.setAttribute('role', 'img');
+                // The one word in this, and it is not drawn: the icon is a
+                // shape and a reader that speaks the DOM aloud needs to be
+                // told it is about rain. Same split as the weather glyph.
+                drop.setAttribute('aria-label', words.rainChance);
+                drop.removeAttribute('aria-hidden');
+                rain.appendChild(drop);
+            }
+            const pct = el('span', null, 'w-chance-pct');
+            pct.textContent = formatPercent(chance);
+            rain.appendChild(pct);
+            city.appendChild(rain);
+        }
+        // After the float and not before it: a float only pushes the inline
+        // content that follows it in the DOM, so the city has to come second
+        // or it would be laid out first and the drop would drop below it.
+        city.appendChild(document.createTextNode(weather.city));
 
         const temp = el('div', null, 'w-temp');
         temp.textContent = `${formatTemp(weather.tempC)}°C`;
@@ -647,7 +800,7 @@
         // comment claimed by quoting the old 48px type: nudge either number
         // and this stops being true, so measure rather than assume.
         const label = words.weather[weather.code] || words.unknown;
-        const glyph = renderGlyph(weatherGlyph(weather.code), label);
+        const glyph = renderGlyph(weatherGlyph(weather.code, weather.isDay), label);
         if (glyph) {
             main.append(glyph, temp);
         } else {
@@ -656,8 +809,18 @@
             main.append(named, temp);
         }
 
+        // The min/max and the moon share a line, and it is the one line on this
+        // card with width to spare: `18.3 / 28.5` is about half of the 204px
+        // interior. The moon therefore costs the card no height, which matters
+        // because T6.12 left it 6.6px of slack (the budget is in theme.css).
         const range = el('div', null, 'w-range');
-        range.textContent = formatRange(weather.minC, weather.maxC);
+        const span = el('span', null, 'w-range-temps');
+        span.textContent = formatRange(weather.minC, weather.maxC);
+        range.appendChild(span);
+        const moon = renderMoon(moonFields(weather.moon, words));
+        if (moon) {
+            range.appendChild(moon);
+        }
 
         body.append(city, main, range);
         els.weather.appendChild(body);
