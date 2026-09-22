@@ -60,6 +60,22 @@ only decides whether the phone waits until tomorrow. Failures are reported and s
 exit code. A broken **config** does block it — that is the one thing that would stop the server
 coming back up at all.
 
+## A restart costs the caches, and the panel shows it
+
+Every cache the server holds is in memory, so a restart empties all of them and the panel
+degrades visibly for up to a minute. Both symptoms look like bugs and neither is:
+
+- **The FX sparkline disappears.** Its series is fetched on `history_interval_s`, six hours by
+  default, so until the first background refresh lands there is nothing to draw.
+- **The moon's percentage changes.** A cold start answers from `providers_usno.synodic_phase()`
+  — the arithmetic mean phase, `source: "mean"` — because the moon must never be `unknown` just
+  because a network call is in flight. The USNO value replaces it moments later, and the two are
+  a few points apart: 79% and 85% on the evening this was written.
+
+Neither needs doing anything about, but do not restart three times in a row to watch it settle,
+which is how this section came to be written. If somebody is looking at the panel, one restart
+is the polite number.
+
 ## Windows
 
 Nothing else to do. The Scheduled Task's action points at `server.py` inside the checkout, so a

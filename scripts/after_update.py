@@ -633,9 +633,14 @@ def main(argv=None):
     print(format_report(steps))
 
     code = overall_exit(steps)
-    if code == 0 and not args.dry_run and head:
-        # Only a clean run moves the marker. A failed one must keep comparing
-        # against the last commit that was actually seen through.
+    if code != 1 and not args.dry_run and head:
+        # No **failure**, rather than a clean sweep, and the difference is a
+        # deadlock the first real run walked into: a machine with no marker
+        # reports `apk: unknown`, which makes the run exit 2, which -- when the
+        # marker was only written on 0 -- meant the marker was never written and
+        # every future run was a first run. The APK check could never start
+        # working. A run that failed still keeps the old marker, because the
+        # commit it was about was not seen through.
         write_state({"head": head, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")})
 
     print(
