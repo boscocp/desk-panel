@@ -182,7 +182,7 @@ and the first line of each file says so.
 
 ## Resuming after 2026-09-23 (wave 21)
 
-Wave 21 is **T0.6**, on `wave/21-the-two-agent-setup`, PR #26. It is the oldest row in the table
+Wave 21 is **T0.6**, on `wave/21-the-two-agent-setup`, PR #27. It is the oldest row in the table
 and the
 one that had carried the `start here` marker since the bootstrap — the two-agent setup that
 arrived whole in PR #1, outside the task system it was meant to live in.
@@ -190,6 +190,8 @@ arrived whole in PR #1, outside the task system it was meant to live in.
 **It was numbered 20 for most of its life.** A second session was working in this same checkout
 at the same time and merged its own wave 20 (PR #25, `after_update.py`) while this branch was
 open; the collision surfaced at the merge, not before. Both sections are below, newest first.
+Renaming the remote branch to match then **closed PR #26** — GitHub does not retarget a pull
+request whose head branch is renamed out from under it — so the wave's PR is #27.
 
 **Next: T3.6 + T7.2** — serve the APK at `/app`, and wireless adb from the container. They pair:
 both are about getting a build onto the phone without a cable, and T7.2 is allowed to fall back

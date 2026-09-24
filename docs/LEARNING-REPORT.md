@@ -245,7 +245,7 @@ Only what is cited. `—` means not recorded, which is itself a finding.
 | 18 | #23 | two cards, Linux login signal | +1,229 / −213 | **5, all applied** — the first review's own report was lost and had to be reconstructed from the diff | `sed_escape` produced exactly the corruption it was written to prevent; `is_day` read an explicit `null` as night |
 | 19 | #24 | the moon, the one-pixel shift, rain | +2,577 / −156 | **9, all applied, none declined** | a test that passed only in this timezone, and whose property was genuinely false; the mean-synodic fallback was cached as a success |
 | 20 | #25 | one command to run after a pull | +1,513 / −0 | **6, all real, all applied** | the Linux branch was unreachable code while two documents described it running; `--dry-run` exited 0 on the state the script was written for |
-| 21 | #26 | the two-agent setup becomes a task | +616 / −19 | **6, all applied** | the wave's own new gate exited 0 after the ADR 0011 guard was deleted; and it was green about a command neither file allowed |
+| 21 | #27 | the two-agent setup becomes a task | +616 / −19 | **6, all applied** | the wave's own new gate exited 0 after the ADR 0011 guard was deleted; and it was green about a command neither file allowed |
 
 There is no wave 3 or 5 in the record; the numbering has gaps, and the "Resuming after"
 sections in `STATUS.md` are the authority. Diffs are `gh pr list --json additions,deletions`,
