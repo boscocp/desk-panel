@@ -13,9 +13,10 @@
 #   - Read(path) does NOT map — Reasonix's reader is read_file. Secrets are
 #     protected by [sandbox] forbid_read below, which also covers `cat`.
 #
-# Every asymmetry between the two files is declared here with a
-# `# parity: intentional` line naming the rules it covers. The checker reads
-# those lines; an undeclared difference fails it.
+# Every asymmetry between the two files is declared here with a comment that
+# opens `# parity: intentional (allow)`, `(deny)` or `(allow, deny)` and then
+# names the rules it covers. The checker reads those blocks; an undeclared
+# difference fails it, and so does a declaration that no longer describes one.
 
 # The model and its provider are pinned here rather than left to an untracked
 # ~/.reasonix/config.toml, so "it worked on this machine" is reproducible from
@@ -43,7 +44,7 @@ allow = [
   "Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)",
   "Bash(grep:*)", "Bash(rg:*)", "Bash(find:*)", "Bash(tree:*)", "Bash(file:*)",
   "Bash(which:*)", "Bash(pwd:*)", "Bash(diff:*)",
-  # parity: intentional — Bash(ls:*), Bash(cat:*), Bash(head:*), Bash(tail:*),
+  # parity: intentional (allow) — Bash(ls:*), Bash(cat:*), Bash(head:*), Bash(tail:*),
   # Bash(wc:*), Bash(grep:*), Bash(rg:*), Bash(find:*), Bash(tree:*),
   # Bash(file:*), Bash(which:*), Bash(pwd:*), Bash(diff:*): Claude Code reads
   # and searches with its native Read/Grep/Glob tools, which no Bash rule
@@ -52,7 +53,7 @@ allow = [
   # Test layers — every acceptance criterion in tasks/ is one of these.
   "Bash(make check:*)", "Bash(make test-server:*)", "Bash(make test-web:*)",
   "Bash(make test-android:*)", "Bash(make lint-tasks:*)", "Bash(make lint-notes:*)",
-  "Bash(make connected:*)",
+  "Bash(make lint-permissions:*)", "Bash(make connected:*)",
   "Bash(python -m unittest:*)", "Bash(python3 -m unittest:*)",
   "Bash(python -m json.tool:*)", "Bash(python3 -m json.tool:*)",
   "Bash(python scripts/:*)", "Bash(python3 scripts/:*)",
@@ -74,16 +75,28 @@ allow = [
 
   # Phone. `adb shell` and `adb install` are what T2.4, T4.4 and the E2E
   # scenarios actually run; leaving them out meant every device task stopped at
-  # an approval prompt.
-  "Bash(adb devices:*)", "Bash(adb logcat:*)", "Bash(adb shell:*)", "Bash(adb install:*)",
+  # an approval prompt. Granted one subcommand at a time, because a bare
+  # `adb shell:*` reaches `pm uninstall dev.bosco.deskpanel` — the one operation
+  # this project forbids outright, since an uninstall throws away the MIUI
+  # autostart and battery grants that T2.4 spends a session obtaining by hand.
+  # These eight are every subcommand any task or document in the repo uses.
+  "Bash(adb devices:*)", "Bash(adb logcat:*)", "Bash(adb install:*)",
+  "Bash(adb shell am:*)", "Bash(adb shell appops:*)", "Bash(adb shell cmd power:*)",
+  "Bash(adb shell dumpsys:*)", "Bash(adb shell input:*)", "Bash(adb shell ping:*)",
+  "Bash(adb shell settings:*)", "Bash(adb shell svc:*)",
 
-  # The server acceptance blocks reach the running server, and T7.1 reads the
-  # signing certificate back out of the APK. `curl` is granted at exactly the
-  # prefix those blocks use and no wider: a bare `Bash(curl:*)` is an
-  # unprompted egress channel to any host on the internet, which is a large
+  # The server acceptance blocks reach the running server. `curl` is granted at
+  # exactly the prefix those blocks use and no wider: a bare `Bash(curl:*)` is
+  # an unprompted egress channel to any host on the internet, which is a large
   # thing to hand an agent in exchange for one localhost request.
-  "Bash(curl -sf http://localhost:*)", "Bash(keytool:*)",
-  # parity: intentional — WebFetch(domain:developer.android.com),
+  "Bash(curl -sf http://localhost:*)",
+  # `keytool` reads only. `-genkeypair` over an existing keystore, or
+  # `-delete`, destroys the release signing key, and a differently-signed APK
+  # cannot install over the one on the phone (docs/BUILD.md, T7.1) — the way
+  # out is an uninstall, which is the loss above. Creating the key is a human
+  # step in T7.1 and prompts, correctly.
+  "Bash(keytool -list:*)", "Bash(keytool -printcert:*)",
+  # parity: intentional (allow) — WebFetch(domain:developer.android.com),
   # WebFetch(domain:docs.python.org), WebFetch(domain:nodejs.org),
   # WebFetch(domain:brapi.dev), WebFetch(domain:open-meteo.com): Reasonix has
   # no WebFetch tool and no equivalent rule, which is also why T3.3 and T3.4
@@ -95,15 +108,24 @@ deny = [
   "Edit(server/config.json)",
   "Edit(server/config.toml)",
   "Edit(keystore.properties)",
+  # The read side of the keystore is [sandbox] forbid_read; this is the write
+  # side. An agent that cannot read the signing key can still truncate it, and
+  # the outcome is the same unrecoverable one.
+  "Edit(*.keystore)",
 
   # ADR 0011: the local model executes, Claude publishes. Reasonix has no git
   # tool at all, but the model can reach `bash git ...`, and a commit is the
   # first place an unverified completion report would become permanent.
   "Bash(git commit:*)",
   "Bash(git push:*)",
-  # parity: intentional — Bash(git commit:*), Bash(git push:*): the same two
-  # commands are ALLOWED in .claude/settings.json. That is the division of
-  # labour, not drift: git belongs to the reviewing agent.
+  # parity: intentional (deny) — Bash(git commit:*), Bash(git push:*): denied
+  # here and not there. That is the division of labour, not drift: git belongs
+  # to the reviewing agent.
+
+  # parity: intentional (allow) — Bash(git commit:*): the other half of the
+  # same asymmetry, Claude's allow against this file's deny. `git push` needs
+  # no twin here: it is in neither allow list, because publishing is a step
+  # that should stop and ask even on the reviewing side.
 ]
 
 [sandbox]
@@ -116,5 +138,5 @@ deny = [
 # name spelled out, the same command returned `Permission denied`. So the
 # keystore is listed by name, and a second keystore would need a second line.
 forbid_read = ["server/config.json", "server/config.toml", "keystore.properties", "desk-panel.keystore"]
-# parity: intentional — Read(./*.keystore): .claude/settings.json can deny a
+# parity: intentional (deny) — Read(./*.keystore): .claude/settings.json can deny a
 # glob and this file cannot, per the measurement above.
