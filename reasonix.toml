@@ -78,8 +78,11 @@ allow = [
   "Bash(adb devices:*)", "Bash(adb logcat:*)", "Bash(adb shell:*)", "Bash(adb install:*)",
 
   # The server acceptance blocks reach the running server, and T7.1 reads the
-  # signing certificate back out of the APK.
-  "Bash(curl:*)", "Bash(keytool:*)",
+  # signing certificate back out of the APK. `curl` is granted at exactly the
+  # prefix those blocks use and no wider: a bare `Bash(curl:*)` is an
+  # unprompted egress channel to any host on the internet, which is a large
+  # thing to hand an agent in exchange for one localhost request.
+  "Bash(curl -sf http://localhost:*)", "Bash(keytool:*)",
   # parity: intentional — WebFetch(domain:developer.android.com),
   # WebFetch(domain:docs.python.org), WebFetch(domain:nodejs.org),
   # WebFetch(domain:brapi.dev), WebFetch(domain:open-meteo.com): Reasonix has

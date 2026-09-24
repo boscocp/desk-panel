@@ -34,7 +34,7 @@
       "Bash(adb devices)",
       "Bash(adb shell *)",
       "Bash(adb install *)",
-      "Bash(curl *)",
+      "Bash(curl -sf http://localhost:*)",
       "Bash(keytool *)",
       "WebFetch(domain:developer.android.com)",
       "WebFetch(domain:docs.python.org)",
