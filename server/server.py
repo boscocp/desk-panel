@@ -13,6 +13,7 @@ TT.2.
 """
 import argparse
 import functools
+import html
 import json
 import os
 import sys
@@ -42,6 +43,15 @@ MIN_PYTHON = (3, 11)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 EXAMPLE_CONFIG_PATH = SCRIPT_DIR / "config.example.toml"
+
+# Where `make apk` and `assembleRelease` leave their output. Not a config key:
+# it is a property of the checkout, not of the panel, and config.example.toml
+# is a catalogue of what the panel shows.
+APK_DIR = SCRIPT_DIR.parent / "out"
+
+# Without this exact type Chrome on Android saves the file instead of offering
+# to install it, which is the whole point of the route.
+APK_CONTENT_TYPE = "application/vnd.android.package-archive"
 
 # The two names the script_dir fallback will answer to, best first. Order is
 # the whole rule: config.toml wins wherever both exist (T3.12 step 3).
@@ -749,16 +759,98 @@ def action_id(path):
     return rest
 
 
-def route(method, path, app=None):
-    """Pure routing: (method, path) -> (status, body_bytes, content_type).
+def newest_apk(directory):
+    """The most recently modified `*.apk` in `directory`, or None.
 
-    No I/O of its own -- callable directly from tests without starting a
-    server. `app` supplies the data routes; without one they answer 503
-    rather than pretending, which is what lets the existing two-argument
-    tests keep asserting that /ping and 404 need no state at all.
+    Newest by mtime rather than by name: `out/` holds `app-debug.apk` and
+    `desk-panel-release.apk` side by side, and the one to install is whichever
+    was built last, not whichever sorts first. A directory that does not exist
+    is the same answer as an empty one -- a fresh clone has no `out/` and that
+    is not an error, it is "build first".
+    """
+    try:
+        candidates = [child for child in directory.iterdir() if child.suffix == ".apk"]
+    except (FileNotFoundError, NotADirectoryError, PermissionError):
+        return None
+    if not candidates:
+        return None
+    return max(candidates, key=lambda child: child.stat().st_mtime)
+
+
+def apk_download(directory):
+    """The `/app` response: the newest APK in `directory`, or a 404 that says
+    what to do about it.
+
+    The 404 body is plain text and reads like a sentence because the client
+    here is a person holding a phone, not the panel: every other error in this
+    file is JSON because the panel is what reads it.
+    """
+    apk = newest_apk(directory)
+    if apk is None:
+        return (
+            404,
+            b"No APK in out/. Build one first:\n"
+            b"    docker compose -f docker/compose.yml run --rm build ./gradlew assembleRelease\n",
+            "text/plain; charset=utf-8",
+            (),
+        )
+    body = apk.read_bytes()
+    # The filename is the only reason this header is here. Without it the
+    # browser saves the download as "app", with no extension, and Android
+    # will not open it.
+    disposition = f'attachment; filename="{apk.name}"'
+    return 200, body, APK_CONTENT_TYPE, (("Content-Disposition", disposition),)
+
+
+def index_page(directory):
+    """One page, one link, so the phone only has to remember host and port.
+
+    It exists because typing `/app` on a phone keyboard is worse than tapping
+    a link, and because a bare host:port answering 404 reads like the server
+    is broken.
+    """
+    apk = newest_apk(directory)
+    if apk is None:
+        offer = "<p>No APK built yet.</p>"
+    else:
+        megabytes = apk.stat().st_size / (1024 * 1024)
+        offer = (
+            f'<p><a href="/app">Install {html.escape(apk.name)}</a> '
+            f"({megabytes:.1f}&nbsp;MB)</p>"
+        )
+    body = (
+        "<!doctype html><meta charset=utf-8>"
+        '<meta name=viewport content="width=device-width,initial-scale=1">'
+        "<title>desk-panel</title>"
+        "<style>body{font:16px/1.5 system-ui,sans-serif;margin:0;padding:24px 16px;"
+        "background:#0b0f14;color:#d7e0ea}a{color:#5ad1e6}</style>"
+        "<h1>desk-panel</h1>"
+        f"{offer}"
+        "<p><a href=\"/ping\">/ping</a> &middot; <a href=\"/quotes\">/quotes</a> "
+        "&middot; <a href=\"/weather\">/weather</a></p>"
+    )
+    return 200, body.encode("utf-8"), "text/html; charset=utf-8", ()
+
+
+def route(method, path, app=None):
+    """Routing: (method, path) -> (status, body_bytes, content_type, headers).
+
+    `headers` is extra headers only -- Content-Type and Content-Length are the
+    handler's, and every route but `/app` leaves it empty.
+
+    `app` supplies the data routes; without one they answer 503 rather than
+    pretending, which is what lets the existing two-argument tests keep
+    asserting that /ping and 404 need no state at all. `/app` needs no app:
+    what it serves is a property of the checkout, not of the panel.
     """
     if method == "GET" and path == "/ping":
         return _json(200, {"ok": True})
+
+    if method == "GET" and path == "/app":
+        return apk_download(APK_DIR)
+
+    if method == "GET" and path == "/":
+        return index_page(APK_DIR)
 
     if method == "GET" and path == "/quotes":
         if app is None:
@@ -776,12 +868,12 @@ def route(method, path, app=None):
         # 200 would say something happened.
         return _json(501, {"error": "not implemented"})
 
-    return 404, b"", "text/plain"
+    return 404, b"", "text/plain", ()
 
 
 def _json(status, payload):
-    """(status, body, content_type) for a JSON response."""
-    return status, json.dumps(payload).encode("utf-8"), "application/json"
+    """(status, body, content_type, headers) for a JSON response."""
+    return status, json.dumps(payload).encode("utf-8"), "application/json", ()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -795,8 +887,14 @@ class Handler(BaseHTTPRequestHandler):
         super().__init__(*args, **kwargs)
 
     def _handle(self, method):
+        # HEAD is GET without the body, by definition, so it routes as GET and
+        # the body is dropped on the way out. Content-Length still describes
+        # the body a GET would have returned, which is what makes a HEAD worth
+        # making -- see T3.6's acceptance, which asserts the type without
+        # downloading two megabytes.
+        routed = "GET" if method == "HEAD" else method
         try:
-            status, body, content_type = route(method, self.path, getattr(self, "app", None))
+            status, body, content_type, headers = route(routed, self.path, getattr(self, "app", None))
         except Exception:  # noqa: BLE001 - deliberately everything
             # route() used to be pure; it does I/O now, and TimedCache
             # re-raises anything that is not an UpstreamError on purpose --
@@ -806,16 +904,21 @@ class Handler(BaseHTTPRequestHandler):
             # and the operator sees nothing. A 500 is a failure somebody can
             # read; a reset connection is one they have to guess at.
             traceback.print_exc()
-            status, body, content_type = _json(500, {"error": "internal error"})
+            status, body, content_type, headers = _json(500, {"error": "internal error"})
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        for name, value in headers:
+            self.send_header(name, value)
         self.end_headers()
-        if body:
+        if body and method != "HEAD":
             self.wfile.write(body)
 
     def do_GET(self):
         self._handle("GET")
+
+    def do_HEAD(self):
+        self._handle("HEAD")
 
     def do_POST(self):
         self._handle("POST")

@@ -12,6 +12,7 @@ launched by path, never imported.
     probe.py --serve --expect up            # starts server.py, probes, stops it
     probe.py --serve --url /action/x --method POST --expect-status 501
     probe.py --host H --url /quotes --expect-json-keys quotes,fx,crypto
+    probe.py --serve --url /app --method HEAD --expect-header content-type=application/...
 
 Exit 0 iff reality matched the expectation, 1 if it did not, 2 on a probe
 error that is not itself an answer (bad hostname, permission error, the
@@ -49,6 +50,18 @@ def parse_args(argv=None):
     parser.add_argument("--expect", choices=["up", "down"], default=None)
     parser.add_argument("--expect-status", type=int, dest="expect_status", default=None)
     parser.add_argument(
+        "--expect-header",
+        dest="expect_header",
+        action="append",
+        default=None,
+        metavar="NAME=VALUE",
+        help=(
+            "a response header that must be present with this value; repeatable. "
+            "The name is case-insensitive and the value is compared exactly, minus "
+            "surrounding whitespace"
+        ),
+    )
+    parser.add_argument(
         "--expect-json-keys",
         dest="expect_json_keys",
         default=None,
@@ -61,8 +74,18 @@ def parse_args(argv=None):
     )
     args = parser.parse_args(argv)
 
-    if args.expect is None and args.expect_status is None and args.expect_json_keys is None:
-        parser.error("one of --expect, --expect-status or --expect-json-keys is required")
+    if (
+        args.expect is None
+        and args.expect_status is None
+        and args.expect_json_keys is None
+        and args.expect_header is None
+    ):
+        parser.error(
+            "one of --expect, --expect-status, --expect-header or --expect-json-keys is required"
+        )
+    for pair in args.expect_header or []:
+        if "=" not in pair:
+            parser.error(f"--expect-header wants NAME=VALUE, got {pair!r}")
     if not args.serve and args.host is None:
         parser.error("--host is required unless --serve")
     if args.serve and args.host is None:
@@ -71,8 +94,12 @@ def parse_args(argv=None):
 
 
 def check(host, port, url, method, timeout):
-    """One HTTP request. Returns ("up", status_code, body_bytes) or
-    ("down", None, b"").
+    """One HTTP request. Returns ("up", status_code, body_bytes, headers) or
+    ("down", None, b"", []).
+
+    `headers` is a list of (name, value) pairs as the server sent them --
+    order and case preserved, duplicates kept, because discarding either
+    would make this unable to answer questions about the wire.
 
     "down" covers both a refused connection (nothing listening) and a
     timeout (a firewall dropping packets instead of refusing them) --
@@ -85,18 +112,47 @@ def check(host, port, url, method, timeout):
         conn.request(method, url)
         response = conn.getresponse()
         status = response.status
+        headers = list(response.getheaders())
         # Read it either way: the body is what --expect-json-keys needs, and
         # an unread response leaves the socket unusable for keep-alive.
         body = response.read()
-        return "up", status, body
+        return "up", status, body, headers
     except (ConnectionRefusedError, socket.timeout, TimeoutError):
-        return "down", None, b""
+        return "down", None, b"", []
     except socket.gaierror as exc:
         raise ProbeError(f"cannot resolve host {host!r}: {exc}") from exc
     except OSError as exc:
         raise ProbeError(f"unexpected error probing {host}:{port}: {exc}") from exc
     finally:
         conn.close()
+
+
+def mismatched_headers(headers, wanted):
+    """Pure: which of `wanted` (NAME=VALUE strings) the response does not carry.
+
+    Returns a list of readable complaints -- empty means every one matched.
+    Header names are case-insensitive per RFC 9110; values are compared
+    exactly, after stripping surrounding whitespace, because the assertion
+    that matters here is a media type and a media type is not a substring
+    question: `text/html` contains `text/htm`, and a check that accepted that
+    would pass for the wrong server.
+
+    A repeated header matches if any of its values does.
+    """
+    seen = {}
+    for name, value in headers:
+        seen.setdefault(name.lower(), []).append(value.strip())
+    problems = []
+    for pair in wanted:
+        name, _, expected = pair.partition("=")
+        key = name.strip().lower()
+        expected = expected.strip()
+        values = seen.get(key)
+        if values is None:
+            problems.append(f"no {name.strip()} header")
+        elif expected not in values:
+            problems.append(f"{name.strip()} is {values[0]!r}, wanted {expected!r}")
+    return problems
 
 
 def missing_json_keys(body, wanted):
@@ -125,7 +181,9 @@ def evaluate(args):
     Expectations combine with AND when more than one is given, so
     `--expect-status 200 --expect-json-keys a,b` fails if either does.
     """
-    kind, status, body = check(args.host, args.port, args.url, args.method, args.timeout)
+    kind, status, body, headers = check(
+        args.host, args.port, args.url, args.method, args.timeout
+    )
 
     matched = True
     detail = ""
@@ -133,6 +191,15 @@ def evaluate(args):
         matched = matched and kind == args.expect
     if args.expect_status is not None:
         matched = matched and kind == "up" and status == args.expect_status
+    if args.expect_header is not None:
+        if kind != "up":
+            matched = False
+        else:
+            wrong = mismatched_headers(headers, args.expect_header)
+            if wrong:
+                matched = False
+                detail = " (" + "; ".join(wrong) + ")"
+
     if args.expect_json_keys is not None:
         wanted = [k.strip() for k in args.expect_json_keys.split(",") if k.strip()]
         if kind != "up":
@@ -189,7 +256,7 @@ def run_server_and_probe(args):
                 raise ProbeError(
                     f"server.py exited early (code {process.returncode}): {stderr.strip()}"
                 )
-            kind, _, _ = check(args.host, args.port, "/ping", "GET", 0.5)
+            kind, _, _, _ = check(args.host, args.port, "/ping", "GET", 0.5)
             if kind == "up":
                 ready = True
                 break
