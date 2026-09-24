@@ -11,6 +11,13 @@ services:
     # Docker Desktop for Windows and is immediate on Linux.
     user: "${UID:-1000}:${GID:-1000}"
     working_dir: /workspace
+    # `make connected` passes -PadbHost=host.docker.internal (TT.7). That name
+    # is invented by Docker Desktop and does not exist on Docker Engine, which
+    # is what Linux runs: without this line it does not resolve, and the only
+    # symptom is a Gradle task that cannot find a device. Harmless where the
+    # name already exists.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ..:/workspace
       # Named volume, not a bind mount: a bind mount is noticeably slower, and
