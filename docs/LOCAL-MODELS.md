@@ -48,9 +48,33 @@ So the instructions and the skills need no duplication.
 | `.claude/settings.json` | `reasonix.toml` | the permission and hook schemas differ, so Reasonix skips the file rather than misparse it |
 | `.claude/agents/verifier.md` | `.reasonix/skills/verifier/SKILL.md` | different frontmatter: `Read/Grep/Glob/Bash` and `model:` versus `read_file/grep/glob/bash` and the session's model |
 
-**Keep each pair in step.** Adding a command to `.claude/settings.json` without adding it
-to `reasonix.toml` means the local agent stops at an approval prompt the other one sails
-through.
+**Keep each pair in step**, and `make lint-permissions` is that rule with an exit code —
+`scripts/check_permission_parity.py`. Adding a command to `.claude/settings.json` without
+adding it to `reasonix.toml` means the local agent stops at an approval prompt the other one
+sails through, which costs a whole turn of a 12B model.
+
+The checker compares command *families*, not spellings: `Bash(make check)`,
+`Bash(make check *)` and `Bash(make check:*)` are one rule. Asymmetries that are meant are
+declared in `reasonix.toml` beside the rules they cover, and **the declaration says which list
+it speaks for**:
+
+```toml
+# parity: intentional (deny) — Bash(git commit:*), Bash(git push:*): denied here
+# and not there. Git belongs to the reviewing agent (ADR 0011).
+```
+
+Every `Tool(spec)` named in such a comment block is exempt **in the lists it names and nowhere
+else**, and a declaration that no longer describes a real difference fails the check too — a
+stale exemption hides the next drift.
+
+Naming the list is not ceremony, and the review of this wave is why it is there. `git commit`
+is asymmetric twice over — Claude allows it and Reasonix does not, Reasonix denies it and
+Claude does not. Under a blanket exemption, **deleting the `deny` that ADR 0011 rests on still
+exited 0**, because the allow-side difference kept the rule looking declared. It now exits 1,
+as a stale exemption.
+
+The marker is anchored to the start of a comment, so a sentence that merely mentions the
+mechanism cannot open a block and quietly exempt whatever rule it cites as an example.
 
 Three syntax traps, all confirmed against the Reasonix source:
 
@@ -64,6 +88,49 @@ Secrets are therefore protected by `[sandbox] forbid_read` in `reasonix.toml` ra
 by a `Read(...)` deny. That is the better mechanism anyway: it blocks `cat` too. Verified
 with a decoy token in `server/config.json` — `read_file` reported the file as
 non-existent and `cat server/config.json` returned `Permission denied`.
+
+**`forbid_read` matches literal paths only.** Measured 2026-09-23 in a scratch fixture: with
+`forbid_read = ["*.keystore"]`, `cat a.keystore` printed the decoy; with the entry spelled out
+as `a.keystore`, the same command returned `Permission denied`. Claude Code's
+`Read(./*.keystore)` deny *is* a glob, so the two files cannot say this the same way — the
+keystore is listed by name in `reasonix.toml`, the glob is declared intentional, and a second
+keystore added to the repository needs a second line or it is readable by the local agent.
+
+## The model and the provider are pinned in the repository
+
+`reasonix.toml` carries `default_model` and a `[[providers]]` block, so a clone resolves the
+same model this desk used:
+
+```toml
+default_model = "ollama-local/gemma4-128k-cc"
+
+[[providers]]
+name = "ollama-local"
+kind = "openai"
+base_url = "http://localhost:11434/v1"
+default = "gemma4-128k-cc"
+api_key_env = ""
+context_window = 131072
+```
+
+They used to live in an untracked `~/.reasonix/config.toml`, which made "it worked here"
+unreproducible and unreviewable (ADR 0011).
+
+`context_window` is not decoration: at **0 the harness disables compaction entirely** and the
+run dies of context exhaustion instead of compacting. It must match the `num_ctx` the model's
+own Modelfile declares — Reasonix does not detect a server-side truncation, so a larger number
+is silently wrong.
+
+One end-to-end check that the pinned provider resolves, and the mode trap in it:
+
+```bash
+reasonix run --dir . --permission-mode manual --max-steps 5 "print the repository name and stop"
+```
+
+The modes are `manual | ask | auto | acceptEdits | dontAsk | plan | bypassPermissions`. There is
+no `read-only`, and `plan` — the read-only one — refuses to run headless with
+`--permission-mode plan requires an interactive session`. `manual` is the strictest mode `run`
+accepts.
 
 ## The limit that decides how you use it
 
