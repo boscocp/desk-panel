@@ -88,6 +88,16 @@ class ApkRouteTests(unittest.TestCase):
         self._apk("desk-panel-release.apk", mtime=1_000)
         self.assertEqual(newest_apk(self.directory).name, "desk-panel-release.apk")
 
+    def test_a_directory_named_like_an_apk_is_not_one(self):
+        # `out/` already contains a directory (baselineProfiles). One named
+        # `x.apk` would otherwise be chosen and then read, which is an
+        # IsADirectoryError surfacing as a 500 from a route whose entire job
+        # is to hand over a file.
+        (self.directory / "baselineProfiles.apk").mkdir()
+        self.assertIsNone(newest_apk(self.directory))
+        status, _, _, _ = apk_download(self.directory)
+        self.assertEqual(status, 404)
+
     def test_served_apk_carries_the_type_and_the_filename(self):
         self._apk("desk-panel-release.apk", mtime=1_000, payload=b"PK\x03\x04body")
         status, body, content_type, headers = apk_download(self.directory)

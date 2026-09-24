@@ -769,7 +769,14 @@ def newest_apk(directory):
     is not an error, it is "build first".
     """
     try:
-        candidates = [child for child in directory.iterdir() if child.suffix == ".apk"]
+        # is_file() and not just the suffix: `out/` already holds a directory
+        # (baselineProfiles), and a directory named `x.apk` would be picked,
+        # then read -- IsADirectoryError, surfacing as a 500 on a route whose
+        # whole job is to hand over a file.
+        candidates = [
+            child for child in directory.iterdir()
+            if child.suffix == ".apk" and child.is_file()
+        ]
     except (FileNotFoundError, NotADirectoryError, PermissionError):
         return None
     if not candidates:
