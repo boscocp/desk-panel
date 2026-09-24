@@ -19,12 +19,17 @@ never reached -- see server/CLAUDE.md.
 """
 import http.client
 import json
+import os
+import tempfile
 import threading
 import unittest
 from functools import partial
+from pathlib import Path
+from unittest import mock
 
 from server import providers_awesomeapi, providers_binance, providers_brapi
-from server.server import App, Handler, Server
+from server import server as server_module
+from server.server import APK_CONTENT_TYPE, App, Handler, Server
 
 
 class HttpIntegrationTests(unittest.TestCase):
@@ -172,6 +177,116 @@ class DataRouteTests(unittest.TestCase):
         self.assertEqual(resp.status, 200)
         self.assertEqual(json.loads(body.decode("utf-8")), {"ok": True})
 
+
+
+class ApkOverRealHttpTests(unittest.TestCase):
+    """T3.6 over a socket. route()'s own tests cover which file is chosen;
+    what can only be seen here is the serialisation -- a HEAD that reports the
+    length of a body it does not send, and an extra header actually reaching
+    the wire."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.directory = Path(cls.tmp.name)
+        cls.payload = b"PK\x03\x04" + b"apk-bytes" * 100
+        apk = cls.directory / "desk-panel-release.apk"
+        apk.write_bytes(cls.payload)
+        os.utime(apk, (1_000, 1_000))
+        # The route reads a module constant, because where the build output
+        # lands is a property of the checkout rather than of the panel.
+        cls.patch = mock.patch.object(server_module, "APK_DIR", cls.directory)
+        cls.patch.start()
+
+        cls.server = Server(("127.0.0.1", 0), Handler)
+        cls.port = cls.server.server_address[1]
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.thread.join()
+        cls.patch.stop()
+        cls.tmp.cleanup()
+
+    def _request(self, path, method="GET"):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        try:
+            conn.request(method, path)
+            resp = conn.getresponse()
+            body = resp.read()
+            return resp, body
+        finally:
+            conn.close()
+
+    def test_get_app_returns_the_apk_bytes(self):
+        resp, body = self._request("/app")
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(body, self.payload)
+        self.assertEqual(resp.getheader("Content-Type"), APK_CONTENT_TYPE)
+        self.assertEqual(
+            resp.getheader("Content-Disposition"),
+            'attachment; filename="desk-panel-release.apk"',
+        )
+
+    def test_head_app_sends_the_length_and_no_body(self):
+        # This is the whole reason the acceptance uses HEAD: it asserts the
+        # type without moving two megabytes. A HEAD that reported
+        # Content-Length: 0 would make the assertion meaningless.
+        resp, body = self._request("/app", method="HEAD")
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(body, b"")
+        self.assertEqual(resp.getheader("Content-Length"), str(len(self.payload)))
+        self.assertEqual(resp.getheader("Content-Type"), APK_CONTENT_TYPE)
+
+    def test_head_works_on_the_json_routes_too(self):
+        # do_HEAD routes as GET, so every route answers it. A 501 here would
+        # be the http.server default for an undefined method.
+        resp, body = self._request("/ping", method="HEAD")
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(body, b"")
+        self.assertEqual(resp.getheader("Content-Length"), str(len(b'{"ok": true}')))
+
+    def test_index_is_html_and_links_to_app(self):
+        resp, body = self._request("/")
+        self.assertEqual(resp.status, 200)
+        self.assertTrue(resp.getheader("Content-Type").startswith("text/html"))
+        self.assertIn(b'href="/app"', body)
+
+
+class ApkMissingOverRealHttpTests(unittest.TestCase):
+    """The same server against an empty out/, which is what a fresh clone has."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.patch = mock.patch.object(server_module, "APK_DIR", Path(cls.tmp.name))
+        cls.patch.start()
+        cls.server = Server(("127.0.0.1", 0), Handler)
+        cls.port = cls.server.server_address[1]
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.thread.join()
+        cls.patch.stop()
+        cls.tmp.cleanup()
+
+    def test_app_is_404_with_the_build_command_in_it(self):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        try:
+            conn.request("GET", "/app")
+            resp = conn.getresponse()
+            body = resp.read()
+        finally:
+            conn.close()
+        self.assertEqual(resp.status, 404)
+        self.assertIn(b"assembleRelease", body)
 
 if __name__ == "__main__":
     unittest.main()
