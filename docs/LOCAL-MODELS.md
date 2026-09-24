@@ -55,18 +55,26 @@ sails through, which costs a whole turn of a 12B model.
 
 The checker compares command *families*, not spellings: `Bash(make check)`,
 `Bash(make check *)` and `Bash(make check:*)` are one rule. Asymmetries that are meant are
-declared in `reasonix.toml` beside the rules they cover:
+declared in `reasonix.toml` beside the rules they cover, and **the declaration says which list
+it speaks for**:
 
 ```toml
-# parity: intentional — Bash(git commit:*), Bash(git push:*): git belongs to the
-# reviewing agent (ADR 0011).
+# parity: intentional (deny) — Bash(git commit:*), Bash(git push:*): denied here
+# and not there. Git belongs to the reviewing agent (ADR 0011).
 ```
 
-Every `Tool(spec)` named in such a comment block is exempt, and a declaration that no longer
-describes a real difference fails the check too — a stale exemption hides the next drift.
-There are four of them today: the shell inspection commands (Claude reads with its native
-`Read`/`Grep`/`Glob` and needs no `Bash(cat:*)`), `WebFetch`, the two git write commands, and
-the keystore glob below.
+Every `Tool(spec)` named in such a comment block is exempt **in the lists it names and nowhere
+else**, and a declaration that no longer describes a real difference fails the check too — a
+stale exemption hides the next drift.
+
+Naming the list is not ceremony, and the review of this wave is why it is there. `git commit`
+is asymmetric twice over — Claude allows it and Reasonix does not, Reasonix denies it and
+Claude does not. Under a blanket exemption, **deleting the `deny` that ADR 0011 rests on still
+exited 0**, because the allow-side difference kept the rule looking declared. It now exits 1,
+as a stale exemption.
+
+The marker is anchored to the start of a comment, so a sentence that merely mentions the
+mechanism cannot open a block and quietly exempt whatever rule it cites as an example.
 
 Three syntax traps, all confirmed against the Reasonix source:
 

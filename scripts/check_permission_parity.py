@@ -20,14 +20,24 @@ Spelling is not the subject. `Bash(make check)`, `Bash(make check *)` and
 whether one agent can run a command family the other cannot, not whether the
 two harnesses punctuate alike.
 
-Asymmetries that are deliberate are declared in reasonix.toml, in a comment:
+Asymmetries that are deliberate are declared in reasonix.toml, in a comment
+that names **which list** it speaks for:
 
-    # parity: intentional -- Bash(git commit:*), Bash(git push:*): git belongs
-    # to the reviewing agent (ADR 0011).
+    # parity: intentional (allow, deny) -- Bash(git commit:*),
+    # Bash(git push:*): git belongs to the reviewing agent (ADR 0011).
 
-Every `Tool(spec)` token in that comment block is exempt. A declaration that no
-longer describes a real asymmetry is reported too: a stale exemption hides the
-next drift behind a rule nobody re-read.
+Every `Tool(spec)` token in that comment block is then exempt in those lists and
+nowhere else. Naming the list is not ceremony: `git commit` is asymmetric twice
+over -- Claude allows it and Reasonix does not, Reasonix denies it and Claude
+does not -- and a blanket exemption let the *deny* be deleted while the *allow*
+kept the rule looking declared. That is the ADR 0011 guard, silently removable.
+
+A declaration that no longer describes a real asymmetry is reported too: a stale
+exemption hides the next drift behind a rule nobody re-read.
+
+The marker is anchored to the start of a comment, so prose that merely mentions
+the mechanism -- this docstring, the header of reasonix.toml -- cannot open a
+block by accident.
 
 Exit codes: 0 in step, 1 drift or a stale exemption, 2 usage or parse error.
 
@@ -41,8 +51,12 @@ import sys
 import tomllib
 from pathlib import Path
 
-# The opening line of a declared-asymmetry comment block in reasonix.toml.
-MARKER_RE = re.compile(r"#.*\bparity:\s*intentional\b", re.I)
+# The opening line of a declared-asymmetry comment block in reasonix.toml, with
+# the list or lists it speaks for. Anchored at the start of a comment: a mention
+# in prose must not be able to open a block.
+MARKER_RE = re.compile(r"^\s*#\s*parity:\s*intentional\b[ \t]*(?:\(([^)]*)\))?", re.I)
+RULE_TOKEN_RE = re.compile(r"([A-Za-z_][A-Za-z_0-9]*)\(([^)]*)\)")
+LISTS = ("allow", "deny")
 
 
 def normalise(rule: str) -> tuple[str, str]:
@@ -67,28 +81,51 @@ def show(rule: tuple[str, str]) -> str:
     return f"{tool}({spec})" if spec else tool
 
 
-def read_exemptions(text: str) -> set[tuple[str, str]]:
-    """Every `Tool(spec)` named in a `# parity: intentional` comment block.
+def read_exemptions(text: str, where: str) -> tuple[set[tuple[str, tuple[str, str]]], list[str]]:
+    """Every `(list, rule)` pair declared in a `# parity: intentional` block.
 
     A block is the marker line plus the comment lines that follow it, so a
-    declaration may wrap over as many lines as its reason needs.
+    declaration may wrap over as many lines as its reason needs. Returns the
+    pairs and the malformed declarations, which are reported rather than
+    ignored -- a marker nobody parses is worse than no marker.
     """
-    exempt: set[tuple[str, str]] = set()
+    exempt: set[tuple[str, tuple[str, str]]] = set()
+    problems: list[str] = []
     lines = text.splitlines()
     index = 0
     while index < len(lines):
-        if not MARKER_RE.search(lines[index]):
+        marker = MARKER_RE.match(lines[index])
+        if not marker:
             index += 1
             continue
-        block = [lines[index]]
+        site = f"{where}:{index + 1}"
+        # Drop the marker itself, so `intentional(allow)` cannot be read as a rule.
+        block = [lines[index][marker.end():]]
         index += 1
         while index < len(lines) and lines[index].lstrip().startswith("#"):
             block.append(lines[index])
             index += 1
-        joined = " ".join(block)
-        for tool, spec in re.findall(r"([A-Za-z_][A-Za-z_0-9]*)\(([^)]*)\)", joined):
-            exempt.add(normalise(f"{tool}({spec})"))
-    return exempt
+
+        labels = [part.strip().lower() for part in (marker.group(1) or "").split(",")]
+        labels = [label for label in labels if label]
+        rules = {normalise(f"{tool}({spec})") for tool, spec in RULE_TOKEN_RE.findall(" ".join(block))}
+
+        if not labels:
+            problems.append(
+                f"{site}: a `parity: intentional` declaration names no list - "
+                f"write `# parity: intentional (allow)`, `(deny)` or `(allow, deny)`"
+            )
+        for label in labels:
+            if label not in LISTS:
+                problems.append(f"{site}: unknown list {label!r} - one of {', '.join(LISTS)}")
+        if not rules:
+            problems.append(f"{site}: a `parity: intentional` declaration names no rule")
+
+        for label in labels:
+            if label in LISTS:
+                for rule in rules:
+                    exempt.add((label, rule))
+    return exempt, problems
 
 
 def main(argv: list[str]) -> int:
@@ -134,35 +171,39 @@ def main(argv: list[str]) -> int:
         reasonix_deny = {normalise(r) for r in reasonix_perms.get("deny", [])}
         # forbid_read is the mechanism that stands in for Claude's Read denies.
         reasonix_deny |= {normalise(f"Read({path})") for path in forbid_read}
-        exempt = read_exemptions(raw_reasonix)
+        exempt, problems = read_exemptions(raw_reasonix, str(reasonix_path))
     except ValueError as error:
         print(f"check_permission_parity: {error}", file=sys.stderr)
         return 2
 
-    asymmetric: set[tuple[str, str]] = set()
-    problems: list[str] = []
+    # Keyed by list, not by rule alone: `git commit` is asymmetric in the allow
+    # lists AND in the deny lists, for opposite reasons, and one blanket
+    # exemption used to cover both -- so deleting the deny that ADR 0011 rests
+    # on left the allow-side difference keeping the rule "declared".
+    asymmetric: set[tuple[str, tuple[str, str]]] = set()
 
     for label, claude_side, reasonix_side in (
         ("allow", claude_allow, reasonix_allow),
         ("deny", claude_deny, reasonix_deny),
     ):
         for rule in sorted(claude_side - reasonix_side):
-            asymmetric.add(rule)
-            if rule not in exempt:
+            asymmetric.add((label, rule))
+            if (label, rule) not in exempt:
                 problems.append(
                     f"{label}: {show(rule)} is in {settings_path} and not in {reasonix_path}"
                 )
         for rule in sorted(reasonix_side - claude_side):
-            asymmetric.add(rule)
-            if rule not in exempt:
+            asymmetric.add((label, rule))
+            if (label, rule) not in exempt:
                 problems.append(
                     f"{label}: {show(rule)} is in {reasonix_path} and not in {settings_path}"
                 )
 
-    for rule in sorted(exempt - asymmetric):
+    for label, rule in sorted(exempt - asymmetric):
         problems.append(
-            f"stale exemption: {show(rule)} is declared intentional in {reasonix_path} "
-            f"but the two files agree about it - delete the declaration"
+            f"stale exemption: {show(rule)} is declared intentional for the {label} "
+            f"list in {reasonix_path}, but the two files agree about it there - "
+            f"delete the declaration"
         )
 
     if problems:
