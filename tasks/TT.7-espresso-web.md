@@ -37,6 +37,19 @@ by running Gradle in the container against the host's adb server over TCP. Defin
 target is part of this task, and `STATUS.md`'s open question about adb-from-container is
 answered here.
 
+**Two measurements from T7.2 (wave 22) that this task has to build on, both on Docker Engine:**
+
+1. `host.docker.internal` is a **Docker Desktop** name and does not exist on Docker Engine.
+   `docker/compose.yml` now carries `extra_hosts: host.docker.internal:host-gateway`, so
+   `-PadbHost=host.docker.internal` resolves at all. Before that line it did not resolve, and
+   the symptom was a Gradle task that could not find a device — not a name error.
+2. **adb cannot listen on a single interface.** `adb -a -L tcp:172.17.0.1:5037 nodaemon server`
+   exits with `listening on specified hostname currently unsupported`. The only server that a
+   container can reach is `adb -a`, which binds `0.0.0.0:5037` and gives every host on the LAN
+   unauthenticated control of the phone. So `make connected` cannot quietly require it: either
+   the target tells the human to start that server and says what it costs, or this test runs
+   with Gradle on the host, which ADR 0003 forbids on Windows. Decide it here, in writing.
+
 ## Notes
 
 - Espresso-Web needs JavaScript enabled on the WebView, which T2.2 already does.
