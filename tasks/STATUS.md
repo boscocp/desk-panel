@@ -232,6 +232,30 @@ On the way there, a bug that was already in the repository: `make connected` pas
 Docker Desktop invention. `docker/compose.yml` maps it now. TT.7 would have hit it as "Gradle
 cannot find a device", which names neither the cause nor the file.
 
+### Found on `main`, not fixed here, and it needs a row
+
+**`python scripts/after_update.py --self-test` exits 1 on this Linux box**, two cases red:
+
+```
+FAIL  python_for: pythonw.exe -> python.exe, same directory
+FAIL  python_for: case does not matter on Windows
+```
+
+It is red on `main` too, so this wave did not cause it. `python_for` uses `Path`, which is
+`PosixPath` here, so `Path(r"C:\Python313\pythonw.exe").name` is the entire string and the
+function returns it unchanged — correct behaviour on Windows, untestable on Linux. The fix is
+`PureWindowsPath` for the Windows branch, which is what `verify_login_scope.py` already learned
+in T3.8: *"`check_macos_agent` tested `"/Library/LaunchAgents/" in str(path)` and a
+`WindowsPath` stringifies with backslashes, so the macOS row silently failed on the primary
+platform."* Same defect, mirrored.
+
+**The shape is the finding, not the two cases.** Wave 20 discovered that the server suite had
+been red on Windows since wave 18 because both waves were judged on Linux. Its own script is now
+red on Linux because it was judged on Windows. Nothing in `make check` runs `--self-test`, so
+neither direction is caught by the loop — it is caught by whoever happens to run the other OS.
+Wiring `--self-test` into `make check` is one line and is the actual fix; **it needs a task
+file**, and this section is not one.
+
 ### What the next wave inherits that is only true on this desk
 
 - **The phone is not on adb.** It answered `unauthorized` over USB at the start of this wave and
