@@ -13,9 +13,16 @@ services:
     working_dir: /workspace
     # `make connected` passes -PadbHost=host.docker.internal (TT.7). That name
     # is invented by Docker Desktop and does not exist on Docker Engine, which
-    # is what Linux runs: without this line it does not resolve, and the only
+    # is what Linux runs: without this line it does not resolve at all, and the
     # symptom is a Gradle task that cannot find a device. Harmless where the
     # name already exists.
+    #
+    # Necessary, not sufficient, and TT.7 still has to close the gap: the
+    # target's `adb start-server` binds 127.0.0.1:5037, so the connection from
+    # here is refused even once the name resolves. adb cannot be told to listen
+    # on one interface -- only `adb -a`, on 0.0.0.0 -- which is the measurement
+    # in tasks/T7.2-wireless-adb.md and the reason the phone belongs to the
+    # host.
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

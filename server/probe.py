@@ -186,7 +186,10 @@ def evaluate(args):
     )
 
     matched = True
-    detail = ""
+    # A list, not a string: with --expect-header and --expect-json-keys both
+    # given and both failing, a single slot showed the second and silently
+    # dropped the first, so the operator saw half of why it failed.
+    details = []
     if args.expect is not None:
         matched = matched and kind == args.expect
     if args.expect_status is not None:
@@ -194,21 +197,24 @@ def evaluate(args):
     if args.expect_header is not None:
         if kind != "up":
             matched = False
+            details.append("no response, so no headers to check")
         else:
             wrong = mismatched_headers(headers, args.expect_header)
             if wrong:
                 matched = False
-                detail = " (" + "; ".join(wrong) + ")"
+                details.extend(wrong)
 
     if args.expect_json_keys is not None:
         wanted = [k.strip() for k in args.expect_json_keys.split(",") if k.strip()]
         if kind != "up":
             matched = False
+            details.append("no response, so no JSON to check")
         else:
             absent = missing_json_keys(body, wanted)
             if absent:
                 matched = False
-                detail = f" (missing JSON keys: {', '.join(absent)})"
+                details.append(f"missing JSON keys: {', '.join(absent)}")
+    detail = " (" + "; ".join(details) + ")" if details else ""
     return matched, kind, status, detail
 
 

@@ -16,6 +16,7 @@ import functools
 import html
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -52,6 +53,20 @@ APK_DIR = SCRIPT_DIR.parent / "out"
 # Without this exact type Chrome on Android saves the file instead of offering
 # to install it, which is the whole point of the route.
 APK_CONTENT_TYPE = "application/vnd.android.package-archive"
+
+# The name build.gradle.kts renames the release APK to. It is preferred over
+# every other APK in out/ and the reason is not tidiness: the phone carries a
+# release-signed build, a debug-signed one fails to install over it with
+# INSTALL_FAILED_UPDATE_INCOMPATIBLE, and the only way out is an uninstall --
+# which throws away MIUI's autostart and battery grants, and those are manual
+# per-device toggles that need somebody standing at the phone. See
+# android/app/build.gradle.kts and docs/INSTALL-PHONE.md.
+RELEASE_APK_NAME = "desk-panel-release.apk"
+
+# A Content-Disposition filename goes into a header unescaped, so anything that
+# is not this shape is replaced rather than quoted. A file in out/ is build
+# output, but it is also whatever anybody drops there.
+SAFE_FILENAME = re.compile(r"^[A-Za-z0-9._-]+$")
 
 # The two names the script_dir fallback will answer to, best first. Order is
 # the whole rule: config.toml wins wherever both exist (T3.12 step 3).
@@ -759,29 +774,69 @@ def action_id(path):
     return rest
 
 
-def newest_apk(directory):
-    """The most recently modified `*.apk` in `directory`, or None.
+def apk_to_serve(directory):
+    """Which `*.apk` in `directory` `/app` hands over, or None.
 
-    Newest by mtime rather than by name: `out/` holds `app-debug.apk` and
-    `desk-panel-release.apk` side by side, and the one to install is whichever
-    was built last, not whichever sorts first. A directory that does not exist
-    is the same answer as an empty one -- a fresh clone has no `out/` and that
-    is not an error, it is "build first".
+    **The release build wins whenever there is one**, however old it is. Newest
+    by mtime was the first rule here and it was wrong in the one way that
+    costs a person a trip to the phone: `out/` holds `app-debug.apk` and
+    `desk-panel-release.apk` side by side, `make apk` is assembleDebug, and a
+    debug-signed APK cannot install over the release-signed one the panel
+    actually runs. The failure is INSTALL_FAILED_UPDATE_INCOMPATIBLE and the
+    only way past it is an uninstall, which drops the MIUI toggles.
+
+    Newest-by-mtime is still the rule *among the rest*, for the case that has
+    no release build at all: a fresh checkout where somebody has only ever run
+    `make apk`.
+
+    A directory that does not exist is the same answer as an empty one -- a
+    fresh clone has no `out/`, and that is not an error, it is "build first".
     """
+    release = directory / RELEASE_APK_NAME
+    if _is_readable_file(release):
+        return release
+
     try:
-        # is_file() and not just the suffix: `out/` already holds a directory
-        # (baselineProfiles), and a directory named `x.apk` would be picked,
-        # then read -- IsADirectoryError, surfacing as a 500 on a route whose
-        # whole job is to hand over a file.
-        candidates = [
-            child for child in directory.iterdir()
-            if child.suffix == ".apk" and child.is_file()
-        ]
-    except (FileNotFoundError, NotADirectoryError, PermissionError):
+        children = list(directory.iterdir())
+    except OSError:
         return None
+
+    # is_file() and not just the suffix: `out/` already holds a directory
+    # (baselineProfiles), and a directory named `x.apk` would be picked, then
+    # read -- IsADirectoryError, surfacing as a 500 on a route whose whole job
+    # is to hand over a file. stat() is guarded for the same reason one step
+    # further out: a dangling symlink answers iterdir() and not stat().
+    candidates = []
+    for child in children:
+        if child.suffix != ".apk":
+            continue
+        try:
+            stat = child.stat()
+        except OSError:
+            continue
+        if child.is_file():
+            candidates.append((stat.st_mtime, child))
     if not candidates:
         return None
-    return max(candidates, key=lambda child: child.stat().st_mtime)
+    return max(candidates)[1]
+
+
+def _is_readable_file(path):
+    try:
+        return path.is_file()
+    except OSError:
+        return False
+
+
+def attachment_filename(name):
+    """Pure: `name` if it is safe to put in a header, else a fixed fallback.
+
+    `send_header` does no validation, so a filename carrying a quote or a CRLF
+    would break the response or inject a header into it. Selection is by what
+    is in `out/`, which is build output on a good day and whatever landed there
+    on a bad one, so this is not hypothetical enough to skip.
+    """
+    return name if SAFE_FILENAME.match(name) else "app.apk"
 
 
 def apk_download(directory):
@@ -792,8 +847,18 @@ def apk_download(directory):
     here is a person holding a phone, not the panel: every other error in this
     file is JSON because the panel is what reads it.
     """
-    apk = newest_apk(directory)
-    if apk is None:
+    apk = apk_to_serve(directory)
+    body = None
+    if apk is not None:
+        try:
+            body = apk.read_bytes()
+        except OSError:
+            # The file was there when it was chosen and is not there now, or
+            # cannot be read: a build replacing it mid-request, a dangling
+            # symlink. "There is not one" is the accurate answer and the
+            # useful one; the alternative is a 500 that says nothing.
+            body = None
+    if body is None:
         return (
             404,
             b"No APK in out/. Build one first:\n"
@@ -801,11 +866,10 @@ def apk_download(directory):
             "text/plain; charset=utf-8",
             (),
         )
-    body = apk.read_bytes()
     # The filename is the only reason this header is here. Without it the
     # browser saves the download as "app", with no extension, and Android
     # will not open it.
-    disposition = f'attachment; filename="{apk.name}"'
+    disposition = f'attachment; filename="{attachment_filename(apk.name)}"'
     return 200, body, APK_CONTENT_TYPE, (("Content-Disposition", disposition),)
 
 
@@ -816,15 +880,26 @@ def index_page(directory):
     a link, and because a bare host:port answering 404 reads like the server
     is broken.
     """
-    apk = newest_apk(directory)
-    if apk is None:
+    apk = apk_to_serve(directory)
+    try:
+        size = apk.stat().st_size if apk is not None else None
+    except OSError:
+        size = None
+    if apk is None or size is None:
         offer = "<p>No APK built yet.</p>"
     else:
-        megabytes = apk.stat().st_size / (1024 * 1024)
         offer = (
             f'<p><a href="/app">Install {html.escape(apk.name)}</a> '
-            f"({megabytes:.1f}&nbsp;MB)</p>"
+            f"({size / (1024 * 1024):.1f}&nbsp;MB)</p>"
         )
+        if apk.name != RELEASE_APK_NAME:
+            # Worth a sentence rather than a silent download: this build will
+            # refuse to install over a release-signed one, and the error
+            # Android shows for that does not say why.
+            offer += (
+                "<p>This is not the release build. It will not install over one "
+                "&mdash; run <code>assembleRelease</code> first.</p>"
+            )
     body = (
         "<!doctype html><meta charset=utf-8>"
         '<meta name=viewport content="width=device-width,initial-scale=1">'

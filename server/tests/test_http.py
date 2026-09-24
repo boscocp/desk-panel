@@ -178,9 +178,6 @@ class DataRouteTests(unittest.TestCase):
         self.assertEqual(json.loads(body.decode("utf-8")), {"ok": True})
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class ApkOverRealHttpTests(unittest.TestCase):
     """T3.6 over a socket. route()'s own tests cover which file is chosen;
@@ -290,3 +287,6 @@ class ApkMissingOverRealHttpTests(unittest.TestCase):
             conn.close()
         self.assertEqual(resp.status, 404)
         self.assertIn(b"assembleRelease", body)
+
+if __name__ == "__main__":
+    unittest.main()
