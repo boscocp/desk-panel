@@ -7,8 +7,15 @@ Target device: Redmi Note 10, Android 12, MIUI 14.0.9. AMOLED, 2400x1080, used i
 The PC server serves the APK. From the phone's browser:
 
 ```
-http://<pc-ip>:8777/app
+http://<pc-ip>:8777/
 ```
+
+That page has one link, which is `/app` — worth a bookmark, because a host and a port is less
+to type on a phone than a host, a port and a path. `/app` serves **the newest `.apk` in
+`out/`**, by modification time: `out/` holds `app-debug.apk` and `desk-panel-release.apk` side
+by side, and the one you want is whichever was built last, not whichever sorts first. If
+nothing has been built the route answers 404 with the build command in it, rather than an empty
+page that reads like the server is broken.
 
 Download, then install. MIUI will ask you to allow installs from the browser once.
 
@@ -131,11 +138,31 @@ adb connect <ip>:<port>
 adb logcat -s DeskPanel
 ```
 
-Whether this works from inside the build container is not something the Android docs cover —
-pairing uses mDNS, which may not cross the container boundary. If it does not, extract
-`platform-tools` into `tools/platform-tools/` in this repo and run adb from the host. It is a
-zip with no installer, `tools/` is gitignored, and deleting the folder removes it completely —
-so the "nothing installed on Windows" promise holds either way.
+**Run adb on the host, not inside the build container.** The container does ship `adb` — the
+image installs `platform-tools` — but it should not be the thing that owns the phone, and the
+reason is measured rather than assumed:
+
+- The container reaches the host by `host.docker.internal`, which is **invented by Docker
+  Desktop and absent on Docker Engine**, i.e. on Linux. `docker/compose.yml` now maps it with
+  `extra_hosts: host.docker.internal:host-gateway`; without that line the name does not resolve
+  at all and the only symptom is a Gradle task that cannot find a device.
+- For the container to use the host's adb server, that server has to accept a connection from
+  the bridge — and **adb cannot listen on one interface**. `adb -a -L tcp:172.17.0.1:5037
+  nodaemon server` exits with `could not install *smartsocket* listener: listening on specified
+  hostname currently unsupported`. The only thing that works is `adb -a`, which binds
+  `0.0.0.0:5037` and hands **anyone on the LAN full adb control of the phone**, with no
+  authentication in front of it. That is a large price for tidiness.
+
+So: pair and connect from the host, and let the container build. On Windows that means
+extracting `platform-tools` into `tools/platform-tools/` in this repo rather than installing
+anything — a zip with no installer, `tools/` is gitignored, and deleting the folder removes it
+completely, so the "nothing installed on Windows" promise ([ADR 0003](adr/0003-containerized-toolchain.md))
+holds either way.
+
+Pairing is one-time per host; the connection survives until the phone forgets it or wireless
+debugging is turned off. Some access points block mDNS — if *Pair device with pairing code*
+never finds the host, the explicit `adb pair <ip>:<pair-port>` above does not need discovery at
+all, and a phone hotspot is the quickest way to tell the two apart.
 
 ## Battery
 

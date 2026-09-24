@@ -613,12 +613,12 @@ class ActionIdTests(unittest.TestCase):
         # 501 says "this route exists and does nothing yet", which is the
         # truth. 404 would say it does not exist and 200 would say something
         # happened.
-        status, _, content_type = route("POST", "/action/lock")
+        status, _, content_type, _ = route("POST", "/action/lock")
         self.assertEqual(status, 501)
         self.assertEqual(content_type, "application/json")
 
     def test_get_to_an_action_is_404(self):
-        status, _, _ = route("GET", "/action/lock")
+        status, _, _, _ = route("GET", "/action/lock")
         self.assertEqual(status, 404)
 
 
@@ -627,12 +627,12 @@ class RouteWithoutAppTests(unittest.TestCase):
     two-argument route tests meaningful."""
 
     def test_quotes_without_an_app_is_503_not_a_crash(self):
-        status, _, content_type = route("GET", "/quotes")
+        status, _, content_type, _ = route("GET", "/quotes")
         self.assertEqual(status, 503)
         self.assertEqual(content_type, "application/json")
 
     def test_weather_without_an_app_is_503(self):
-        status, _, _ = route("GET", "/weather")
+        status, _, _, _ = route("GET", "/weather")
         self.assertEqual(status, 503)
 
 
