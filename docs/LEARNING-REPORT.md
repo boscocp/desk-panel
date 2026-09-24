@@ -244,13 +244,15 @@ Only what is cited. `—` means not recorded, which is itself a finding.
 | 17 | #22 | scroll loop, icons, localisation | +1,898 / −194 | **5, two of which changed behaviour** | `measure.js` had never measured three of the panel's eight sections; `pseudoInk` then measured a wrapping title as one line |
 | 18 | #23 | two cards, Linux login signal | +1,229 / −213 | **5, all applied** — the first review's own report was lost and had to be reconstructed from the diff | `sed_escape` produced exactly the corruption it was written to prevent; `is_day` read an explicit `null` as night |
 | 19 | #24 | the moon, the one-pixel shift, rain | +2,577 / −156 | **9, all applied, none declined** | a test that passed only in this timezone, and whose property was genuinely false; the mean-synodic fallback was cached as a success |
+| 20 | #26 | the two-agent setup becomes a task | +616 / −19 | **6, all applied** | the wave's own new gate exited 0 after the ADR 0011 guard was deleted; and it was green about a command neither file allowed |
 
 There is no wave 3 or 5 in the record; the numbering has gaps, and the "Resuming after"
 sections in `STATUS.md` are the authority. Diffs are `gh pr list --json additions,deletions`,
 not estimates.
 
 **What the table says.** Review before merge has found between four and fourteen real things in
-every wave it was run on. It is the highest-yield step in the loop, and it is the one that costs
+every wave it was run on — including the wave whose entire subject was a new gate, where it
+found that the gate could be disarmed without failing. It is the highest-yield step in the loop, and it is the one that costs
 the least — it runs against a finished diff, in one pass, with no device.
 
 ---
