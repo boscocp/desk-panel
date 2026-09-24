@@ -36,6 +36,25 @@ it is cheap to settle: read the path the task actually passes and check the file
 Wave 19's lesson applies — **read the switch before the mechanism.** Settle "is it even
 registered, and what did it return" before reasoning about triggers.
 
+## Start with the script that now exists
+
+Wave 20 (PR #25, merged 2026-09-22 from another session) added exactly the tool for this:
+
+```powershell
+git pull
+python scripts/after_update.py
+```
+
+Read [`docs/UPDATING.md`](docs/UPDATING.md) if it fails. It finds the Scheduled Task, reads the
+paths the task was **actually registered with** rather than guessing, runs `--check-only`
+against that config, restarts through the launcher, and compares `/weather` against the key set
+the tree's own `normalise()` produces. Exit 0 means every check this OS could run passed, 1
+means something is really wrong, 2 means something could not be determined.
+
+If it answers cleanly and the panel still did not come up at logon, the trigger itself is the
+suspect and the list below is the next step. If it fails, its report names the step — go
+straight to that row of the table.
+
 ## Triage, in order. Each line is an exit code or one field.
 
 Run from the repository root, in PowerShell.
