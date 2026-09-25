@@ -201,9 +201,15 @@ make alone:
    free on public and paid otherwise, `dependency-review-action` needs Advanced Security. Steps
    5 and 8 would spend the owner's money and change repo-level settings.
 
-If neither is settled, the unblocked alternative is **T7.4 + T7.5 + T7.6** — the documentation
-cluster T7.8 depends on, none of which needs the phone, Docker or a public repo. That also
-produces the three missing guard scripts, after which T7.8's step 7 is true as written.
+**Decided from the chair, 2026-09-24: neither. Next is T7.4 + T7.5 + T7.6**, the documentation
+cluster T7.8 actually depends on — none of which needs the phone, Docker or a public repo. It
+also produces the three missing guard scripts, after which T7.8's step 7 is true as written and
+its `guards` job has five real commands to run instead of two.
+
+The repo stays private for now. Making it public would make all of T7.8 free, and it was
+considered and set aside: **T7.3 is explicitly the last look before the repo opens** — secrets,
+README, screenshots — and it is still `todo`. Opening first would run that task after the thing
+it exists to gate.
 
 ### A self-test no target invokes is a test suite with no runner
 
@@ -221,6 +227,19 @@ in `make check` with the other four.
 deliberately does not require the file: T9.1 and T9.2 are blocked on ADR 0015 being written, and
 a prerequisite you have not met is the normal case. The shape is checked; the number cannot be.
 
+### The backslash cost this repository time for the third time
+
+Two independent instances in one wave, one written and one found. The new Makefile target was
+drafted through a heredoc and every continuation collapsed; then the review found that the
+continuations which *did* survive into the committed file would not have worked on this desk
+either, because the worktree is CRLF and a backslash followed by CR is not a line join. `cat -A`
+showed both; `sed -n` showed neither. The recipe now has no continuations at all.
+
+Wave 20 found this in `sed` through Git Bash, TT.11 built the probe for it, and this session had
+read both notes before adding a third case. The rule that follows is mechanical, because "be
+careful" has now failed twice: **a file whose content depends on backslashes is edited with a
+file tool, not through the shell, and it is read back with `cat -A`.**
+
 ### The shell ate the backslashes, one wave after the note about it
 
 The new Makefile target was written through a heredoc and every `\`+newline continuation
@@ -236,13 +255,16 @@ read back with `cat -A`.
 
 ### What the next wave inherits that is only true on this desk
 
-- **The Linux half of TT.12 is unproven here.** No WSL, no Docker, no `make`. The fix is sound
-  by construction — no `Path` remains in the decision — and both cases pass on Windows, but
-  nobody has watched them pass on Linux. CI is the first place that happens, and the first place
-  `lint-selftests` runs as a Make target rather than as its body in `sh`.
-- **CI still does not run the guard scripts.** `ci.yml` runs the three suites and nothing else,
-  which is exactly what T7.8 step 7 exists to fix. Until then `make check` is the only thing
-  that reaches them, and no machine runs it unasked.
+- **The Linux half of TT.12 is unproven, and CI does not fix that.** No WSL, no Docker, no
+  `make` here. The fix is sound by construction — no `Path` remains in the decision — and both
+  cases pass on Windows, but nobody has watched them pass on Linux. The first draft of this
+  section said CI would settle it; **it does not.** `ci.yml` runs the server suite, the web
+  suite and `gradlew test`, and none of the three invokes `after_update.py --self-test`.
+- So the wave fixed a test nothing ran, added the target that runs it, and **that target is
+  still run by nobody but a human at this desk.** `make check` is the only thing that reaches
+  the guard scripts, and no machine runs `make check` unasked. This is the gap T7.8 step 7
+  closes, and it is a better argument for T7.8 than wave 23 had: it is now about proving a fix,
+  not about tidiness.
 - **A wave was wasted before this one.** The session opened by rebuilding T0.6 against a `main`
   four waves stale, against a snapshot that reads as current. PR #30 was closed and its branch
   kept. One `git fetch` before branching is the whole fix.

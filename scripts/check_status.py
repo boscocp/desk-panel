@@ -66,18 +66,24 @@ def main(argv: list[str]) -> int:
             continue
         # Parenthetical asides are prose, not dependencies.
         declared = re.sub(r"\([^)]*\)", "", m.group(1))
-        for dep in (d.strip() for d in declared.split(",")):
-            dep = dep.strip("`")
-            if not dep or dep.lower() in {"none", "-"}:
+        for item in (d.strip() for d in declared.split(",")):
+            bare = item.strip("`")
+            if not bare or bare.lower() in {"none", "-"}:
                 continue
-            if dep.upper().startswith("ADR"):
+            if bare.upper().startswith("ADR"):
                 # A decision, not a task: it gates the work but is not a node in
                 # the task graph, so it is neither looked up in `files` nor
-                # walked for cycles.
-                if not ADR_RE.match(dep):
-                    problems.append(f"{path.name}: prereq {dep!r} is not `ADR NNNN`")
+                # walked for cycles. The whole item is matched, because the
+                # number is the half that means anything.
+                if not ADR_RE.match(bare):
+                    problems.append(f"{path.name}: prereq {bare!r} is not `ADR NNNN`")
                 continue
-            dep = dep.split()[0]
+            # Strip again after taking the first word, never only before it: a
+            # prereq written as `` `T3.12` and friends `` keeps a trailing
+            # backtick on the id otherwise, and a task that exists reads as
+            # missing. `Files:` fields all over this repo use backticks, so the
+            # convention is one copy-paste away. Found by review.
+            dep = bare.split()[0].strip("`")
             if dep not in files:
                 problems.append(f"{path.name}: prereq {dep} does not exist")
             else:

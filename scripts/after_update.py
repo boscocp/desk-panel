@@ -166,8 +166,13 @@ def _pure(path_str):
 
     A drive letter or a backslash means Windows. Nothing else does -- a bare
     `pythonw.exe` has no separator at all and either flavour answers alike.
+
+    The drive letter is matched **without** requiring a separator after it:
+    `C:pythonw.exe` is drive-relative and legal on Windows, and the first cut of
+    this regex demanded `C:\\` or `C:/`, so that form fell through to
+    `PurePosixPath` and the swap quietly did not happen. Found by review.
     """
-    if re.match(r"^[A-Za-z]:[\\/]", path_str) or "\\" in path_str:
+    if re.match(r"^[A-Za-z]:", path_str) or "\\" in path_str:
         return PureWindowsPath(path_str)
     return PurePosixPath(path_str)
 
@@ -869,6 +874,21 @@ def self_test_cases():
             "python_for: case does not matter on Windows",
             lambda: python_for("C:\\Py\\PYTHONW.EXE").endswith("python.exe"),
         ),
+        # The case that guards the fix ON WINDOWS, which is the only platform
+        # that ever runs this suite. The three cases above all pass against the
+        # old, platform-bound body here -- so the fix for a test nothing ran was
+        # itself tested by nothing. With `Path` this returns `\\usr\\bin\\python`,
+        # because a WindowsPath stringifies with backslashes. Found by review.
+        (
+            "python_for: a POSIX pythonw keeps its separators",
+            lambda: python_for("/usr/bin/pythonw") == "/usr/bin/python",
+        ),
+        # The flavour decision itself, which had no coverage of its own.
+        ("_pure: a drive letter is Windows", lambda: isinstance(_pure("C:\\Py\\x"), PureWindowsPath)),
+        ("_pure: drive-relative is Windows too", lambda: isinstance(_pure("C:pythonw.exe"), PureWindowsPath)),
+        ("_pure: a backslash is Windows", lambda: isinstance(_pure("Py\\x"), PureWindowsPath)),
+        ("_pure: a POSIX path is POSIX", lambda: isinstance(_pure("/usr/bin/x"), PurePosixPath)),
+        ("_pure: a bare name is POSIX", lambda: isinstance(_pure("pythonw.exe"), PurePosixPath)),
         ("rebuild: a theme change needs an APK", lambda: needs_rebuild(["web/themes/neon/theme.css"]) == ["web/themes/neon/theme.css"]),
         ("rebuild: an Activity change needs an APK", lambda: len(needs_rebuild(["android/app/src/main/java/X.java"])) == 1),
         ("rebuild: the server does not", lambda: needs_rebuild(["server/server.py"]) == []),
