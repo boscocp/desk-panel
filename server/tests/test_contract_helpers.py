@@ -166,11 +166,31 @@ class TheGuardAndTheFilename(unittest.TestCase):
         self.assertTrue(fnmatch.fnmatch(path.name, "contract_*.py"))
         self.assertTrue(path.is_file())
 
+    def test_zero_means_no(self):
+        # The trap: `os.environ.get("RUN_CONTRACT_TESTS")` is truthy for "0",
+        # so the one value a person types to turn something off turns it on.
+        # A shell profile or a CI matrix that sets every flag to 0 is how this
+        # arrives, not a deliberate keystroke.
+        for value in ("", "0", "false", "False", "no", "off", "  OFF  "):
+            with self.subTest(value=value):
+                self.assertFalse(
+                    contract_upstream.wants_network({"RUN_CONTRACT_TESTS": value}),
+                    f"{value!r} enabled the live tests")
+
+    def test_anything_meant_as_yes_means_yes(self):
+        for value in ("1", "true", "yes", "on", "please"):
+            with self.subTest(value=value):
+                self.assertTrue(
+                    contract_upstream.wants_network({"RUN_CONTRACT_TESTS": value}))
+
+    def test_an_absent_variable_means_no(self):
+        self.assertFalse(contract_upstream.wants_network({}))
+
     def test_the_guard_follows_the_environment_variable(self):
         # Asserted against the live env rather than pinned to "skipped", so
         # this passes in both directions: `make test-server` skips,
         # `RUN_CONTRACT_TESTS=1 make test-server` does not.
-        expected = bool(os.environ.get("RUN_CONTRACT_TESTS"))
+        expected = contract_upstream.wants_network()
 
         @contract_upstream.LIVE
         class Guarded(unittest.TestCase):

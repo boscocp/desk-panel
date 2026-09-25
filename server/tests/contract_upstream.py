@@ -45,6 +45,23 @@ from server import (
 
 SKIP_REASON = "requires network - set RUN_CONTRACT_TESTS=1 (make contract)"
 
+# The spellings that mean "no". `os.environ.get("RUN_CONTRACT_TESTS")` on its
+# own is the obvious guard and it has a trap in it: `RUN_CONTRACT_TESTS=0` is a
+# non-empty string, so the one value a person types to *disable* something
+# turns it on. Nobody here would write that on purpose; a shell profile, a CI
+# matrix or a `.env` that sets every flag to 0 would.
+OFF = {"", "0", "false", "no", "off"}
+
+
+def wants_network(env=None):
+    """Pure: does the environment ask for the live tests?
+
+    Takes the mapping rather than reading os.environ, so the helper test can
+    ask it about a dozen spellings without touching the process it runs in.
+    """
+    value = (env if env is not None else os.environ).get("RUN_CONTRACT_TESTS", "")
+    return str(value).strip().lower() not in OFF
+
 
 def LIVE(case):
     """Mark a case as needing the network, and skip it unless asked for.
@@ -62,7 +79,7 @@ def LIVE(case):
     what `test_contract_helpers` walks the module for.
     """
     case.needs_network = True
-    return unittest.skipUnless(os.environ.get("RUN_CONTRACT_TESTS"), SKIP_REASON)(case)
+    return unittest.skipUnless(wants_network(), SKIP_REASON)(case)
 
 # brapi's four documented free-tier tickers. One symbol per request is what the
 # free plan allows, so these are asked for one at a time; see
@@ -312,7 +329,12 @@ class OpenMeteoContract(ContractCase):
             "stopped aligning the arrays, and the card loses its min and max silently")
         self.assertIsNotNone(weather["maxC"], "daily maximum did not resolve for today")
         self.assertIsNotNone(weather["tempC"], "current temperature did not resolve")
-        self.assertIsInstance(weather["isDay"], bool)
+        # No `assertIsInstance(weather["isDay"], bool)` here: `_is_day` ends in
+        # `bool(...)` on every path, so that assertion holds whatever the
+        # upstream sends and could not go red -- a check that cannot fail is
+        # worse than no check. The live claim about is_day is the key's
+        # presence, and test_forecast_carries_every_field_the_card_reads makes
+        # it against the raw body, which is where it can still be wrong.
 
 
 @LIVE

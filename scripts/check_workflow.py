@@ -159,9 +159,15 @@ def workflow_jobs(text: str) -> dict[str, list[str]]:
         indent = len(raw) - len(raw.lstrip(" "))
 
         # Inside a `run: |` block scalar: everything indented past the step
-        # keeps belonging to it.
+        # keeps belonging to it. A blank line does too -- it carries no
+        # indentation to compare, and treating it as the end of the block
+        # silently dropped every command after it, which reached the reader as
+        # "CI does not run ./gradlew assembleDebug" about a workflow that does.
+        # A dropped command is the one thing this file must never do quietly.
         if block is not None:
-            if stripped and indent > block_indent:
+            if not stripped:
+                continue
+            if indent > block_indent:
                 block.append(stripped)
                 continue
             jobs[job].append(normalise(" && ".join(block)))
@@ -177,8 +183,13 @@ def workflow_jobs(text: str) -> dict[str, list[str]]:
         if not in_jobs:
             continue
 
-        if indent == 2 and stripped.endswith(":"):
-            job = stripped[:-1].strip()
+        # A job key, with a trailing comment tolerated: `web: # the node suite`
+        # does not end in a colon, and reading it as "not a job" handed the
+        # next job's steps to the previous one -- two wrong complaints about a
+        # workflow whose only sin was a comment.
+        opened = re.match(r"^([^\s#:]+):\s*(?:#.*)?$", stripped)
+        if indent == 2 and opened:
+            job = opened.group(1)
             jobs.setdefault(job, [])
             continue
         if job is None:
@@ -263,6 +274,34 @@ def check(workflow_text: str, makefile_text: str) -> list[str]:
             "Makefile's text no longer means it runs the same thing. The Makefile "
             "runs from the repository root and `./gradlew` there is the shim into "
             "android/ - use it.")
+
+    # The same lie, told two other ways, and the comparison above cannot see
+    # either: a step that is present in the file is not necessarily a step that
+    # runs, nor one whose failure is a failure.
+    #
+    #   `if:`                 - the step is skipped on whichever events the
+    #                           expression excludes, and the reader counts it
+    #                           as run. `if: github.event_name == 'push'` on
+    #                           the android suite is green here and no Gradle
+    #                           on a pull request.
+    #   `continue-on-error:`  - the step runs and its red is discarded, so CI
+    #                           is green while the Makefile's target exits 1.
+    #
+    # Banned outright rather than inspected, for the reason the whole file
+    # exists: a rule that tries to decide which conditions are harmless is a
+    # rule that will one day decide wrongly and say nothing. The three layers
+    # here have no conditions to express - they run, or the workflow is not
+    # doing what the Makefile does.
+    for pattern, why in (
+        (r"^\s*(?:-\s*)?if:",
+         "a step or job is conditional, so it can be skipped while this check still "
+         "counts it as run - CI would be green having run less than the Makefile"),
+        (r"^\s*(?:-\s*)?continue-on-error:",
+         "a step or job discards its own failure, so CI stays green on a red suite - "
+         "`make check` exits non-zero there and CI must too"),
+    ):
+        if re.search(pattern, code, re.M):
+            problems.append(f"ci.yml: {why}.")
 
     for job, targets in LAYERS.items():
         if job not in jobs:
@@ -387,11 +426,51 @@ def self_test_cases():
                                "# connectedAndroidTest is deliberately absent, and\n"
                                "# RUN_CONTRACT_TESTS is deliberately unset.\njobs:"),
          GOOD_MAKEFILE, True),
+        # The two the review found, each written as the false *complaint* it
+        # produced. Both are the same defect wearing different clothes: the
+        # reader dropped a command it could not place, and a dropped command
+        # reaches the reader of this script as CI having stopped running
+        # something it runs perfectly well. A checker that cries wolf gets
+        # switched off, which costs more than the drift it was watching for.
+        # On the `web` job, which maps to one target, so the only thing the
+        # case can fail on is the blank line. Under the old reader the blank
+        # line closed the block, the line after it matched no `run:` and was
+        # dropped on the floor, and the complaint was that CI had stopped
+        # running a command sitting in plain sight two lines below.
+        ("a blank line inside a block scalar does not end it",
+         GOOD_WORKFLOW.replace(
+             '      - run: node --test "web/test/**/*.test.js"',
+             '      - run: |\n          node --test "web/test/**/*.test.js"\n\n'
+             '          node --test "web/extra.test.js"'),
+         GOOD_MAKEFILE.replace(
+             '\tnode --test "web/test/**/*.test.js"',
+             '\tnode --test "web/test/**/*.test.js" && node --test "web/extra.test.js"'),
+         True),
+        ("a job key with a trailing comment is still a job",
+         GOOD_WORKFLOW.replace("  web:", "  web:  # the node suite"),
+         GOOD_MAKEFILE, True),
         ("a working-directory is caught",
          GOOD_WORKFLOW.replace("  android:\n    steps:",
                                "  android:\n    defaults:\n      run:\n"
                                "        working-directory: android\n    steps:"),
          GOOD_MAKEFILE, False),
+        ("a suite made conditional is caught",
+         GOOD_WORKFLOW.replace("      - run: ./gradlew assembleDebug",
+                               "      - if: github.event_name == 'push'\n"
+                               "        run: ./gradlew assembleDebug"),
+         GOOD_MAKEFILE, False),
+        ("a suite allowed to fail is caught",
+         GOOD_WORKFLOW.replace("      - run: ./gradlew test",
+                               "      - run: ./gradlew test\n"
+                               "        continue-on-error: true"),
+         GOOD_MAKEFILE, False),
+        ("`if-no-files-found:` is not an `if:`",
+         GOOD_WORKFLOW.replace("      - run: ./gradlew assembleDebug",
+                               "      - run: ./gradlew assembleDebug\n"
+                               "      - uses: actions/upload-artifact@v4\n"
+                               "        with:\n          path: out/*.apk\n"
+                               "          if-no-files-found: error"),
+         GOOD_MAKEFILE, True),
     ]
 
 
@@ -421,17 +500,19 @@ def main(argv: list[str]) -> int:
         flag = args.pop(0)
         if flag == "--self-test":
             return self_test()
+        # Unknown before missing-value: a typo reported as "--workfow needs a
+        # value" sends the reader looking for the value rather than the typo.
+        if flag not in ("--workflow", "--makefile"):
+            print(f"check_workflow: unknown option {flag}", file=sys.stderr)
+            return 2
         if not args:
             print(f"check_workflow: {flag} needs a value", file=sys.stderr)
             return 2
         value = args.pop(0)
         if flag == "--workflow":
             workflow = Path(value)
-        elif flag == "--makefile":
-            makefile = Path(value)
         else:
-            print(f"check_workflow: unknown option {flag}", file=sys.stderr)
-            return 2
+            makefile = Path(value)
 
     for path in (workflow, makefile):
         if not path.is_file():
