@@ -1,7 +1,7 @@
 # Entry point for humans, CI and agents alike. Every target exits non-zero on failure.
 DC := docker compose -f docker/compose.yml run --rm build
 
-.PHONY: help check lint-tasks lint-notes lint-permissions lint-workflow test-server test-web test-android connected build apk contract e2e clean
+.PHONY: help check lint-tasks lint-notes lint-status lint-permissions lint-workflow lint-selftests test-server test-web test-android connected build apk contract e2e clean
 
 help:
 	@echo "check         run everything that does not need the phone"
@@ -14,11 +14,13 @@ help:
 	@echo "e2e           full end-to-end, needs the phone on adb"
 	@echo "lint-tasks    every acceptance criterion is a command with an exit code"
 	@echo "lint-notes    every finished wave left a note in docs/harness-notes/"
+	@echo "lint-status   STATUS.md and tasks/*.md still agree"
 	@echo "lint-permissions  .claude/settings.json and reasonix.toml are still twins"
 	@echo "lint-workflow ci.yml runs the same commands these targets do"
+	@echo "lint-selftests  every scripts/*.py that has a --self-test runs it"
 	@echo "clean         remove build output"
 
-check: lint-tasks lint-notes lint-permissions lint-workflow test-server test-web test-android
+check: lint-tasks lint-notes lint-status lint-permissions lint-workflow lint-selftests test-server test-web test-android
 
 lint-tasks:
 	python scripts/check_acceptance.py
@@ -26,16 +28,42 @@ lint-tasks:
 lint-notes:
 	python scripts/check_harness_notes.py
 
+lint-status:
+	python scripts/check_status.py
+
 lint-permissions:
 	python scripts/check_permission_parity.py
 
 # Both halves: the rules are checked against ci.yml, and the rules are
-# checked against themselves. --self-test exists in after_update.py too and
-# nothing ran it, so it was red on Linux for two waves (TT.12) - a self-test
-# no target invokes is a test suite with no runner.
+# checked against themselves.
 lint-workflow:
 	python scripts/check_workflow.py --self-test
 	python scripts/check_workflow.py
+
+# A self-test no target invokes is a test suite with no runner. after_update.py
+# had one, nothing ran it, and it was red on Linux from the day it was written
+# while every wave was judged on Windows (TT.12). Discovery is by grep over a
+# glob, never a list: the next script to grow a --self-test is covered by being
+# written, which a list would not do.
+#
+# It greps for the *quoted* flag, which is how a script that parses one spells
+# it. A bare `--self-test` also matches a docstring that merely documents the
+# flag, and such a script would then be run with an argument it does not
+# understand -- after which its exit code says whatever its argv handling
+# happens to say, which is not a self-test result. The cost is that an
+# implementation spelling it '--self-test' in single quotes is missed; this
+# repo writes double. Found by review.
+SELFTESTS := $(shell grep -l '"--self-test"' scripts/*.py)
+
+# No backslash continuations in this recipe, deliberately. This worktree is
+# CRLF, and a backslash followed by CR is not a line join, so make would run
+# each line in its own shell and the target would die on its own error message
+# with every script still unrun. The committed blob is LF, so a clone and CI
+# never see it -- which is exactly what makes it worth removing. Found by review.
+lint-selftests:
+	@# discovery is a glob over scripts/, never a list of names
+	@test -n "$(SELFTESTS)" || { echo "lint-selftests: nothing carries a --self-test"; exit 1; }
+	@for s in $(SELFTESTS); do echo "--> $$s --self-test"; python "$$s" --self-test || exit 1; done
 
 test-server:
 	python -m unittest discover -s server/tests -t .
