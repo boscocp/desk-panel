@@ -23,6 +23,17 @@ from pathlib import Path
 ID_RE = re.compile(r"^(T\d+\.\d+|TT\.\d+)-")
 ROW_RE = re.compile(r"^\|\s*(T\d+\.\d+|TT\.\d+)\s*\|", re.M)
 PREREQ_RE = re.compile(r"^Size:.*?Prereqs:\s*([^·\n]+)", re.M)
+# `Prereqs: T8.2, ADR 0015` - a decision can gate a task just as a task can, and
+# T9.1 and T9.2 both say so. This script used to read every comma-separated item
+# as a task id, take the first word, and report `prereq ADR does not exist`; it
+# had been red on main for some time because nothing ran it.
+#
+# The ADR is deliberately NOT required to exist. 0015 has not been written, and
+# that is precisely what those two rows are blocked on - a prerequisite you have
+# not met yet is the normal case, not a broken reference. The shape is checked
+# so `ADR fifteen` is still caught; the number cannot be, and a wrong one reads
+# the same as a forward reference.
+ADR_RE = re.compile(r"^ADR\s+\d{4}$", re.I)
 # Rows kept for history: the bootstrap commits, which predate the task system.
 BOOTSTRAP = {"T0.0", "T0.2", "T0.3", "T0.4"}
 
@@ -55,10 +66,24 @@ def main(argv: list[str]) -> int:
             continue
         # Parenthetical asides are prose, not dependencies.
         declared = re.sub(r"\([^)]*\)", "", m.group(1))
-        for dep in (d.strip() for d in declared.split(",")):
-            dep = dep.split()[0].strip("`") if dep else ""
-            if not dep or dep.lower() in {"none", "-"}:
+        for item in (d.strip() for d in declared.split(",")):
+            bare = item.strip("`")
+            if not bare or bare.lower() in {"none", "-"}:
                 continue
+            if bare.upper().startswith("ADR"):
+                # A decision, not a task: it gates the work but is not a node in
+                # the task graph, so it is neither looked up in `files` nor
+                # walked for cycles. The whole item is matched, because the
+                # number is the half that means anything.
+                if not ADR_RE.match(bare):
+                    problems.append(f"{path.name}: prereq {bare!r} is not `ADR NNNN`")
+                continue
+            # Strip again after taking the first word, never only before it: a
+            # prereq written as `` `T3.12` and friends `` keeps a trailing
+            # backtick on the id otherwise, and a task that exists reads as
+            # missing. `Files:` fields all over this repo use backticks, so the
+            # convention is one copy-paste away. Found by review.
+            dep = bare.split()[0].strip("`")
             if dep not in files:
                 problems.append(f"{path.name}: prereq {dep} does not exist")
             else:
