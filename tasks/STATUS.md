@@ -78,7 +78,7 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 | TT.4 | Contract tests, opt-in | done | 2026-09-24, wave 23. **Five upstreams, not the two the task file listed** — crypto and FX moved to Binance and AwesomeAPI when brapi turned out to charge for them (T3.3 subtask 0), and the moon arrived with T6.13; an upstream this file does not cover is one whose schema change reaches the desk as a blank card. 15 live cases, all green against the real APIs. Shape, never value: a helper asserts a field is **parseable as a number** rather than typed, because brapi sends JSON numbers where Binance and AwesomeAPI send the same quantities as strings and every normaliser runs `float()` anyway. Three cases are about more than presence — Binance's kline close is **positional** at index 4 and an inserted column would silently redraw the sparkline from the volume; open-meteo's daily arrays are asserted to still align with `current.time`, because the timezone parameter failing reaches the panel as a missing min and max rather than an error; and the USNO window is asserted to still bracket now with two New Moons, which the first cut of `LOOKBACK_DAYS`/`NUMP` did not. **The assertion mechanism got its own tests first** (wave 22's rule): 21 offline cases prove every helper fails and names the path, including the ones that would otherwise pass — `float(True)` is 1.0, so a price that became a flag reads as one; an empty `results` array must fail with a message rather than raise IndexError naming no field. `LIVE` sets a `needs_network` tag of its own **because `skipUnless` is the identity function once the variable is set** and leaves nothing to walk the module for — a case added without the decorator would then be invisible to everything but review, and it would be the one case that opens a socket from `make check`. 244 server tests, up from 223 |
 | TT.10 | Login-scope verifier tests, from fixtures | done | 2026-09-21. Makes T3.10 checkable without a Mac. 97 recorded cases now run under `unittest discover` as well as under `--self-test`, imported rather than copied; purity is asserted by nailing `run_command`, `read_registry_autologin`, `read_file` and `file_present` shut and re-running them all. Two rows of the task's fixture table were amended: the verifier proves the unit is outside `default.target`'s closure rather than checking `Linger`, which is the stronger property and is why T3.9 may pass with `Linger=yes`; and WSL is read from `/proc/sys/kernel/osrelease`, not `/proc/version`. Writing the named cases found that `detect_autologin` dispatches on `"win32"`, so a test spelling it `"windows"` silently tests the Linux branch |
 | TT.11 | The unit-rendering test skips a shell that cannot run it | done | 2026-09-22, wave 20. **Found by T3.13** on a clean `main`: the server suite was red on the Windows host with eight failures, and had been since wave 18 landed. Not the escaping, which is what it looks like and what the file's own docstring says has been wrong twice - read out of `install_user_unit.sh` and run through `sed -f`, the shipped `s/[\\&|]/\\&/g` is provably correct. **It is the transport**: Git Bash hands the `-e` argument to a native `sed.exe` through MSYS2's conversion, one backslash is eaten, and the escaping silently returns every path unchanged. Three reproductions were wrong before that landed, each mangled by a different quoting layer - including the agent's own shell collapsing `\\` in the diagnostic commands; only reading the bytes out of the file settled it. `shell_passes_backslash_to_sed()` hands sed a fixed `s/x/\\y/` and requires `\y` back, and **deliberately never calls `sed_escape`** - a skip keyed on "the escaping looks wrong" would have gone green for both historical bugs, so the acceptance asserts the probe does not call the function under test. Detected, never assumed from `sys.platform`, which would guess at which shells mangle arguments and lie the day MSYS2 fixes it. The suite is 191 tests, green, one skip; the escaping stays verified on Linux, where the installer actually runs |
-| TT.12 | The self-tests nothing runs | todo | Written 2026-09-24, wave 23, as wave 22's record asked. `python scripts/after_update.py --self-test` exits 1 on Linux and has since it was written: `python_for` uses `Path`, which is `PosixPath` here, so a Windows path is returned unchanged — correct on Windows, untestable off it, and the mirror image of the defect T3.8 found in `verify_login_scope.py`. **The shape is the finding**: wave 20 caught the server suite red on Windows because two waves were judged on Linux; this is the same thing pointing the other way, and neither direction is caught by the loop because nothing runs `--self-test`. A second red guard was found the same way while TT.9 was being written — `check_status.py` exits 1 on `main` because it reads `Prereqs: T8.2, ADR 0015` as naming a task called ADR. Same cause: `make check` runs three of the guard scripts and not these. The acceptance that matters is the one failing when a script grows a `--self-test` the new target does not reach |
+| TT.12 | The self-tests nothing runs | done | 2026-09-24, wave 24. Both scripts are green and `make check` now reaches them. `python_for` took the flavour from the OS instead of from the string, so on Linux `Path(r"C:\Py\pythonw.exe").name` was the whole string and the swap silently did not happen; a `_pure()` helper picks `PureWindowsPath` or `PurePosixPath` from the path itself, which is the mirror of the defect T3.8 fixed in `verify_login_scope.py`. `check_status.py` read every comma-separated prereq as a task id, so `ADR 0015` became `prereq ADR does not exist`; **the ADR is deliberately not required to exist** — T9.1 and T9.2 are blocked on it being written, and a prerequisite you have not met yet is the normal case. The shape is checked, so `ADR fifteen` still fails, and the number cannot be. Two new targets: `lint-status` and `lint-selftests`, the latter discovering by `grep -l -- '--self-test' scripts/*.py` rather than by a list, so the next script to grow one is covered by being written. Both mutation-tested: a hardcoded-list recipe fails the fourth acceptance line, and a malformed ADR plus a missing task prereq both still exit 1. **The Linux half is unproven on this desk** — no WSL, no Docker, so the fix is verified by construction (no `Path` remains in the decision) and by the two cases passing on Windows, not by a green run on Linux. CI is where that lands |
 
 ## Phase 4 — The core behaviour
 
@@ -180,6 +180,76 @@ and the first line of each file says so.
 |---|---|---|---|
 | T9.1 | **The next meeting, under the clock** | todo | Google Calendar and Microsoft Outlook merged, the soonest event under the clock in the `#shortcuts` strip, between T8.2's two buttons. Blocked behind T8.2 for a layout reason and behind **ADR 0016** for a bigger one: this is the first feature that puts *personal data* on a panel whose server has no authentication, and the refresh tokens it needs are credentials sitting on a desktop PC. OAuth stays on the PC and never reaches the APK — two acceptance lines exist for exactly that. The merge is where the design is: the two providers disagree about all-day events, about time zones and about the word for "declined" |
 | T9.2 | **Spike: can the panel talk to an assistant for nothing?** | todo | A button to ask something out loud and hear an answer, with the whole pipeline on the PC — invariant 1 means the page cannot call anything. Time-boxed, produces `docs/spikes/2026-voice-assistant.md` and a throwaway prototype under `spikes/`, and is allowed to conclude *do not build this*. The unknown is whether offline STT, a small local model and offline TTS fit inside a latency a person will stand at a panel for; Claude and DeepSeek are the paid comparison, not the plan. Also has to answer the awkward ones: `RECORD_AUDIO` would be the app's first dangerous permission, and an unauthenticated LAN endpoint that runs a model and speaks in someone's room is not in ADR 0015's family |
+
+## Resuming after 2026-09-24 (wave 24)
+
+Wave 24 is **TT.12**, on `wave/24-the-self-tests-nothing-runs`. Wave 23 recommended TT.12 + T7.8
+and the order was load-bearing; TT.12 landed and **T7.8 was not started**, for two reasons in
+its own header rather than anything found by running it.
+
+**Next: T7.8 is blocked on a decision, not on work.** Both halves are in the note
+(`docs/harness-notes/2026-09-24-wave-24.md`) and neither is a judgement call an agent should
+make alone:
+
+1. **Three of the five guard scripts step 7 names do not exist.** `check_links.py` (T7.4),
+   `check_requirements.py` (T7.5) and T7.6's commit-message check are all unwritten, and all
+   three tasks are declared prereqs of T7.8. Wave 23 assumed the five were there. Either T7.4-
+   T7.6 come first, or step 7 is rewritten to run the guards that exist — which after this wave
+   is every one of them, through `make check`.
+2. **The repository is private, and T7.8 is titled for a public one.** Its step 1 is the
+   argument: Actions minutes are unlimited on public repos and metered on private, CodeQL is
+   free on public and paid otherwise, `dependency-review-action` needs Advanced Security. Steps
+   5 and 8 would spend the owner's money and change repo-level settings.
+
+If neither is settled, the unblocked alternative is **T7.4 + T7.5 + T7.6** — the documentation
+cluster T7.8 depends on, none of which needs the phone, Docker or a public repo. That also
+produces the three missing guard scripts, after which T7.8's step 7 is true as written.
+
+### A self-test no target invokes is a test suite with no runner
+
+Two scripts, red for waves, each on the OS nobody checked them on. `after_update.py --self-test`
+exited 1 on **Linux** because `python_for` used `Path`, which is `PosixPath` there, so a Windows
+path came back unchanged; `check_status.py` exited 1 on **every** OS because it read `ADR 0015`
+as a task id. Neither was run by anything.
+
+The fix that matters is not either bug. It is `lint-selftests`, which discovers by
+`grep -l -- '--self-test' scripts/*.py` rather than by a list, so the next script to grow a
+self-test is covered by being written — and `lint-status`, so the fifth guard script is finally
+in `make check` with the other four.
+
+**An ADR is allowed to not exist yet.** `check_status` now understands `ADR NNNN` and
+deliberately does not require the file: T9.1 and T9.2 are blocked on ADR 0015 being written, and
+a prerequisite you have not met is the normal case. The shape is checked; the number cannot be.
+
+### The shell ate the backslashes, one wave after the note about it
+
+The new Makefile target was written through a heredoc and every `\`+newline continuation
+collapsed, leaving a literal `
+` in `check:` and the whole recipe on one line. `sed -n` showed
+it as fine; `cat -A` showed the truth. Wave 20 recorded this trap in these words — *the agent's
+own shell collapses a doubled backslash in the commands written to diagnose backslash handling*
+— and this session had read that note before walking into it.
+
+The rule worth keeping is mechanical, because "be careful" already failed: **a file whose
+content depends on backslashes is edited with a file tool, not through the shell**, and it is
+read back with `cat -A`.
+
+### What the next wave inherits that is only true on this desk
+
+- **The Linux half of TT.12 is unproven here.** No WSL, no Docker, no `make`. The fix is sound
+  by construction — no `Path` remains in the decision — and both cases pass on Windows, but
+  nobody has watched them pass on Linux. CI is the first place that happens, and the first place
+  `lint-selftests` runs as a Make target rather than as its body in `sh`.
+- **CI still does not run the guard scripts.** `ci.yml` runs the three suites and nothing else,
+  which is exactly what T7.8 step 7 exists to fix. Until then `make check` is the only thing
+  that reaches them, and no machine runs it unasked.
+- **A wave was wasted before this one.** The session opened by rebuilding T0.6 against a `main`
+  four waves stale, against a snapshot that reads as current. PR #30 was closed and its branch
+  kept. One `git fetch` before branching is the whole fix.
+- **The phone is still not on adb**, unchanged from waves 22 and 23. TT.7, TT.8, T2.4 and T7.2
+  all wait on the RSA prompt nobody can tap from here.
+- `server/config.json` is still mode 0644 and holds the brapi token. One `chmod 600`; T7.3 wants
+  it. Carried from wave 19 through 23, still not done.
 
 ## Resuming after 2026-09-24 (wave 23)
 
