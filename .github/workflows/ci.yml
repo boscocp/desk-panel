@@ -62,12 +62,17 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+      # No `build-root-directory:`. The first cut passed one, on the belief
+      # that the cache had to be pointed at android/ where the real wrapper
+      # lives -- and the run went green while the action printed "Unexpected
+      # input(s) 'build-root-directory'" into its annotations and ignored it.
+      # The input belongs to the older gradle/gradle-build-action, not to this
+      # one. setup-gradle v4 caches the Gradle User Home, which is the same
+      # directory whichever subproject invoked it, so there was nothing to
+      # point at. Noted rather than deleted quietly: a green check with a
+      # silently discarded input is this wave's own subject arriving in its own
+      # workflow.
       - uses: gradle/actions/setup-gradle@v4
-        with:
-          # The build lives in android/; the root gradlew is a shim. This tells
-          # the cache where to look without moving the run steps off the root,
-          # which is what keeps them identical to the Makefile's.
-          build-root-directory: android
       - run: ./gradlew test
       - run: ./gradlew assembleDebug
       - uses: actions/upload-artifact@v4
