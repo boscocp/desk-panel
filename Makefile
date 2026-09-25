@@ -1,7 +1,7 @@
 # Entry point for humans, CI and agents alike. Every target exits non-zero on failure.
 DC := docker compose -f docker/compose.yml run --rm build
 
-.PHONY: help check lint-tasks lint-notes lint-permissions test-server test-web test-android connected build apk contract e2e clean
+.PHONY: help check lint-tasks lint-notes lint-permissions lint-workflow test-server test-web test-android connected build apk contract e2e clean
 
 help:
 	@echo "check         run everything that does not need the phone"
@@ -15,9 +15,10 @@ help:
 	@echo "lint-tasks    every acceptance criterion is a command with an exit code"
 	@echo "lint-notes    every finished wave left a note in docs/harness-notes/"
 	@echo "lint-permissions  .claude/settings.json and reasonix.toml are still twins"
+	@echo "lint-workflow ci.yml runs the same commands these targets do"
 	@echo "clean         remove build output"
 
-check: lint-tasks lint-notes lint-permissions test-server test-web test-android
+check: lint-tasks lint-notes lint-permissions lint-workflow test-server test-web test-android
 
 lint-tasks:
 	python scripts/check_acceptance.py
@@ -27,6 +28,14 @@ lint-notes:
 
 lint-permissions:
 	python scripts/check_permission_parity.py
+
+# Both halves: the rules are checked against ci.yml, and the rules are
+# checked against themselves. --self-test exists in after_update.py too and
+# nothing ran it, so it was red on Linux for two waves (TT.12) - a self-test
+# no target invokes is a test suite with no runner.
+lint-workflow:
+	python scripts/check_workflow.py --self-test
+	python scripts/check_workflow.py
 
 test-server:
 	python -m unittest discover -s server/tests -t .
