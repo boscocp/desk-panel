@@ -201,8 +201,31 @@ make alone:
    free on public and paid otherwise, `dependency-review-action` needs Advanced Security. Steps
    5 and 8 would spend the owner's money and change repo-level settings.
 
-**Decided from the chair, 2026-09-24: neither. Next is T7.4 + T7.5 + T7.6**, the documentation
-cluster T7.8 actually depends on — none of which needs the phone, Docker or a public repo. It
+**Superseded 2026-09-25, from the chair: next is T8.1.** The T7.x reasoning below still holds
+and is what to come back to after it; T8.1 simply jumped the queue, and it earns the place —
+**it is what writes ADR 0015**, which T9.1 and T9.2 are both blocked on, so it unblocks the
+whole of phase 9 as a side effect.
+
+Read `## Why this is the first task where the server stops being read-only` before writing any
+code, and do its steps in order: **ADR 0015 comes first**, before `server/actions.py` exists.
+This is the first route that changes the machine the server runs on, and the server has no
+authentication by design (invariant 2, ADR 0004) — so the allowlist is the design and not a
+detail, T3.7's constraint is *the request carries an id and nothing else*, and `mute` is in
+scope precisely because repeating it is harmless while `shutdown` is not. Prereqs T3.7, T3.11
+and T3.12 are all `done`; `Requires:` is none for the tests, a desktop session for the manual
+check.
+
+**The T7.x chain was unblocked on the way past, 2026-09-25.** `T7.4`'s `Prereqs:` said
+`T2.4, T7.2` — both `blocked` on a phone nobody here can tap the RSA prompt for — which made the
+whole `T7.4 → T7.5 → T7.6 → T7.7 → T7.3` chain read as unreachable. **Not one of T7.4's five
+acceptance commands touches `adb`**; the phone is in its `## Manual check` only, exactly as its
+own `Requires:` line said, and `docs/INSTALL-PHONE.md` already exists. `Prereqs:` is now `none`,
+with the reasoning in the task file. This is the second time a `Prereqs:`/`Requires:` line has
+been overstated in this repo — T7.1 recorded the first — so check the line against the
+acceptance block rather than trusting it.
+
+The original decision, still the right one once T8.1 lands: **T7.4 + T7.5 + T7.6**, the
+documentation cluster T7.8 actually depends on — none of which needs the phone, Docker or a public repo. It
 also produces the three missing guard scripts, after which T7.8's step 7 is true as written and
 its `guards` job has five real commands to run instead of two.
 

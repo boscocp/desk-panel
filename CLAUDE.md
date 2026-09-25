@@ -54,6 +54,12 @@ Android SDK or Android Studio on the Windows host — keeping the host clean is 
 requirement, not a preference (ADR 0003).
 
 ## How to resume work
+0. **`git fetch` before you branch, and check `main` is not behind.** The git status a session
+   opens with is a snapshot and reads as current when it is not. On 2026-09-24 a session opened
+   on a `main` four waves stale, rebuilt T0.6 from scratch, reviewed it, and only found at the
+   merge that the work had shipped as wave 21 — PR #30, closed unmerged. It is wave 20's own
+   lesson one layer up: a pull is not a deploy, and nothing in the loop could tell yesterday's
+   `main` from today's.
 1. Read `tasks/STATUS.md` and take the first task that is not `done`.
 2. Read only that task file. Each one is self-contained by design — do not read the whole
    repository to get oriented.
