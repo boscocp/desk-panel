@@ -75,9 +75,10 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 | T3.13 | **One command to run after a pull** | done | 2026-09-22, wave 20. `scripts/after_update.py` + `docs/UPDATING.md`. Written after an evening lost to a server that was **one minute older than the code it was serving**: the Scheduled Task had started at 00:31:18, the pull rewrote `server.py` at 00:32, and the phone's two new cards (T6.13, T6.15) were empty while every check this repo owns said the machine was healthy - `/ping` answered, the config was valid, the APK was current, `probe.py` would have exited 0. **A pull is not a deploy**, and "does it answer" cannot tell yesterday's server from today's. So the script's load-bearing step compares `/weather` against the key set the tree's own `normalise()` produces, imported rather than hardcoded, plus `moon` when `providers_usno.py` is present - a field added to the payload later starts being required with nobody editing the script. It **asks the launcher** on every OS and never spawns the server (invariant 2; the acceptance greps for `Popen` to keep it that way), takes every path out of the launcher's own action rather than the repo, and **waits for the socket between stop and start** - discovered the hard way, a back-to-back `Stop`/`Start` hit `WinError 10048` and took down the survivor too, because `allow_reuse_address` is off on Windows on purpose. **The test suite deliberately does not gate the restart** and the first cut had that backwards: the new code is already on disk and the next login loads it regardless, so refusing would leave the panel stale *and* the tree broken. A broken config does gate it. macOS reports `unknown` rather than guessing (T3.10 is `blocked`), and `docs/UPDATING.md` records the three things that join the script when a Mac exists. `--self-test` covers the pure functions on any box, 35 cases, and caught `python_for` corrupting `/usr/bin/python3` into `\usr\bin\python3` by round-tripping through `Path`. **Six review findings, all six real and all six applied.** The one that mattered: **the Linux branch was unreachable code** - `config_path` was assigned only inside the `win32` branch, so Linux reached a launcher and never a port, and `restart_linux`, `step_payload` and `step_login_scope` could not run while this task file and `docs/UPDATING.md` both described them running. `parse_exec_start` now reads the unit's quoted `ExecStart` from the **file**, not `systemctl show -p ExecStart`, whose `argv[]=` resolves the quoting and makes a path with a space look like two arguments. Then: a **cold weather cache was announced as stale code** (the payload check runs when the cache is empty by construction, and a failed first fetch drops to a five-key fallback - it now reads the `stale` flag the payload already carries); an **`apk` failure pinned its own marker**, since FAIL means exit 1 and exit 1 is what stops the marker advancing, so no rebuild could clear it - `--rebuilt` is the explicit acknowledgement, explicit because the repo cannot see the phone; a **refused `Stop` was blamed on "something else owns it"** with the real error discarded; **`--dry-run` printed "all clear" and exited 0** on the exact machine state the script was written for, the deciding check being the one a dry run cannot make; and a red web suite reported `FAIL` with no detail. The Linux path was then **simulated** - platform patched, fake unit, end steps stubbed - which proves it is reached and proves nothing about `systemctl --user restart`, still never executed |
 | TT.2 | Server unit tests + fixtures | done | 2026-09-19. Re-opened by wave 8, as its earlier note asked. 86 tests now, up from 32: every provider normaliser against a **real recorded response** in `server/tests/fixtures/`, plus the cache, the stale fallback and the payload assembly. The fixtures are captures, not hand-written shapes — which is the point, since the shapes for crypto and FX were not in anybody's documentation. `TimedCache` takes `now` as an argument and `App` takes its clock, so a 300s TTL expires in a function call rather than a sleep. **A test found a real defect**: after a failed refresh the cache did not move `fetched_at`, so every subsequent request retried — an upstream that is down would have become one outbound call per panel poll, the exact traffic the cache exists to prevent, arriving when the upstream can least afford it. A failure now spends the TTL like a success does. The acceptance's real check passes too: the whole suite is green inside a network namespace with no route out, proved by a `URLError` on a live URL from that same namespace |
 | TT.3 | Two HTTP integration tests on port 0 | done | 2026-09-19. Steps 5 and 6 landed, which is what it was `blocked` on: `/quotes` over a real socket asserting the T1.2 contract shape key by key, and `POST /action/x` returning 501 with `GET` to the same path still 404. Still no network — the provider modules' `load` is replaced, so the payload comes from the test file and `upstream.py` is never reached. A second server on its own port 0, built with `functools.partial(Handler, app=...)` rather than a class attribute, because a class attribute would be shared by every server in a process that starts more than one. Content-Length is asserted against the **byte** length on a payload carrying `São Paulo`, since a length computed on characters truncates the body and the client hangs |
-| TT.4 | Contract tests, opt-in | todo | |
+| TT.4 | Contract tests, opt-in | done | 2026-09-24, wave 23. **Five upstreams, not the two the task file listed** — crypto and FX moved to Binance and AwesomeAPI when brapi turned out to charge for them (T3.3 subtask 0), and the moon arrived with T6.13; an upstream this file does not cover is one whose schema change reaches the desk as a blank card. 15 live cases, all green against the real APIs. Shape, never value: a helper asserts a field is **parseable as a number** rather than typed, because brapi sends JSON numbers where Binance and AwesomeAPI send the same quantities as strings and every normaliser runs `float()` anyway. Three cases are about more than presence — Binance's kline close is **positional** at index 4 and an inserted column would silently redraw the sparkline from the volume; open-meteo's daily arrays are asserted to still align with `current.time`, because the timezone parameter failing reaches the panel as a missing min and max rather than an error; and the USNO window is asserted to still bracket now with two New Moons, which the first cut of `LOOKBACK_DAYS`/`NUMP` did not. **The assertion mechanism got its own tests first** (wave 22's rule): 21 offline cases prove every helper fails and names the path, including the ones that would otherwise pass — `float(True)` is 1.0, so a price that became a flag reads as one; an empty `results` array must fail with a message rather than raise IndexError naming no field. `LIVE` sets a `needs_network` tag of its own **because `skipUnless` is the identity function once the variable is set** and leaves nothing to walk the module for — a case added without the decorator would then be invisible to everything but review, and it would be the one case that opens a socket from `make check`. 244 server tests, up from 223 |
 | TT.10 | Login-scope verifier tests, from fixtures | done | 2026-09-21. Makes T3.10 checkable without a Mac. 97 recorded cases now run under `unittest discover` as well as under `--self-test`, imported rather than copied; purity is asserted by nailing `run_command`, `read_registry_autologin`, `read_file` and `file_present` shut and re-running them all. Two rows of the task's fixture table were amended: the verifier proves the unit is outside `default.target`'s closure rather than checking `Linger`, which is the stronger property and is why T3.9 may pass with `Linger=yes`; and WSL is read from `/proc/sys/kernel/osrelease`, not `/proc/version`. Writing the named cases found that `detect_autologin` dispatches on `"win32"`, so a test spelling it `"windows"` silently tests the Linux branch |
 | TT.11 | The unit-rendering test skips a shell that cannot run it | done | 2026-09-22, wave 20. **Found by T3.13** on a clean `main`: the server suite was red on the Windows host with eight failures, and had been since wave 18 landed. Not the escaping, which is what it looks like and what the file's own docstring says has been wrong twice - read out of `install_user_unit.sh` and run through `sed -f`, the shipped `s/[\\&|]/\\&/g` is provably correct. **It is the transport**: Git Bash hands the `-e` argument to a native `sed.exe` through MSYS2's conversion, one backslash is eaten, and the escaping silently returns every path unchanged. Three reproductions were wrong before that landed, each mangled by a different quoting layer - including the agent's own shell collapsing `\\` in the diagnostic commands; only reading the bytes out of the file settled it. `shell_passes_backslash_to_sed()` hands sed a fixed `s/x/\\y/` and requires `\y` back, and **deliberately never calls `sed_escape`** - a skip keyed on "the escaping looks wrong" would have gone green for both historical bugs, so the acceptance asserts the probe does not call the function under test. Detected, never assumed from `sys.platform`, which would guess at which shells mangle arguments and lie the day MSYS2 fixes it. The suite is 191 tests, green, one skip; the escaping stays verified on Linux, where the installer actually runs |
+| TT.12 | The self-tests nothing runs | todo | Written 2026-09-24, wave 23, as wave 22's record asked. `python scripts/after_update.py --self-test` exits 1 on Linux and has since it was written: `python_for` uses `Path`, which is `PosixPath` here, so a Windows path is returned unchanged — correct on Windows, untestable off it, and the mirror image of the defect T3.8 found in `verify_login_scope.py`. **The shape is the finding**: wave 20 caught the server suite red on Windows because two waves were judged on Linux; this is the same thing pointing the other way, and neither direction is caught by the loop because nothing runs `--self-test`. A second red guard was found the same way while TT.9 was being written — `check_status.py` exits 1 on `main` because it reads `Prereqs: T8.2, ADR 0015` as naming a task called ADR. Same cause: `make check` runs three of the guard scripts and not these. The acceptance that matters is the one failing when a script grows a `--self-test` the new target does not reach |
 
 ## Phase 4 — The core behaviour
 
@@ -155,7 +156,7 @@ something wider, so its text widths are a conservative estimate rather than the 
 | T7.8 | **Everything GitHub gives a public repo for nothing** | todo | Asked for 2026-09-20. Not `ci.yml` — TT.9 owns that and this must not rewrite it. This is what goes *around* it before the repo opens: CodeQL (free on a public repo and the only one of these that reads what the code does), Dependabot for the two ecosystems that actually exist, `permissions:` and SHA-pinned actions on every workflow, and a lint job whose shape is constrained by this project's own rules — `ruff` in CI but never in `server/`, PSScriptAnalyzer on the one file nobody here can run, and **not** ESLint, because `web/` has no `package.json` by design. Also runs the repo's own five guard scripts, which nothing runs today unless a human remembers. Deliberately no stale bot and no auto-labeller. Required status checks stay T7.7's; this task makes the checks worth requiring |
 | T7.3 | Pre-public review: secrets, README, screenshots | todo | Before flipping the repo public. Now runs **after** T7.4–T7.7 and carries the README's final pass; its `Prereqs:` line was updated to say so |
 | TT.8 | `e2e/run_e2e.py`, five scenarios | todo | Needs TT.6 |
-| TT.9 | CI workflow | todo | |
+| TT.9 | CI workflow | done | 2026-09-24, wave 23. The bootstrap skeleton was `workflow_dispatch` only and had drifted for twenty-two waves — a workflow nobody runs is green forever. Now push and pull_request, three jobs, `permissions: contents: read`. **The task's real subject is `scripts/check_workflow.py`**, which reads ci.yml and the Makefile and fails on any difference: the command CI runs must be the same string the Makefile runs, with exactly one allowed difference — the `$(DC)` container prefix, dropped because a runner is disposable where the Windows host is not (ADR 0003). No PyYAML: this project takes no dependencies, and the reader **fails loudly on a shape it cannot parse** rather than returning an empty result that reads as agreement. Two rules came out of running it rather than writing it. `connectedAndroidTest` matched inside the comment *explaining* its deliberate absence, so the scan is comment-aware — the alternative was deleting the comment or gutting the rule. And a **`working-directory:` is now itself a violation**: `./gradlew test` from android/ and from the root are the same string and not the same command, so the old job's `working-directory: android` made the whole comparison a lie; the run steps sit at the root where the `gradlew` shim lives. setup-gradle gets no `build-root-directory`: the first cut passed one and the run went green while the action printed "Unexpected input(s)" and ignored it — the input belongs to the older gradle-build-action, and v4 caches the Gradle User Home, which is the same directory whichever subproject invoked it. A green check with a silently discarded input is this wave's own subject arriving in its own workflow. **`--self-test` found a bug in the reader on its first run** — `value.strip("'\"")` ate the trailing quote of `node --test "web/test/**/*.test.js"`, leaving an unterminated string — which is the argument for writing it first. 18 rules, and `make lint-workflow` runs both halves, so `make check` is what catches the next drift. CI does **not** run the guard scripts; that gap is T7.8's and is named in the script |
 
 ## Phase 8 — Shortcuts (v2)
 
@@ -179,6 +180,90 @@ and the first line of each file says so.
 |---|---|---|---|
 | T9.1 | **The next meeting, under the clock** | todo | Google Calendar and Microsoft Outlook merged, the soonest event under the clock in the `#shortcuts` strip, between T8.2's two buttons. Blocked behind T8.2 for a layout reason and behind **ADR 0016** for a bigger one: this is the first feature that puts *personal data* on a panel whose server has no authentication, and the refresh tokens it needs are credentials sitting on a desktop PC. OAuth stays on the PC and never reaches the APK — two acceptance lines exist for exactly that. The merge is where the design is: the two providers disagree about all-day events, about time zones and about the word for "declined" |
 | T9.2 | **Spike: can the panel talk to an assistant for nothing?** | todo | A button to ask something out loud and hear an answer, with the whole pipeline on the PC — invariant 1 means the page cannot call anything. Time-boxed, produces `docs/spikes/2026-voice-assistant.md` and a throwaway prototype under `spikes/`, and is allowed to conclude *do not build this*. The unknown is whether offline STT, a small local model and offline TTS fit inside a latency a person will stand at a panel for; Claude and DeepSeek are the paid comparison, not the plan. Also has to answer the awkward ones: `RECORD_AUDIO` would be the app's first dangerous permission, and an unauthenticated LAN endpoint that runs a model and speaks in someone's room is not in ADR 0015's family |
+
+## Resuming after 2026-09-24 (wave 23)
+
+Wave 23 is **TT.4 + TT.9**, on `wave/23-contract-tests-and-ci`, PR #29. Contract tests against
+the five real upstreams, CI on every push, and `scripts/check_workflow.py` to stop the two from
+drifting again. **TT.12** was written, not executed: wave 22's record said the `--self-test`
+finding needed a task file, and a resuming section is not one.
+
+**Next: TT.12 + T7.8**, and the order inside the pair is load-bearing. T7.8's own row promises a
+lint job that "runs the repo's own five guard scripts, which nothing runs today unless a human
+remembers" — and two of those scripts are **red on `main` right now**. Add the job first and it
+arrives red, which teaches everyone to ignore it, which is the failure the bootstrap `ci.yml`
+already demonstrated for twenty-two waves. **TT.12 first, then the job that runs it.**
+
+Everything else in the backlog needs the phone (TT.7, TT.8, T2.4, T7.2) or another machine
+(T3.8's Windows half, T3.10's Mac), or is documentation waiting on T7.8 (T7.4–T7.7, T7.3).
+
+Five rows stay blocked and none of them is blocked on work: **T2.4** and **T3.10** (no Mac),
+**T3.9**'s human half, **T3.8**'s Windows half, **T7.2**'s phone half.
+
+### A tool that catches CI overclaiming, caught overclaiming
+
+`check_workflow.py` compares the command CI runs against the command the Makefile runs. The
+review found three ways it counted a step that is **present** as a step that **runs**:
+
+- **`continue-on-error: true`** on the android suite left the check returning zero problems. CI
+  green on a red suite, while `make test-android` exits 1 on the same tree.
+- **`if:`** does it the other way — `if: github.event_name == 'push'` on `assembleDebug` is green
+  and runs no Gradle on a pull request.
+- **a blank line inside a `run: |` block** closed the block, and every command after it matched
+  no `run:` and was dropped, reported as CI not running something it runs two lines below.
+
+The first two are banned outright rather than inspected, and that is the general rule this wave
+is worth remembering for: **a check that tries to decide which conditions are harmless will one
+day decide wrongly and say nothing.** The three layers here have no conditions to express.
+
+### `gh run watch --exit-status` is not a gate on the workflow being correct
+
+TT.9's own acceptance line proves the suites passed. It does not prove the workflow does what it
+says, and this wave has the demonstration: the first android job passed **`build-root-directory:`
+to `setup-gradle`, which is an input of a different action**. The run went green while the action
+annotated that it had discarded the input. Nothing in the acceptance could see it; `gh run view`
+by eye could, and does now, as a `## Manual check` in the task file.
+
+Two annotations are still there and are **T7.8's**, not bugs: `actions/checkout@v4`,
+`setup-java@v4`, `upload-artifact@v4` and `setup-gradle@v4` all target Node 20, which is
+deprecated, and `ubuntu-latest` migrates to Ubuntu 26 on 2026-10-19. T7.8 SHA-pins the actions
+anyway, so the version bump belongs in the same pass.
+
+### What the contract tests actually pin, and what they cannot
+
+Fifteen cases, green on 2026-09-24 against brapi, Binance, AwesomeAPI, open-meteo and the USNO.
+**That is all a contract test ever proves**; their value is the run someone does in three months,
+and the task file says to do it monthly.
+
+Three of them go past "the key is still there", and those are the ones worth keeping if the file
+ever has to shrink:
+
+- **Binance's kline close is positional**, index 4 of a twelve-element array, and nothing in the
+  response names it. An inserted column redraws every crypto sparkline from the volume, and
+  nothing about the picture says so.
+- **open-meteo's daily arrays are asserted to still align with `current.time`.** The timezone
+  parameter failing does not error — it reaches the panel as a missing min and max.
+- **the USNO window is asserted to still bracket now with two New Moons**, which the first cut of
+  `LOOKBACK_DAYS`/`NUMP` did not, and the symptom is the moon quietly not being drawn.
+
+### What the next wave inherits that is only true on this desk
+
+- **The phone is still not on adb**, unchanged from wave 22. TT.7, TT.8, T2.4 and T7.2 all need
+  it back, and the first step is the RSA prompt on the device, which nobody can tap from here.
+- **TT.9's `## Manual check` was not done.** Nothing deliberately broke one test to confirm that
+  only its job goes red. Every job has been seen green; the failure path has not.
+- **`on: push` with no branch filter runs all three jobs twice for every PR from this repo** —
+  two run ids per commit, visible on #29. The review declined to change it because it is a
+  decision about what the trigger means rather than a bug, and TT.9 step 1 says push and pull
+  request in those words. Worth settling deliberately, in the task file, before the repo opens
+  and the minutes are someone else's.
+- **`--fix` owns the working tree until it reports.** This session edited
+  `scripts/check_workflow.py` while the review agent was writing to it and produced duplicate
+  self-test cases; the review removed its own copies, kept the session's, and reported "another
+  session is reviewing this same branch" — which was this session, failing to wait. Nothing was
+  lost, and nothing except reading the case list would have caught it.
+- `server/config.json` is still mode 0644 and holds the brapi token. One `chmod 600`; T7.3 wants
+  it. Carried from wave 19 through 22, still not done.
 
 ## Resuming after 2026-09-23 (wave 22)
 

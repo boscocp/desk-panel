@@ -40,9 +40,23 @@ an exit code.
 Note that `gh workflow run` needs the branch pushed, and `git push` is deliberately outside
 the agent allowlist (`.claude/README.md`). A human runs this one, or authorises the push.
 
+It also needs the `workflow_dispatch` event to still exist. Step 1 says push and pull_request,
+and the skeleton's mistake was having dispatch *instead of* them, not having it at all — so
+keep all three, and let `check_workflow.py` require the two that matter and tolerate the third.
+
+**`gh run watch --exit-status` exits 0 on a run carrying annotations.** It is the right gate for
+"did the suites pass" and it is not a gate on the workflow being correct: wave 23's first cut
+passed `build-root-directory:` to `setup-gradle`, which is an input of a *different* action, and
+the run went green while annotating that it had discarded it. Read `gh run view <id>` once, by
+eye, the first time a workflow changes — and that is a `## Manual check`, not a criterion.
+
 ## Manual check
 
 Break one test deliberately and confirm the right job — and only that job — goes red.
+
+Read `gh run view <run-id>`'s ANNOTATIONS block after the first green run of a changed workflow.
+An ignored input, a deprecated action and a runner-image migration all land there and none of
+them touches the exit code.
 
 ## Notes
 

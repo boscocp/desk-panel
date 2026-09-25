@@ -1,10 +1,36 @@
-# Skeleton. Runs on manual dispatch only until the suites exist — see tasks/TT.9, which
-# switches the trigger to push/pull_request. A workflow that goes red on an empty repository
-# teaches you to ignore the red.
+# Every push runs everything that does not need the phone (TT.9). Three jobs,
+# independent, so a red one names the layer that broke rather than "CI".
+#
+# The commands here are the Makefile's, string for string, and
+# `scripts/check_workflow.py` is what keeps them that way -- it reads both
+# files and fails on any difference. The bootstrap skeleton this replaces was
+# `workflow_dispatch` only and drifted for twenty-two waves precisely because
+# nothing compared the two.
+#
+# The one allowed difference is the toolchain container: `make test-android`
+# runs Gradle inside it to keep the developer's Windows host clean (ADR 0003),
+# and a CI runner is disposable, so the `$(DC)` prefix is dropped and nothing
+# else is. Every job runs from the repository root, like the Makefile -- the
+# root `./gradlew` is a shim into android/, and a `working-directory:` here
+# would make a command that matches the Makefile's text stop matching its
+# meaning.
 name: ci
 
 on:
+  push:
+  pull_request:
+  # Kept alongside them, not instead of them. This is what the bootstrap
+  # skeleton had on its own, and on its own it is a workflow nobody runs -- so
+  # check_workflow.py requires the two above and merely tolerates this one. It
+  # earns its place by making `gh workflow run ci.yml --ref <branch>` work,
+  # which is TT.9's acceptance line and the way a re-run is asked for without
+  # an empty commit.
   workflow_dispatch:
+
+# Least privilege, and it is enough: nothing here writes to the repository.
+# T7.8 owns hardening the rest of what a public repo gets.
+permissions:
+  contents: read
 
 jobs:
   server:
@@ -36,15 +62,25 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+      # No `build-root-directory:`. The first cut passed one, on the belief
+      # that the cache had to be pointed at android/ where the real wrapper
+      # lives -- and the run went green while the action printed "Unexpected
+      # input(s) 'build-root-directory'" into its annotations and ignored it.
+      # The input belongs to the older gradle/gradle-build-action, not to this
+      # one. setup-gradle v4 caches the Gradle User Home, which is the same
+      # directory whichever subproject invoked it, so there was nothing to
+      # point at. Noted rather than deleted quietly: a green check with a
+      # silently discarded input is this wave's own subject arriving in its own
+      # workflow.
       - uses: gradle/actions/setup-gradle@v4
       - run: ./gradlew test
-        working-directory: android
       - run: ./gradlew assembleDebug
-        working-directory: android
       - uses: actions/upload-artifact@v4
         with:
           name: desk-panel-debug
+          # android/app/build.gradle.kts copies the APK here; see its copyApk task.
           path: out/*.apk
-      # connectedAndroidTest is deliberately absent: it needs the physical phone.
-      # android-actions/setup-android is avoided because it is third-party and not
-      # GitHub-certified; setup-java plus the Gradle wrapper covers what we need.
+          if-no-files-found: error
+      # The phone's own tests are deliberately absent: they need the device.
+      # android-actions/setup-android is avoided because it is third-party and
+      # not GitHub-certified; setup-java plus the Gradle wrapper covers this.
