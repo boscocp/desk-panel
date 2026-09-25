@@ -45,14 +45,25 @@ lint-workflow:
 # while every wave was judged on Windows (TT.12). Discovery is by grep over a
 # glob, never a list: the next script to grow a --self-test is covered by being
 # written, which a list would not do.
+#
+# It greps for the *quoted* flag, which is how a script that parses one spells
+# it. A bare `--self-test` also matches a docstring that merely documents the
+# flag, and such a script would then be run with an argument it does not
+# understand -- after which its exit code says whatever its argv handling
+# happens to say, which is not a self-test result. The cost is that an
+# implementation spelling it '--self-test' in single quotes is missed; this
+# repo writes double. Found by review.
+SELFTESTS := $(shell grep -l '"--self-test"' scripts/*.py)
+
+# No backslash continuations in this recipe, deliberately. This worktree is
+# CRLF, and a backslash followed by CR is not a line join, so make would run
+# each line in its own shell and the target would die on its own error message
+# with every script still unrun. The committed blob is LF, so a clone and CI
+# never see it -- which is exactly what makes it worth removing. Found by review.
 lint-selftests:
 	@# discovery is a glob over scripts/, never a list of names
-	@found=$$(grep -l -- '--self-test' scripts/*.py); \
-	test -n "$$found" || { echo "lint-selftests: nothing carries a --self-test"; exit 1; }; \
-	for s in $$found; do \
-		echo "--> $$s --self-test"; \
-		python "$$s" --self-test || exit 1; \
-	done
+	@test -n "$(SELFTESTS)" || { echo "lint-selftests: nothing carries a --self-test"; exit 1; }
+	@for s in $(SELFTESTS); do echo "--> $$s --self-test"; python "$$s" --self-test || exit 1; done
 
 test-server:
 	python -m unittest discover -s server/tests -t .
