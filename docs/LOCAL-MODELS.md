@@ -67,9 +67,20 @@ one file has and the other does not. An asymmetry that is meant is declared in
 ```
 
 The reason is required, and a marker matching nothing is reported too — otherwise a stale
-exemption silently swallows whatever lands on that rule next. There are three today:
-`WebFetch`, and `git commit` / `git push`, which Claude may run and the local agent may
-not.
+exemption silently swallows whatever lands on that rule next.
+
+**Not every asymmetry is drift, and the review of T0.6 is where that was learned.** The
+first cut treated them all as drift and made the two files symmetric, which meant putting
+`Bash(cat *)` on Claude's allow list — re-opening, on Claude's side, the exact hole that
+same diff closed on Reasonix's. Claude Code's rules are per-tool, so `Bash(cat *)` walks
+straight past a `Read(./.env)` deny; Reasonix can afford `Bash(cat:*)` **because**
+`forbid_read` blocks those files beneath it. Ten exemptions exist today:
+
+| rule | why |
+|---|---|
+| `cat`, `head`, `tail`, `grep`, `rg`, `find`, `diff` | Reasonix has `forbid_read` under them; Claude Code has no equivalent layer |
+| `git commit`, `git push` | ADR 0011 §4 — publication is Claude's side of the split |
+| `WebFetch(domain:*)` | no Reasonix equivalent at all |
 
 Three syntax traps, all confirmed against the Reasonix source:
 

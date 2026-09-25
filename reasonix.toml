@@ -38,7 +38,21 @@ context_window = 131072
 mode = "ask"
 
 allow = [
-  # Inspection.
+  # Inspection. The seven that dump file contents are allowed HERE ONLY, and
+  # that is a difference in the harnesses rather than drift: [sandbox]
+  # forbid_read blocks the secret files beneath these commands, so `cat` cannot
+  # reach the brapi token however it is spelled. Claude Code has no equivalent
+  # layer - its rules are per-tool, so `Bash(cat *)` on its allow list would
+  # walk straight past its own Read(...) denies. Reviewed into existence: the
+  # first cut of T0.6 put them on both sides and re-opened, on Claude's side,
+  # the exact hole step 3 of the task file closed on this one.
+  # parity: intentional Bash(cat*) forbid_read blocks the secrets beneath it; Claude Code has no sandbox layer
+  # parity: intentional Bash(head*) forbid_read blocks the secrets beneath it; Claude Code has no sandbox layer
+  # parity: intentional Bash(tail*) forbid_read blocks the secrets beneath it; Claude Code has no sandbox layer
+  # parity: intentional Bash(grep*) forbid_read blocks the secrets beneath it; Claude Code has no sandbox layer
+  # parity: intentional Bash(rg*) forbid_read blocks the secrets beneath it; Claude Code has no sandbox layer
+  # parity: intentional Bash(find*) forbid_read blocks the secrets beneath it; Claude Code has no sandbox layer
+  # parity: intentional Bash(diff*) forbid_read blocks the secrets beneath it; Claude Code has no sandbox layer
   "Bash(ls:*)", "Bash(cat:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)",
   "Bash(grep:*)", "Bash(rg:*)", "Bash(find:*)", "Bash(tree:*)", "Bash(file:*)",
   "Bash(which:*)", "Bash(pwd:*)", "Bash(diff:*)",
@@ -47,6 +61,7 @@ allow = [
   "Bash(make check:*)", "Bash(make test-server:*)", "Bash(make test-web:*)",
   "Bash(make test-android:*)",
   "Bash(make lint-tasks:*)", "Bash(make lint-notes:*)", "Bash(make lint-parity:*)",
+  "Bash(make connected:*)",
   "Bash(python -m unittest:*)", "Bash(python3 -m unittest:*)",
   "Bash(python -m json.tool:*)", "Bash(python3 -m json.tool:*)",
   "Bash(node --test:*)", "Bash(node --check:*)",
@@ -72,8 +87,12 @@ allow = [
   # it to settle and then assert. Without it they stop at a prompt mid-sequence.
   "Bash(sleep:*)",
 
-  # LAN only, and the only way to assert on a running server from the shell.
-  "Bash(curl:*)",
+  # Scoped to the one invocation the acceptance blocks still make (T3.3). A bare
+  # `curl:*` would auto-approve a request to anywhere, and this repository spent
+  # T0.5, T3.5 and T3.7 migrating off curl onto probe.py precisely because
+  # `curl -w` exits 0 whatever the server said. Any other curl asks first, which
+  # is the safe direction to fail in.
+  "Bash(curl -sf http://localhost:8777/:*)",
 
   # Signing. T7.1 generates the keystore with it; the passwords come from a
   # human and from .env, neither of which this agent can read.

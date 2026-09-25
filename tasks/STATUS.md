@@ -180,6 +180,79 @@ and the first line of each file says so.
 | T9.1 | **The next meeting, under the clock** | todo | Google Calendar and Microsoft Outlook merged, the soonest event under the clock in the `#shortcuts` strip, between T8.2's two buttons. Blocked behind T8.2 for a layout reason and behind **ADR 0016** for a bigger one: this is the first feature that puts *personal data* on a panel whose server has no authentication, and the refresh tokens it needs are credentials sitting on a desktop PC. OAuth stays on the PC and never reaches the APK — two acceptance lines exist for exactly that. The merge is where the design is: the two providers disagree about all-day events, about time zones and about the word for "declined" |
 | T9.2 | **Spike: can the panel talk to an assistant for nothing?** | todo | A button to ask something out loud and hear an answer, with the whole pipeline on the PC — invariant 1 means the page cannot call anything. Time-boxed, produces `docs/spikes/2026-voice-assistant.md` and a throwaway prototype under `spikes/`, and is allowed to conclude *do not build this*. The unknown is whether offline STT, a small local model and offline TTS fit inside a latency a person will stand at a panel for; Claude and DeepSeek are the paid comparison, not the plan. Also has to answer the awkward ones: `RECORD_AUDIO` would be the app's first dangerous permission, and an unauthenticated LAN endpoint that runs a model and speaks in someone's room is not in ADR 0015's family |
 
+## Resuming after 2026-09-24 (wave 21)
+
+Wave 21 is **T0.6**, on `wave/21-pinning-the-second-agent`, PR #30. It was the oldest row in
+the table that was not `done` and had carried the `start here` marker since the bootstrap: the
+task written after the fact for the Reasonix setup that arrived whole in PR #1.
+
+**Next: TT.9**, the CI workflow, and this wave is the argument for it. Its prereqs — TT.1, TT.2,
+T2.1 — are all `done`, and what it needs beyond a checkout is a pushed branch and an
+authenticated `gh`, both of which exist. Everything else in the backlog wants hardware this boot
+does not have; TT.9 wants a runner that does.
+
+**Read `T7.8` before writing `ci.yml`.** Its row says it must not rewrite TT.9's workflow, so
+the boundary is already drawn and the two are being taken in the right order.
+
+### This boot cannot finish what it can build
+
+The wave ended `blocked` rather than `done`, and the reason generalises past T0.6. This Windows
+boot has **no `make`, no Docker, no Ollama and no Reasonix**. It runs the Python and Node suites
+and the `scripts/` linters, and that is the whole of it:
+
+- T0.6's fourth acceptance line (`reasonix run …`) cannot run, so the pinned provider is
+  unresolved by observation and whether `forbid_read` expands globs is unverified.
+- `make check` cannot run, so **`make lint-parity` has never been exercised as a Make target** —
+  only the two commands inside it have. TT.9 would be the first thing to run it.
+- T3.6, the obvious next feature task, needs an APK in `out/` for its 200, which needs Docker.
+  Its row now carries that and the missing `probe.py --expect-header` flag.
+
+The absence of `make` and the JDK is deliberate (ADR 0003) and `after_update.py` already says so
+in a comment. The absence of Ollama is simply where this boot is; the model lives on the other
+side of the dual boot.
+
+### Every asymmetry is not drift, and assuming so re-opened a closed hole
+
+The wave's expensive finding, and it was the review's, not the implementation's. Making the two
+permission files symmetric meant putting `Bash(cat *)` on Claude's allow list — and Claude Code's
+rules are per-tool, so that walks straight past the `Read(./.env)` and `Read(./*.keystore)`
+denies added **sixty lines below it in the same diff**. Step 3 of the task file exists because
+`forbid_read` listed the secrets "while allowing `Bash(cat:*)`". The fix for that sentence
+recreated the sentence on the other side.
+
+Reasonix can afford `Bash(cat:*)` *because* `[sandbox] forbid_read` blocks those files beneath
+it. Claude Code has no equivalent layer. That is a difference in the harnesses, and it belongs
+in the exemption mechanism with its reason attached — there are ten exemptions now, and seven
+are that one fact. Anyone extending `check_permission_parity.py` should read its docstring
+before "fixing" an asymmetry it reports.
+
+### A gate that cannot fail is not a gate
+
+`make lint-parity` runs `--selftest` before the real check, and that ordering earned itself
+inside one wave: applying the review's findings broke the checker in two ways at once and the
+selftest named both instead of passing quietly. It was also verified in the other direction —
+gutting `compare()` makes the selftest exit 1 and list the three drifts it failed to find.
+
+The same discipline caught a number in prose. The first draft of this row claimed 27
+asymmetries; the checker, run against `git show HEAD:` copies of both files, said **23**. The 27
+was the `sleep` count bleeding across. A count that came out of a program gets pasted from the
+program.
+
+### What the next wave inherits that is only true on this desk
+
+- **Nothing in this wave has run on Linux, in Docker, or in CI.** The Android suite was not run;
+  the wave touches no Android code.
+- **Whether Claude Code accepts `Bash(python scripts/*)` and
+  `Bash(curl -sf http://localhost:8777/*)` as written was not tested by running them.** If either
+  shape is wrong the failure is a prompt, not a breach.
+- **The seven reader exemptions are an argument about Claude Code's permission model, not a
+  measurement.** Nobody put a decoy in `.env` and watched `cat` return it.
+- `curl` on both allow lists is scoped to `curl -sf http://localhost:8777/`, which is the only
+  invocation left in any acceptance block — T0.5, T3.5 and T3.7 migrated the rest onto
+  `probe.py` because `curl -w` exits 0 whatever the server said.
+- `server/config.json` is still mode 0644 and holds the brapi token. One `chmod 600`; T7.3 wants
+  it. Carried unchanged from wave 19, where it was also carried unchanged.
+
 ## Resuming after 2026-09-22 (wave 20)
 
 Wave 20 was not planned by wave 19. It came from the chair, and it started as a question — *do I

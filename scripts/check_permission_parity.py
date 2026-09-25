@@ -21,10 +21,16 @@ An asymmetry that is meant is declared in reasonix.toml, as a comment:
     # parity: intentional <rule> <why>
 
 The rule is matched against normalised keys with glob semantics, so one
-`WebFetch(domain:*)` marker covers every domain. The reason is required - an
-exemption that cannot be argued is drift wearing a marker. The markers live in
-reasonix.toml because JSON has no comments, so the JSON twin could not carry the
-reason next to the rule.
+`WebFetch(domain:*)` marker covers every domain and `Bash(docker *)` covers a
+family. The reason is required - an exemption that cannot be argued is drift
+wearing a marker. The markers live in reasonix.toml because JSON has no
+comments, so the JSON twin could not carry the reason next to the rule.
+
+Not every asymmetry is drift, and the difference matters. Reasonix allows
+`Bash(cat:*)` safely because `[sandbox] forbid_read` blocks the secret files
+underneath it; Claude Code has no such layer, so the same rule there would walk
+past its own `Read(...)` denies. That one is a difference in the harnesses and
+is declared, not repaired.
 
 An exemption that matches nothing is reported too: the asymmetry it was written
 for is gone, and the marker now hides whatever lands on that rule next.
@@ -46,26 +52,55 @@ from pathlib import Path
 SETTINGS = Path(".claude/settings.json")
 REASONIX = Path("reasonix.toml")
 
-RULE_RE = re.compile(r"^(?P<tool>[A-Za-z]+)\((?P<target>.*)\)$", re.S)
+RULE_RE = re.compile(r"^(?P<tool>[A-Za-z0-9_]+)\((?P<target>.*)\)$", re.S)
+BARE_RE = re.compile(r"^[A-Za-z0-9_]+$")
 MARKER_RE = re.compile(
-    r"#\s*parity:\s*intentional\s+(?P<rule>[A-Za-z]+\([^)]*\))\s*(?P<why>.*?)\s*$", re.M
+    r"#\s*parity:\s*intentional\s+"
+    # `Tool(target)`, or a bare tool name - the same two shapes a rule may take.
+    r"(?P<rule>[A-Za-z0-9_]+\([^)]*\)|[A-Za-z0-9_]+)\s*(?P<why>.*?)\s*$",
+    re.M,
 )
 
 CLAUDE, RX = ".claude/settings.json", "reasonix.toml"
 
 
-def normalise(rule: str) -> tuple[str, str] | None:
-    """Reduce a rule to (tool, target) in whichever dialect it was written."""
-    m = RULE_RE.match(rule.strip())
+def normalise(rule: str, *, pattern: bool = False) -> tuple[str, str] | None:
+    """Reduce a rule to (tool, target) in whichever dialect it was written.
+
+    `pattern=True` is for a parity marker, whose target stays a glob: stripping
+    the wildcard would leave `Bash(docker *)` matching only the literal command
+    `docker`, so a marker written for a family of rules would cover none of them.
+
+    Two limitations, both deliberate and both real blind spots:
+
+      - A rule with no wildcard is an exact match in Claude Code and a prefix in
+        Reasonix, and this reduces both to the same key. `Bash(adb devices)` and
+        `Bash(adb devices:*)` are reported as paired although `adb devices -l`
+        prompts on one side and not the other.
+      - A command missing from BOTH files is symmetric, so nothing here sees it.
+        That gap is covered by reading the `## Acceptance` blocks instead, which
+        is how `sleep` was found in 27 criteria and neither allow list.
+    """
+    rule = rule.strip()
+
+    # A bare tool name (`WebSearch`) or an MCP rule (`mcp__server__tool`) is a
+    # legal Claude Code entry. It carries no target, and it is NOT a parse
+    # error: a gate that goes red when someone adds WebSearch is a gate people
+    # rip out. It compares as itself, and can be exempted like anything else.
+    if BARE_RE.match(rule):
+        return rule, ""
+
+    m = RULE_RE.match(rule)
     if not m:
         return None
     tool, target = m.group("tool"), m.group("target").strip()
 
     if tool == "Bash":
-        for tail in (":*", " *", "*"):
-            if target.endswith(tail):
-                target = target[: -len(tail)]
-                break
+        if not pattern:
+            for tail in (":*", " *", "*"):
+                if target.endswith(tail):
+                    target = target[: -len(tail)]
+                    break
         return "Bash", " ".join(target.split())
 
     if tool in ("Read", "Edit", "Write"):
@@ -113,6 +148,19 @@ def load_reasonix(path: Path) -> tuple[set, set, list[tuple], list[str]]:
             if key is None:
                 problems.append(f"{path}: unparseable {field} rule {rule!r}")
                 continue
+            # The one rule that looks right and does nothing. Reasonix's reader
+            # is read_file, so a Read(...) here is silently inert - and pairing
+            # it against its settings.json twin would make this script bless the
+            # very hole it exists to find: move server/config.json out of
+            # forbid_read into a Read(...) deny and the token is readable by
+            # `cat` again, with the gate still green.
+            if key[0] == "Read":
+                problems.append(
+                    f"{path}: {rule!r} does nothing - Reasonix's reader is read_file, "
+                    "so a Read(...) rule is silently inert. Put the path in "
+                    "[sandbox] forbid_read, which also blocks `cat`"
+                )
+                continue
             keys.add(key)
         out.append(keys)
     allow, deny = out
@@ -122,7 +170,7 @@ def load_reasonix(path: Path) -> tuple[set, set, list[tuple], list[str]]:
 
     exemptions = []
     for m in MARKER_RE.finditer(text):
-        key = normalise(m.group("rule"))
+        key = normalise(m.group("rule"), pattern=True)
         if key is None:
             problems.append(f"{path}: unparseable parity marker {m.group('rule')!r}")
             continue
@@ -233,12 +281,22 @@ def selftest() -> int:
 
     settings = {
         "permissions": {
-            "allow": ["Bash(make check)", "Bash(curl *)", "Bash(git commit *)"],
+            "allow": [
+                "Bash(make check)",
+                "Bash(curl *)",
+                "Bash(git commit *)",
+                "Bash(docker compose build *)",
+                "WebSearch",
+                "mcp__playwright__browser_navigate",
+            ],
             "deny": ["Read(./server/config.json)", "Edit(./.env)"],
         }
     }
     reasonix = """
 # parity: intentional Bash(git commit*) publication is Claude's
+# parity: intentional Bash(docker *) the family marker: a glob must reach past one command
+# parity: intentional WebSearch no Reasonix equivalent
+# parity: intentional mcp__playwright__browser_navigate no Reasonix equivalent
 # parity: intentional Bash(nothing:*) stale, matches no asymmetry
 [permissions]
 allow = ["Bash(make check:*)", "Bash(sleep:*)"]
@@ -249,7 +307,7 @@ forbid_read = ["server/config.json"]
     expected = {
         "Bash(curl): in .claude/settings.json allow, missing from reasonix.toml",
         "Bash(sleep): in reasonix.toml allow, missing from .claude/settings.json",
-        "Bash(nothing): exempted",
+        "Bash(nothing:*): exempted",
     }
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -257,18 +315,36 @@ forbid_read = ["server/config.json"]
         sp.write_text(json.dumps(settings), encoding="utf-8")
         rp.write_text(reasonix, encoding="utf-8")
 
-        c_allow, c_deny, _ = load_settings(sp)
+        c_allow, c_deny, c_problems = load_settings(sp)
         r_allow, r_deny, exemptions, _ = load_reasonix(rp)
         problems = compare(c_allow, c_deny, r_allow, r_deny, exemptions)
+
+        # A Read(...) rule in Reasonix's permission list looks right and does
+        # nothing. It must be refused, not paired.
+        inert = Path(tmp) / "inert.toml"
+        inert.write_text('[permissions]\ndeny = ["Read(server/config.json)"]\n', encoding="utf-8")
+        _, _, _, inert_problems = load_reasonix(inert)
 
     failures = []
     for want in expected:
         if not any(p.startswith(want) for p in problems):
             failures.append(f"did not report: {want}")
-    # `make check` is the same rule in both dialects, and `git commit` is exempt.
-    for unwanted in ("Bash(make check)", "Read(server/config.json)", "Edit(.env)"):
+    # Paired, or exempt. A bare tool name and an MCP rule are legal Claude Code
+    # entries: they must compare, not blow the gate up as parse errors.
+    for unwanted in (
+        "Bash(make check)",
+        "Read(server/config.json)",
+        "Edit(.env)",
+        "Bash(docker compose build)",
+        "WebSearch()",
+        "mcp__playwright__browser_navigate()",
+    ):
         if any(p.startswith(f"{unwanted}:") for p in problems):
             failures.append(f"reported a rule that is paired or exempt: {unwanted}")
+    if c_problems:
+        failures.append(f"treated a legal Claude Code rule as unparseable: {c_problems}")
+    if not any("silently inert" in p for p in inert_problems):
+        failures.append("accepted a Read(...) rule in reasonix.toml's permission list")
 
     if failures:
         print("check_permission_parity: SELFTEST FAILED", file=sys.stderr)
