@@ -181,6 +181,90 @@ and the first line of each file says so.
 | T9.1 | **The next meeting, under the clock** | todo | Google Calendar and Microsoft Outlook merged, the soonest event under the clock in the `#shortcuts` strip, between T8.2's two buttons. Blocked behind T8.2 for a layout reason and behind **ADR 0016** for a bigger one: this is the first feature that puts *personal data* on a panel whose server has no authentication, and the refresh tokens it needs are credentials sitting on a desktop PC. OAuth stays on the PC and never reaches the APK — two acceptance lines exist for exactly that. The merge is where the design is: the two providers disagree about all-day events, about time zones and about the word for "declined" |
 | T9.2 | **Spike: can the panel talk to an assistant for nothing?** | todo | A button to ask something out loud and hear an answer, with the whole pipeline on the PC — invariant 1 means the page cannot call anything. Time-boxed, produces `docs/spikes/2026-voice-assistant.md` and a throwaway prototype under `spikes/`, and is allowed to conclude *do not build this*. The unknown is whether offline STT, a small local model and offline TTS fit inside a latency a person will stand at a panel for; Claude and DeepSeek are the paid comparison, not the plan. Also has to answer the awkward ones: `RECORD_AUDIO` would be the app's first dangerous permission, and an unauthenticated LAN endpoint that runs a model and speaks in someone's room is not in ADR 0015's family |
 
+## Resuming after 2026-09-24 (wave 23)
+
+Wave 23 is **TT.4 + TT.9**, on `wave/23-contract-tests-and-ci`, PR #29. Contract tests against
+the five real upstreams, CI on every push, and `scripts/check_workflow.py` to stop the two from
+drifting again. **TT.12** was written, not executed: wave 22's record said the `--self-test`
+finding needed a task file, and a resuming section is not one.
+
+**Next: TT.12 + T7.8**, and the order inside the pair is load-bearing. T7.8's own row promises a
+lint job that "runs the repo's own five guard scripts, which nothing runs today unless a human
+remembers" — and two of those scripts are **red on `main` right now**. Add the job first and it
+arrives red, which teaches everyone to ignore it, which is the failure the bootstrap `ci.yml`
+already demonstrated for twenty-two waves. **TT.12 first, then the job that runs it.**
+
+Everything else in the backlog needs the phone (TT.7, TT.8, T2.4, T7.2) or another machine
+(T3.8's Windows half, T3.10's Mac), or is documentation waiting on T7.8 (T7.4–T7.7, T7.3).
+
+Five rows stay blocked and none of them is blocked on work: **T2.4** and **T3.10** (no Mac),
+**T3.9**'s human half, **T3.8**'s Windows half, **T7.2**'s phone half.
+
+### A tool that catches CI overclaiming, caught overclaiming
+
+`check_workflow.py` compares the command CI runs against the command the Makefile runs. The
+review found three ways it counted a step that is **present** as a step that **runs**:
+
+- **`continue-on-error: true`** on the android suite left the check returning zero problems. CI
+  green on a red suite, while `make test-android` exits 1 on the same tree.
+- **`if:`** does it the other way — `if: github.event_name == 'push'` on `assembleDebug` is green
+  and runs no Gradle on a pull request.
+- **a blank line inside a `run: |` block** closed the block, and every command after it matched
+  no `run:` and was dropped, reported as CI not running something it runs two lines below.
+
+The first two are banned outright rather than inspected, and that is the general rule this wave
+is worth remembering for: **a check that tries to decide which conditions are harmless will one
+day decide wrongly and say nothing.** The three layers here have no conditions to express.
+
+### `gh run watch --exit-status` is not a gate on the workflow being correct
+
+TT.9's own acceptance line proves the suites passed. It does not prove the workflow does what it
+says, and this wave has the demonstration: the first android job passed **`build-root-directory:`
+to `setup-gradle`, which is an input of a different action**. The run went green while the action
+annotated that it had discarded the input. Nothing in the acceptance could see it; `gh run view`
+by eye could, and does now, as a `## Manual check` in the task file.
+
+Two annotations are still there and are **T7.8's**, not bugs: `actions/checkout@v4`,
+`setup-java@v4`, `upload-artifact@v4` and `setup-gradle@v4` all target Node 20, which is
+deprecated, and `ubuntu-latest` migrates to Ubuntu 26 on 2026-10-19. T7.8 SHA-pins the actions
+anyway, so the version bump belongs in the same pass.
+
+### What the contract tests actually pin, and what they cannot
+
+Fifteen cases, green on 2026-09-24 against brapi, Binance, AwesomeAPI, open-meteo and the USNO.
+**That is all a contract test ever proves**; their value is the run someone does in three months,
+and the task file says to do it monthly.
+
+Three of them go past "the key is still there", and those are the ones worth keeping if the file
+ever has to shrink:
+
+- **Binance's kline close is positional**, index 4 of a twelve-element array, and nothing in the
+  response names it. An inserted column redraws every crypto sparkline from the volume, and
+  nothing about the picture says so.
+- **open-meteo's daily arrays are asserted to still align with `current.time`.** The timezone
+  parameter failing does not error — it reaches the panel as a missing min and max.
+- **the USNO window is asserted to still bracket now with two New Moons**, which the first cut of
+  `LOOKBACK_DAYS`/`NUMP` did not, and the symptom is the moon quietly not being drawn.
+
+### What the next wave inherits that is only true on this desk
+
+- **The phone is still not on adb**, unchanged from wave 22. TT.7, TT.8, T2.4 and T7.2 all need
+  it back, and the first step is the RSA prompt on the device, which nobody can tap from here.
+- **TT.9's `## Manual check` was not done.** Nothing deliberately broke one test to confirm that
+  only its job goes red. Every job has been seen green; the failure path has not.
+- **`on: push` with no branch filter runs all three jobs twice for every PR from this repo** —
+  two run ids per commit, visible on #29. The review declined to change it because it is a
+  decision about what the trigger means rather than a bug, and TT.9 step 1 says push and pull
+  request in those words. Worth settling deliberately, in the task file, before the repo opens
+  and the minutes are someone else's.
+- **`--fix` owns the working tree until it reports.** This session edited
+  `scripts/check_workflow.py` while the review agent was writing to it and produced duplicate
+  self-test cases; the review removed its own copies, kept the session's, and reported "another
+  session is reviewing this same branch" — which was this session, failing to wait. Nothing was
+  lost, and nothing except reading the case list would have caught it.
+- `server/config.json` is still mode 0644 and holds the brapi token. One `chmod 600`; T7.3 wants
+  it. Carried from wave 19 through 22, still not done.
+
 ## Resuming after 2026-09-23 (wave 22)
 
 Wave 22 is **T3.6 + T7.2**, on `wave/22-the-apk-over-the-wire`. They pair by intent — both are
