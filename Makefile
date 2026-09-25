@@ -1,7 +1,7 @@
 # Entry point for humans, CI and agents alike. Every target exits non-zero on failure.
 DC := docker compose -f docker/compose.yml run --rm build
 
-.PHONY: help check lint-tasks lint-notes test-server test-web test-android connected build apk contract e2e clean
+.PHONY: help check lint-tasks lint-notes lint-parity test-server test-web test-android connected build apk contract e2e clean
 
 help:
 	@echo "check         run everything that does not need the phone"
@@ -14,15 +14,22 @@ help:
 	@echo "e2e           full end-to-end, needs the phone on adb"
 	@echo "lint-tasks    every acceptance criterion is a command with an exit code"
 	@echo "lint-notes    every finished wave left a note in docs/harness-notes/"
+	@echo "lint-parity   .claude/settings.json and reasonix.toml have not drifted"
 	@echo "clean         remove build output"
 
-check: lint-tasks lint-notes test-server test-web test-android
+check: lint-tasks lint-notes lint-parity test-server test-web test-android
 
 lint-tasks:
 	python scripts/check_acceptance.py
 
 lint-notes:
 	python scripts/check_harness_notes.py
+
+# The checker's own selftest runs first: a parity check that cannot fail would
+# pass a drifted pair just as happily as a matched one.
+lint-parity:
+	python scripts/check_permission_parity.py --selftest
+	python scripts/check_permission_parity.py
 
 test-server:
 	python -m unittest discover -s server/tests -t .

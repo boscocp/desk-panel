@@ -5,12 +5,34 @@
 # deliberately skips it because the hook and permission schemas differ
 # (internal/config/paths.go, ConventionDirs).
 #
-# Keep the two files in step. If you add a command to .claude/settings.json,
-# add it here too, in Reasonix syntax:
+# Keep the two files in step. `make check` runs scripts/check_permission_parity.py,
+# which compares them rule by rule and fails on drift, so this is enforced rather
+# than remembered. The syntax does not port verbatim:
 #   - Bash(cmd:*) is canonical; Claude Code's Bash(cmd *) also parses.
 #   - Edit(path) covers every file-mutating tool (write_file, edit_file, ...).
 #   - Read(path) does NOT map — Reasonix's reader is read_file. Secrets are
 #     protected by [sandbox] forbid_read below, which also covers `cat`.
+#
+# An asymmetry that is meant is declared here, as a comment the parity script
+# reads:
+#     # parity: intentional <rule> <why>
+# Nothing else is exempt. The marker lives in this file and not in the JSON twin
+# because JSON has no comments, so an exemption could not carry its reason there.
+
+# The model is pinned here rather than left in an untracked global config: a run
+# that cannot be reproduced from a clone cannot be reviewed either. See ADR 0011
+# and docs/LOCAL-MODELS.md for how this model was chosen over three others.
+default_model = "ollama-local/gemma4-128k-cc"
+
+[[providers]]
+name = "ollama-local"
+kind = "openai"
+base_url = "http://localhost:11434/v1"
+default = "gemma4-128k-cc"
+api_key_env = ""
+# Not decoration: at 0 the harness disables compaction entirely and a long run
+# dies of context exhaustion instead of compacting.
+context_window = 131072
 
 [permissions]
 mode = "ask"
@@ -24,6 +46,7 @@ allow = [
   # Test layers — every acceptance criterion in tasks/ is one of these.
   "Bash(make check:*)", "Bash(make test-server:*)", "Bash(make test-web:*)",
   "Bash(make test-android:*)",
+  "Bash(make lint-tasks:*)", "Bash(make lint-notes:*)", "Bash(make lint-parity:*)",
   "Bash(python -m unittest:*)", "Bash(python3 -m unittest:*)",
   "Bash(python -m json.tool:*)", "Bash(python3 -m json.tool:*)",
   "Bash(node --test:*)", "Bash(node --check:*)",
@@ -33,29 +56,74 @@ allow = [
   "Bash(docker compose -f docker/compose.yml build:*)",
   "Bash(docker compose -f docker/compose.yml config:*)",
 
+  # The checkers the acceptance blocks actually call. 33 criteria run
+  # check_layout.py alone, and none of them was reachable without an approval
+  # prompt until T0.6 counted them.
+  "Bash(python scripts/:*)", "Bash(python3 scripts/:*)",
+  "Bash(python e2e/:*)", "Bash(python3 e2e/:*)",
+  "Bash(python server/probe.py:*)", "Bash(python3 server/probe.py:*)",
+
   # The T0.1 ownership probe writes into out/, which is gitignored and absent
   # from a fresh checkout. Deleting is deliberately NOT granted: the `rm` in
   # that acceptance block is run by the reviewer, outside the harness.
   "Bash(mkdir:*)", "Bash(touch:*)", "Bash(test:*)",
 
-  # Git, read side plus staging and committing.
-  "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
-  "Bash(git branch:*)", "Bash(git add:*)", "Bash(git commit:*)",
-  "Bash(git check-ignore:*)",
+  # `sleep` is not idle time: 27 acceptance criteria start something, wait for
+  # it to settle and then assert. Without it they stop at a prompt mid-sequence.
+  "Bash(sleep:*)",
 
-  # Phone, read-only.
+  # LAN only, and the only way to assert on a running server from the shell.
+  "Bash(curl:*)",
+
+  # Signing. T7.1 generates the keystore with it; the passwords come from a
+  # human and from .env, neither of which this agent can read.
+  "Bash(keytool:*)",
+
+  # Git, read side plus staging. Committing and pushing are denied below.
+  "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
+  "Bash(git branch:*)", "Bash(git add:*)", "Bash(git check-ignore:*)",
+
+  # Phone. `adb shell` and `adb install` are the two the acceptance blocks lean
+  # on hardest; `adb reboot` is not granted, because T2.4 reboots a device whose
+  # MIUI permissions cost a session to grant.
   "Bash(adb devices:*)", "Bash(adb logcat:*)",
+  "Bash(adb shell:*)", "Bash(adb install:*)",
+
+  # There is no line here for WebFetch: Reasonix has no equivalent tool, which is
+  # why ADR 0011 keeps T3.3 and T3.4 - the tasks that need upstream API docs -
+  # off the local model regardless of their shape.
+  # parity: intentional WebFetch(domain:*) no Reasonix equivalent — ADR 0011 keeps doc-reading tasks with Claude
 ]
 
 deny = [
+  # Git history is Claude's by design — ADR 0011 §4. The local agent has no git
+  # tool at all, but the model can reach `bash git ...`, and a commit is the
+  # first place an unperformed-work report would become permanent.
+  # parity: intentional Bash(git commit*) ADR 0011 §4 — publication is Claude's side of the split
+  # parity: intentional Bash(git push*) ADR 0011 §4 — publication is Claude's side of the split
+  "Bash(git commit*)",
+  "Bash(git push*)",
+
   # Secrets, mutation side. The read side is [sandbox] forbid_read.
   "Edit(server/config.json)",
   "Edit(server/config.toml)",
   "Edit(keystore.properties)",
+  "Edit(.env)",
 ]
 
 [sandbox]
 # Hard read block: covers read_file, grep and `cat` alike, unlike a permission
 # rule. The real config holds the brapi token, in either format (T3.12 reads
-# both during the transition); the keystore signs the APK.
-forbid_read = ["server/config.json", "server/config.toml", "keystore.properties"]
+# both during the transition); the keystore signs the APK and .env holds its
+# password.
+#
+# Both the glob and the concrete name are listed on purpose. Whether forbid_read
+# expands globs is unverified — Reasonix is not installed on the Windows desk
+# where this was written, and it runs on the CachyOS box. If globs work the
+# concrete lines are redundant; if they do not, the real files are still covered.
+# Delete the redundancy once someone has run it there and watched a glob bite.
+forbid_read = [
+  "server/config.json", "server/config.toml",
+  "keystore.properties", ".env",
+  "*.keystore", "*.jks", "desk-panel.keystore",
+]

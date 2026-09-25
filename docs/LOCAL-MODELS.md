@@ -7,7 +7,11 @@ This document covers the parts that differ and which model to pick.
 
 ## Which local model
 
-**`gemma4-128k-cc`** — Gemma 4 12B, Q4_K_M, 131072 tokens of context.
+**`gemma4-128k-cc`** — Gemma 4 12B, Q4_K_M, 131072 tokens of context. It is pinned in
+`reasonix.toml`, with the provider, so a clone runs what this table measured; it used to
+live in an untracked global config, where "it worked on this machine" was neither
+reproducible nor reviewable. `context_window` is pinned with it — at 0 the harness turns
+compaction off and a long run dies of context exhaustion instead of compacting.
 
 Measured on an RTX 5070 (12 GB): 8.1 GB resident, **100% GPU**, no CPU offload. It is
 the largest model that fits with room for a full context window.
@@ -52,6 +56,21 @@ So the instructions and the skills need no duplication.
 to `reasonix.toml` means the local agent stops at an approval prompt the other one sails
 through.
 
+That was a request to remember, and it was not kept: the two files had drifted before the
+PR declaring them twins was merged. `make check` now runs
+`scripts/check_permission_parity.py`, which normalises both dialects and fails on any rule
+one file has and the other does not. An asymmetry that is meant is declared in
+`reasonix.toml`, where comments are possible:
+
+```toml
+# parity: intentional WebFetch(domain:*) no Reasonix equivalent — ADR 0011 keeps doc-reading tasks with Claude
+```
+
+The reason is required, and a marker matching nothing is reported too — otherwise a stale
+exemption silently swallows whatever lands on that rule next. There are three today:
+`WebFetch`, and `git commit` / `git push`, which Claude may run and the local agent may
+not.
+
 Three syntax traps, all confirmed against the Reasonix source:
 
 - `Bash(cmd:*)` is canonical; Claude Code's `Bash(cmd *)` also parses, so that half ports
@@ -64,6 +83,16 @@ Secrets are therefore protected by `[sandbox] forbid_read` in `reasonix.toml` ra
 by a `Read(...)` deny. That is the better mechanism anyway: it blocks `cat` too. Verified
 with a decoy token in `server/config.json` — `read_file` reported the file as
 non-existent and `cat server/config.json` returned `Permission denied`.
+
+The keystore was readable by the local agent and not by Claude until T0.6: `forbid_read`
+listed the config and `keystore.properties` while allowing `Bash(cat:*)`. It now covers
+`*.keystore`, `*.jks` and `.env` as well — the keystore is worth little without the
+password, and the password is in `.env`.
+
+**Whether `forbid_read` expands globs is not verified.** The entries are listed both as
+globs and by concrete name, which is redundant if it does and load-bearing if it does not.
+Settle it on the machine that actually runs Reasonix — put a decoy in
+`desk-panel.keystore`, `cat` it, and delete whichever half did not bite.
 
 ## The limit that decides how you use it
 

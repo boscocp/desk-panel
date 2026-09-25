@@ -33,8 +33,9 @@
 - `server/` — Python 3.13, standard library only. See `server/CLAUDE.md`.
 - `e2e/run_e2e.py` — end-to-end scenarios driving the real phone over adb.
 - `docs/adr/` — why things are the way they are. Read before arguing with a decision.
-- `reasonix.toml` — permissions for the local-model agent; the twin of `.claude/settings.json`,
-  which Reasonix does not read. Change one, change the other. See `docs/LOCAL-MODELS.md`.
+- `reasonix.toml` — permissions for the local-model agent, and the pinned model; the twin of
+  `.claude/settings.json`, which Reasonix does not read. Change one, change the other —
+  `make check` fails if you do not. See `docs/LOCAL-MODELS.md`.
 - `tasks/` — one file per unit of work. `tasks/STATUS.md` is the index.
 
 ## Commands
