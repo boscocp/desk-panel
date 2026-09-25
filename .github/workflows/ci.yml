@@ -19,6 +19,13 @@ name: ci
 on:
   push:
   pull_request:
+  # Kept alongside them, not instead of them. This is what the bootstrap
+  # skeleton had on its own, and on its own it is a workflow nobody runs -- so
+  # check_workflow.py requires the two above and merely tolerates this one. It
+  # earns its place by making `gh workflow run ci.yml --ref <branch>` work,
+  # which is TT.9's acceptance line and the way a re-run is asked for without
+  # an empty commit.
+  workflow_dispatch:
 
 # Least privilege, and it is enough: nothing here writes to the repository.
 # T7.8 owns hardening the rest of what a public repo gets.
