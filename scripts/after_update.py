@@ -46,7 +46,7 @@ import socket
 import subprocess
 import sys
 import time
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -157,6 +157,21 @@ def unit_file_path():
     return Path(base) / "systemd" / "user" / UNIT_NAME
 
 
+def _pure(path_str):
+    """A pure path in the flavour the string is written in.
+
+    Pure path classes have no filesystem behind them and therefore no opinion
+    about which OS is running, which is the whole point: a function that reasons
+    about a Windows path must behave the same when a Linux runner reads it.
+
+    A drive letter or a backslash means Windows. Nothing else does -- a bare
+    `pythonw.exe` has no separator at all and either flavour answers alike.
+    """
+    if re.match(r"^[A-Za-z]:[\\/]", path_str) or "\\" in path_str:
+        return PureWindowsPath(path_str)
+    return PurePosixPath(path_str)
+
+
 def python_for(pythonw):
     """`python.exe` beside a `pythonw.exe`, or the path unchanged.
 
@@ -168,8 +183,16 @@ def python_for(pythonw):
     Returned unchanged when it is not a `pythonw`, and *unchanged* is literal:
     `str(Path("/usr/bin/python3"))` is `\\usr\\bin\\python3` on Windows, so
     round-tripping a path this function does not mean to touch would corrupt it.
+
+    The flavour comes from **the string**, never from the OS running this. `Path`
+    is platform-bound, so on Linux `Path(r"C:\\Py\\pythonw.exe").name` is the whole
+    string, nothing matches, and the swap silently does not happen -- correct on
+    Windows and wrong everywhere else, which is why the two self-test cases below
+    were red on Linux from the day they were written. `verify_login_scope.py` hit
+    the mirror image of this in T3.8, where a `WindowsPath` stringified with
+    backslashes and the macOS check failed on the primary platform.
     """
-    path = Path(pythonw)
+    path = _pure(pythonw)
     if path.name.lower() == "pythonw.exe":
         return str(path.with_name("python.exe"))
     if path.name.lower() == "pythonw":
