@@ -1,0 +1,45 @@
+# The ecosystems this repository actually has, and no others (T7.8).
+#
+# `pip` and `npm` are deliberately absent. `server/` is standard library only
+# and `web/` has no package.json, both by design (server/CLAUDE.md, ADR 0006),
+# and `pyproject.toml` here configures a linter rather than declaring a single
+# dependency. A Dependabot config naming an ecosystem the repo does not have is
+# the kind of thing that looks like coverage and is not, so
+# `scripts/check_ci_hygiene.py` fails on an invented ecosystem as loudly as on
+# a missing one.
+#
+# `docker` is here because `docker/Dockerfile` pins its base image by digest,
+# which is the definition of a reproducible build for the whole Android
+# toolchain (ADR 0003) -- and a digest is exactly the pin nobody updates by
+# hand. The task file named two ecosystems; this is the third it had not
+# noticed.
+#
+# Everything is grouped into one pull request per ecosystem per week. Ungrouped,
+# SHA-pinned actions turn this repo into a stream of one-line pull requests,
+# and the pinning in step 3 becomes the reason nobody reviews anything.
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: gradle
+    directory: "/android"
+    schedule:
+      interval: weekly
+    groups:
+      gradle:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: "/docker"
+    schedule:
+      interval: weekly
+    groups:
+      docker:
+        patterns: ["*"]

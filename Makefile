@@ -1,9 +1,10 @@
 # Entry point for humans, CI and agents alike. Every target exits non-zero on failure.
 DC := docker compose -f docker/compose.yml run --rm build
 
-.PHONY: help check lint-tasks lint-notes lint-status lint-permissions lint-workflow lint-selftests test-server test-web test-android connected build apk contract e2e clean
+.PHONY: help wave-start check lint-tasks lint-notes lint-status lint-permissions lint-workflow lint-ci-hygiene lint-selftests test-server test-web test-android connected build apk contract e2e clean
 
 help:
+	@echo "wave-start    fetch, prove main is current, cut BRANCH=wave/NN-slug"
 	@echo "check         run everything that does not need the phone"
 	@echo "test-server   python unittest"
 	@echo "test-web      node:test"
@@ -17,10 +18,36 @@ help:
 	@echo "lint-status   STATUS.md and tasks/*.md still agree"
 	@echo "lint-permissions  .claude/settings.json and reasonix.toml are still twins"
 	@echo "lint-workflow ci.yml runs the same commands these targets do"
+	@echo "lint-ci-hygiene  permissions, SHA pins, concurrency, dependabot"
 	@echo "lint-selftests  every scripts/*.py that has a --self-test runs it"
 	@echo "clean         remove build output"
 
-check: lint-tasks lint-notes lint-status lint-permissions lint-workflow lint-selftests test-server test-web test-android
+# The first command of a wave, and the only one that talks to the network
+# before any code is written. Two waves have been rebuilt from scratch on a
+# `main` that had already shipped them -- PR #30 and PR #31 -- because the git
+# status a session opens with is a snapshot that reads as current when it is
+# not. "git fetch before you branch" was written in CLAUDE.md after the first
+# and did not stop the second, so it is a command with an exit code now.
+#
+# It refuses rather than fast-forwarding on its own: a `main` that cannot be
+# fast-forwarded means local commits nobody asked about, and moving it is a
+# decision, not a step.
+wave-start:
+	@test -n "$(BRANCH)" || { echo "usage: make wave-start BRANCH=wave/NN-slug"; exit 2; }
+	git fetch --quiet origin
+	git switch main
+	@# Before the merge, where `main` is still the stale thing this session
+	@# opened on -- this is the call that names what it was about to miss.
+	python scripts/check_branch_base.py --report
+	git merge --ff-only origin/main
+	@# After it, as a post-condition. Only allowed to be green.
+	python scripts/check_branch_base.py
+	git switch -c "$(BRANCH)"
+	@echo
+	@echo "Read this before writing anything -- it is the wave's prompt:"
+	@grep -n -m1 '^## Resuming after' tasks/STATUS.md
+
+check: lint-tasks lint-notes lint-status lint-permissions lint-workflow lint-ci-hygiene lint-selftests test-server test-web test-android
 
 lint-tasks:
 	python scripts/check_acceptance.py
@@ -39,6 +66,11 @@ lint-permissions:
 lint-workflow:
 	python scripts/check_workflow.py --self-test
 	python scripts/check_workflow.py
+
+# Runs against this checkout, so the properties hold before the push rather
+# than after a runner says so. Its own rules are checked by lint-selftests.
+lint-ci-hygiene:
+	python scripts/check_ci_hygiene.py
 
 # A self-test no target invokes is a test suite with no runner. after_update.py
 # had one, nothing ran it, and it was red on Linux from the day it was written
