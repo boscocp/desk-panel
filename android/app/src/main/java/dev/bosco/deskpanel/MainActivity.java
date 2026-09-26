@@ -383,9 +383,13 @@ public class MainActivity extends Activity implements PanelService.Panel {
      * page, so it is a known-safe literal by the time it is interpolated here
      * — which is the same rule {@code DataPayload} enforces for the payload.
      */
-    private void pushActionResultToPage(String id, boolean ok) {
+    private void pushActionResultToPage(String id, boolean ok, String state) {
+        // Both interpolated values are this app's own: `id` comes from
+        // Actions.ALLOWED and `state` from DataPayload.actionState, which
+        // answers one of three literals or "unknown". Neither is a string the
+        // page or the PC chose the characters of.
         webView.evaluateJavascript(
-                "window.onActionResult('" + id + "'," + ok + ")", null);
+                "window.onActionResult('" + id + "'," + ok + ",'" + state + "')", null);
     }
 
     /**
@@ -400,7 +404,7 @@ public class MainActivity extends Activity implements PanelService.Panel {
 
         /**
          * Fires a shortcut. Returns immediately; the outcome arrives at
-         * {@code window.onActionResult(id, ok)} later, or not at all if this
+         * {@code window.onActionResult(id, ok, state)} later, or not at all if this
          * returned false.
          *
          * @param id an id the page asked for, untrusted
@@ -411,8 +415,8 @@ public class MainActivity extends Activity implements PanelService.Panel {
          */
         @JavascriptInterface
         public boolean invoke(String id) {
-            return PanelService.invokeAction(id, (resolved, ok) ->
-                    runOnUiThread(() -> pushActionResultToPage(resolved, ok)));
+            return PanelService.invokeAction(id, (resolved, ok, state) ->
+                    runOnUiThread(() -> pushActionResultToPage(resolved, ok, state)));
         }
     }
 

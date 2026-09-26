@@ -184,6 +184,77 @@ _TABLE = {
 }
 
 
+# What to run *after* a toggle to find out what actually happened, per id and
+# per platform. Keyed exactly like _TABLE and read the same way.
+#
+# **Why this exists.** The first cut answered `unknown` on Linux, because
+# `wpctl` and `pactl` print nothing when they toggle -- and ADR 0015 is right
+# that a state this server guessed is the one thing a button must never show.
+# Asked for from the chair: the button should carry a cross when the PC is
+# muted. So the state is *measured* rather than guessed: a second, read-only
+# command whose whole job is to say what the mixer now holds.
+#
+# It is a separate command and not a flag on the first because the toggle and
+# the question are different things, and because a read that fails must not
+# make a successful toggle look like a failure -- `run_action` treats a
+# missing or unreadable read-back as `unknown` and keeps the 200.
+#
+# macOS and Windows need no entry: their toggles already end on a word.
+_READBACK = {
+    "mute-audio": {
+        "linux": [
+            ["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"],
+            ["pactl", "get-sink-mute", "@DEFAULT_SINK@"],
+        ],
+    },
+    "mute-mic": {
+        "linux": [
+            ["wpctl", "get-volume", "@DEFAULT_AUDIO_SOURCE@"],
+            ["pactl", "get-source-mute", "@DEFAULT_SOURCE@"],
+        ],
+    },
+}
+
+
+def readback(action, platform=None):
+    """Pure: the read-only commands that answer "is it muted now?", best first."""
+    if action not in CATALOGUE:
+        raise KeyError(action)
+    table = _READBACK.get(action, {})
+    return [list(argv) for argv in table.get(platform_key(platform or sys.platform), [])]
+
+
+def state_from_readback(stdout):
+    """Pure: `muted`/`unmuted`/`unknown` from a mixer's own report.
+
+    Two spellings, because two mixers:
+
+      wpctl get-volume  ->  `Volume: 0.40 [MUTED]`  /  `Volume: 0.40`
+      pactl get-sink-mute -> `Mute: yes`            /  `Mute: no`
+
+    Anything else is `unknown`, deliberately. This function is the only thing
+    standing between a mixer's output and a cross drawn on a button, and the
+    cross is about a microphone.
+    """
+    text = (stdout or "").strip().lower()
+    if not text:
+        return UNKNOWN
+    if "[muted]" in text:
+        return MUTED
+    if text.startswith("volume:"):
+        # wpctl prints the mute flag only when it is set, so a volume line
+        # without it is the mixer saying "not muted" rather than saying
+        # nothing.
+        return UNMUTED
+    if text.startswith("mute:"):
+        value = text.split(":", 1)[1].strip()
+        if value in {"yes", "true", "1"}:
+            return MUTED
+        if value in {"no", "false", "0"}:
+            return UNMUTED
+    return UNKNOWN
+
+
 def platform_key(platform):
     """Pure: `sys.platform` reduced to the three families the table knows.
 
@@ -362,4 +433,30 @@ def run_action(action, platform=None, runner=None, which=None, timeout=None):
         raise ActionError(
             f"{argv[0]} exited {done.returncode}: {detail[-1][:200] if detail else 'no output'}"
         )
-    return state_from(action, done.stdout, done.returncode)
+    state = state_from(action, done.stdout, done.returncode)
+    if state is UNKNOWN or state == UNKNOWN:
+        # The toggle worked and said nothing about the result, which is every
+        # Linux mixer. Ask.
+        state = _read_state(action, platform, runner, which, timeout)
+    return state
+
+
+def _read_state(action, platform, runner, which, timeout):
+    """The mixer's own answer, or `unknown`. Never raises.
+
+    A read-back that fails is not a failed action: the toggle already
+    succeeded and the caller is owed its 200. All this decides is whether the
+    panel draws a cross, and "I could not tell" is an answer the page knows
+    how to render.
+    """
+    for argv in readback(action, platform):
+        if not which(argv[0]):
+            continue
+        try:
+            done = runner(argv, timeout)
+        except (subprocess.TimeoutExpired, OSError):
+            return UNKNOWN
+        if done.returncode == 0:
+            return state_from_readback(done.stdout)
+        return UNKNOWN
+    return UNKNOWN

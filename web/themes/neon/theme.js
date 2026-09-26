@@ -151,6 +151,13 @@
 
         root.append(sidebar, panel);
         els = { root, clock, date, lists, weather, agenda, battery, stale, shortcuts };
+        // The signature renderShortcuts compares against describes markup that
+        // has just been thrown away. mount() runs again whenever host.js empties
+        // the root -- a theme switch away and back is the ordinary case -- and a
+        // stale signature would match the ids that are still enabled and return
+        // early, leaving the strip empty on a panel that had buttons a minute
+        // ago.
+        drawnActions = null;
     }
 
     // --- The shortcut buttons (T8.2) ---------------------------------------
@@ -195,32 +202,67 @@
         // its own allowlist (ADR 0015, Actions.java).
         button.dataset.action = shortcut.id;
         button.title = shortcut.hint;
-        // The caption is the visible label; the hint says that it toggles,
-        // which the caption alone does not.
-        button.setAttribute('aria-label', shortcut.label + ' \u2014 ' + shortcut.hint);
 
+        // No caption. Asked for from the chair, and the icon carries the
+        // whole message now -- which is what makes room for it to be big
+        // enough to read across a desk. The word has not gone away, it has
+        // moved to where it belongs for a picture: the accessible name, which
+        // is also what `title` shows and what a screen reader says.
         const icon = svgIcon(ICONS[shortcut.id], 's-icon');
         if (icon) {
+            // The cross that says *muted*, drawn once and hidden until the PC
+            // says so. Built here rather than on each result so a state change
+            // is one attribute and not a rebuild of the icon under the finger.
+            icon.appendChild(svgPath(ICONS.mutedCross, 's-cross'));
             button.appendChild(icon);
         }
-        const caption = el('span', null, 's-label');
-        caption.textContent = shortcut.label;
-        button.appendChild(caption);
 
+        applyState(button, shortcut, 'unknown');
         button.addEventListener('click', () => press(button, shortcut));
         return button;
     }
 
-    // What the button says after a press, and the rule is T8.2 step 7: it
-    // shows **the last result**, never a state.
+    // What the icon claims, and the claim is narrow on purpose.
     //
-    // The panel cannot know whether the PC is muted. T8.1's toggles report a
-    // state, but only for the instant of the call -- somebody at the keyboard
-    // can change it a second later and nothing tells the phone. So a button
-    // that displayed "muted" would be lying within seconds, and a button that
-    // lies about whether the microphone is live is a privacy failure rather
-    // than a cosmetic one. The acknowledgement fades; nothing persists.
+    // `unknown` is the resting state and the honest one: the panel has not
+    // asked, so it draws the device and no cross. After a press the PC reports
+    // what its mixer actually holds -- measured, not inferred (ADR 0015's
+    // amendment) -- and the cross follows that.
+    //
+    // **It is the last known state, not a live one.** Somebody at the keyboard
+    // can mute after the panel last asked and nothing tells the phone. The
+    // accessible name says so rather than the picture pretending otherwise,
+    // which is the same bargain the stale badge makes for a price.
+    function applyState(button, shortcut, state) {
+        button.dataset.state = state;
+        const suffix = state === 'muted' ? words.actionMuted
+            : state === 'unmuted' ? words.actionUnmuted : '';
+        button.setAttribute(
+            'aria-label',
+            shortcut.label + ' \u2014 ' + shortcut.hint + (suffix ? ' (' + suffix + ')' : ''));
+    }
+
+    // Two different things are drawn on a press and they have different
+    // lifetimes, which is the whole reason this is fiddly:
+    //
+    //   the **result**  -- did the request work. A brief colour, and it fades.
+    //   the **state**   -- what the mixer now holds. The cross, and it stays.
+    //
+    // T8.2 step 7 said the button shows the result and never a state, because
+    // the panel could not know one: every Linux mixer toggles in silence. The
+    // chair asked for the cross, so the server measures the state with a
+    // second read-only command instead of inferring it, and the cross is the
+    // PC's own answer rather than the panel's guess.
+    //
+    // What has not changed is the honesty rule underneath: the cross is the
+    // **last known** state, not a live one, and a failed press leaves it
+    // exactly where it was rather than flipping it. A button that said the
+    // microphone was off while it was live would be a privacy failure, and
+    // guessing after a failure is precisely how that happens.
     const ACK_MS = 1200;
+
+    // The pending fade per button, so a new press can cancel the old one.
+    const fading = new Map();
 
     function press(button, shortcut) {
         if (button.dataset.busy) {
@@ -232,18 +274,37 @@
         button.dataset.busy = '1';
         button.classList.remove('ok', 'err');
         button.classList.add('sending');
-        const settle = (ok) => {
+        // The previous press's fade, cancelled. Without this, the timer from
+        // an acknowledgement that has not finished yet fires part-way through
+        // *this* press and puts the caption back -- which is the wrong caption
+        // for a button that is currently sending, and on the second tap of a
+        // pair it wipes the acknowledgement that has just appeared.
+        if (fading.has(button)) {
+            window.clearTimeout(fading.get(button));
+            fading.delete(button);
+        }
+        let settled = false;
+        const settle = (ok, state) => {
+            // Once. Core answers a refusal through the callback *and* through
+            // its return value, so both arms below can run for one press.
+            if (settled) {
+                return;
+            }
+            settled = true;
             delete button.dataset.busy;
             button.classList.remove('sending');
             button.classList.add(ok ? 'ok' : 'err');
-            // The failure says so in words as well as in colour: the panel is
-            // looked at from across a desk and a red tint alone is not a
-            // message.
-            caption(button).textContent = ok ? shortcut.label : words.actionFailed;
-            window.setTimeout(() => {
+            // Only a press that worked may move the cross. A failure says so
+            // with the flash and leaves the state alone: the last thing the PC
+            // told us is still the best thing known, and inventing a flip here
+            // is how a cross ends up lying about a live microphone.
+            if (ok) {
+                applyState(button, shortcut, state || 'unknown');
+            }
+            fading.set(button, window.setTimeout(() => {
+                fading.delete(button);
                 button.classList.remove('ok', 'err');
-                caption(button).textContent = shortcut.label;
-            }, ACK_MS);
+            }, ACK_MS));
         };
         // false means core refused outright -- offline, no bridge, or an id
         // the PC did not send -- and no result is coming. Settling here is
@@ -251,10 +312,6 @@
         if (!DeskPanel.invoke(shortcut.id, settle)) {
             settle(false);
         }
-    }
-
-    function caption(button) {
-        return button.querySelector('.s-label');
     }
 
     // The four card titles, as data on the sections ::before reads them from.
@@ -584,17 +641,27 @@
         // gets a button with a caption and no picture rather than an empty
         // <svg> holding a flex basis open.
         //
-        // Silhouettes, not outlines of devices. The two sit side by side at
-        // 56px and the failure they have to avoid is a mis-tap, so what
-        // matters is that they are distinguishable at a glance across a desk:
-        // a squat cone pointing right, and a tall capsule on a stand. That is
-        // the same argument the battery and thermometer icons above lost
-        // twice before it was taken seriously.
-        'mute-audio': 'M4 9.5h3.2L12 5.4v13.2L7.2 14.5H4a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1z'
-                    + 'M15.6 9.2l4.4 5.6M20 9.2l-4.4 5.6',
+        // Silhouettes, not outlines of devices. The two sit side by side and
+        // the failure they have to avoid is a mis-tap, so what matters is that
+        // they are distinguishable at a glance across a desk: a squat cone
+        // pointing right, and a tall capsule on a stand. That is the same
+        // argument the battery and thermometer icons above lost twice before
+        // it was taken seriously.
+        //
+        // **The device only.** The cross that says *muted* is a separate path
+        // (`mutedCross`), drawn over the top and only when the PC has actually
+        // said so -- asked for from the chair, and honest only because the
+        // server measures the state rather than guessing it (ADR 0015's
+        // amendment). An icon that baked the cross in would be claiming a
+        // state on every render.
+        'mute-audio': 'M4 9.5h3.2L12 5.4v13.2L7.2 14.5H4a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1z',
         'mute-mic': 'M12 3.2a2.6 2.6 0 0 1 2.6 2.6v5.4a2.6 2.6 0 1 1-5.2 0V5.8'
                   + 'A2.6 2.6 0 0 1 12 3.2zM6.4 11.2a5.6 5.6 0 0 0 11.2 0M12 16.8v3.4'
                   + 'M9.2 20.2h5.6',
+        // One stroke for both, in the top-right quadrant where neither device
+        // has ink: a cross over the middle of the microphone would eat the
+        // shape that identifies it.
+        mutedCross: 'M16.4 8.4l5 5M21.4 8.4l-5 5',
     };
 
     // One <svg> with one path in it. Both icon sets go through this: the only

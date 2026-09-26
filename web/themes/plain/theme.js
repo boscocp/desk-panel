@@ -109,6 +109,13 @@
             weather: weather.scroller,
             shortcuts,
         };
+        // The signature renderShortcuts compares against describes markup that
+        // has just been thrown away. mount() runs again whenever host.js empties
+        // the root -- a theme switch away and back is the ordinary case -- and a
+        // stale signature would match the ids that are still enabled and return
+        // early, leaving the strip empty on a panel that had buttons a minute
+        // ago.
+        drawnActions = null;
     }
 
     // --- The shortcut buttons (T8.2) ---------------------------------------
@@ -140,6 +147,7 @@
             button.dataset.action = shortcut.id;
             button.title = shortcut.hint;
             button.textContent = shortcut.label;
+            applyState(button, 'unknown');
             button.addEventListener('click', () => press(button, shortcut));
             els.shortcuts.appendChild(button);
         }
@@ -149,7 +157,27 @@
     // the caption rather than a colour, because this theme has no palette to
     // say it with -- which makes it the honest test of whether the rule is
     // about the rule or about neon's CSS.
+    // The state the PC last reported, said in a word. neon draws a cross; this
+    // theme has no pictures, so it says it -- which is the point of the theme
+    // existing, and the check that the contract is about the contract.
+    //
+    // `unknown` is the resting state and shows nothing: the panel has not
+    // asked, and a theme that printed "com som" before anyone pressed anything
+    // would be making the claim ADR 0015 forbids.
+    function applyState(button, state) {
+        button.dataset.state = state;
+        const suffix = state === 'muted' ? words.actionMuted
+            : state === 'unmuted' ? words.actionUnmuted : '';
+        button.title = suffix ? words.actionHint + ' \u2014 ' + suffix : words.actionHint;
+    }
+
     const ACK_MS = 1200;
+
+    // The pending fade per button, so a new press can cancel the old one:
+    // otherwise the previous acknowledgement's timer fires part-way through
+    // this press and replaces "SOM ..." with "SOM" on a button that is still
+    // waiting to hear.
+    const fading = new Map();
 
     function press(button, shortcut) {
         if (button.dataset.busy) {
@@ -157,12 +185,38 @@
         }
         button.dataset.busy = '1';
         button.textContent = shortcut.label + ' ...';
-        const settle = (ok) => {
+        if (fading.has(button)) {
+            window.clearTimeout(fading.get(button));
+            fading.delete(button);
+        }
+        let settled = false;
+        const settle = (ok, state) => {
+            // Once: core answers a refusal through the callback *and* through
+            // its return value, so both arms below can run for one press.
+            if (settled) {
+                return;
+            }
+            settled = true;
             delete button.dataset.busy;
+            // Only a press that worked may move the state. A failure says so
+            // and leaves the last thing the PC told us alone -- guessing a
+            // flip after a failure is how a panel ends up claiming a
+            // microphone is off while it is live.
+            if (ok) {
+                applyState(button, state || 'unknown');
+            }
             button.textContent = ok ? shortcut.label + ' ok' : shortcut.label + ' ' + words.actionFailed;
-            window.setTimeout(() => {
-                button.textContent = shortcut.label;
-            }, ACK_MS);
+            fading.set(button, window.setTimeout(() => {
+                fading.delete(button);
+                // Back to the caption plus whatever the PC last said, which is
+                // this theme's version of neon's cross: it persists, while the
+                // ok/failed acknowledgement above does not.
+                const state = button.dataset.state;
+                const suffix = state === 'muted' ? words.actionMuted
+                    : state === 'unmuted' ? words.actionUnmuted : '';
+                button.textContent = suffix ? shortcut.label + ' \u2014 ' + suffix
+                    : shortcut.label;
+            }, ACK_MS));
         };
         if (!DeskPanel.invoke(shortcut.id, settle)) {
             settle(false);

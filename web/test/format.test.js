@@ -1123,6 +1123,16 @@ test('every language has a caption for every action and a hint', () => {
         assert.equal(typeof table.actionHint, 'string', `${tag} has no actionHint`);
         assert.ok(table.actionHint.length > 0, `${tag} has an empty actionHint`);
         assert.equal(typeof table.actionFailed, 'string', `${tag} has no actionFailed`);
+        for (const key of ['actionMuted', 'actionUnmuted']) {
+            // Said to a screen reader after a press. Both have to carry "last
+            // asked" in whatever words the language uses -- the panel knows a
+            // state the PC reported, not a live one, and an accessible name
+            // that claimed otherwise would be the lie the picture avoids.
+            assert.equal(typeof table[key], 'string', `${tag} has no ${key}`);
+            assert.ok(table[key].length > 0, `${tag} has an empty ${key}`);
+        }
+        assert.notEqual(table.actionMuted, table.actionUnmuted,
+                        `${tag} says the same thing for muted and unmuted`);
         for (const id of ids) {
             assert.equal(typeof table.actions[id], 'string', `${tag} has no caption for ${id}`);
             assert.ok(table.actions[id].length > 0, `${tag} has an empty caption for ${id}`);
