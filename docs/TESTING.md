@@ -52,7 +52,7 @@ tests.
 
 ## The panel, in a real browser — `e2e/layout/`
 
-Five checks, one harness. They drive Firefox over Marionette (its built-in automation
+Six checks, one harness. They drive Firefox over Marionette (its built-in automation
 protocol — no driver binary, no npm, standard library only) at **872x392**, the phone's real
 landscape viewport, and none of them needs the phone. `e2e/layout/README.md` is the long
 version; this is what each one is for.
@@ -64,10 +64,12 @@ version; this is what each one is for.
 | `check_scroll.py` | does an overflowing card keep moving across a refresh |
 | `check_pulse.py` | does a value pulse only when it changed |
 | `check_night.py` | does the panel enter its night profile inside the window, stop moving, drop its glow, and leave it alone when nobody can see it |
+| `check_actions.py` | does a shortcut button draw only what the PC enabled, measure 56px, hand the bridge an id and nothing else, and send nothing while the PC is away (T8.2) |
 
-All five take `--theme NAME`. Run `check_layout`, `check_blackout` and `check_night` for every
-theme; `check_scroll` for a theme that answers overflow with motion, and `check_pulse` for one
-that marks a changed value — both are optional in the theme contract (`docs/THEMING.md`).
+All six take `--theme NAME`. Run `check_layout`, `check_blackout`, `check_night` and
+`check_actions` for every theme; `check_scroll` for a theme that answers overflow with
+motion, and `check_pulse` for one that marks a changed value — both are optional in the
+theme contract (`docs/THEMING.md`).
 
 `check_layout` also takes `--lang TAG`, and it is worth running for every language that ships
 (T6.11). The words are not the same length — `TEMPO` against `WEATHER`, `DEFASADO` against

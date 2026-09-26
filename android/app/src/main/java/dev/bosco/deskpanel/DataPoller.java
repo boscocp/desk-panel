@@ -51,6 +51,25 @@ public final class DataPoller {
     private static final int TIMEOUT_MS = 5000;
 
     /**
+     * How long a shortcut press may wait for the PC, and it is deliberately
+     * not {@link #TIMEOUT_MS} (T8.2).
+     *
+     * <p>The number is dictated by the other end: {@code actions.timeout_for}
+     * allows a press <b>15 seconds</b> on Windows, because the mixer call
+     * there is PowerShell handing C# to {@code Add-Type} and the compiler runs
+     * on every press. Five seconds here would give up first, log
+     * {@code result=err} and make the button say it failed — on a PC that then
+     * mutes a few seconds later. A button that lies about a mute is the one
+     * thing T8.2 step 7 forbids, and "it did nothing" is indistinguishable
+     * from "it worked" by ear.
+     *
+     * <p>Only the read timeout: connecting is a LAN handshake and still gets
+     * {@link #TIMEOUT_MS}, so an absent PC is still refused in five seconds
+     * rather than twenty.
+     */
+    private static final int ACTION_TIMEOUT_MS = 20000;
+
+    /**
      * How often to ask. Well apart from the 2s ping on purpose, and shorter
      * than the server's own cache windows so a cache that has just expired is
      * picked up promptly rather than a whole interval late.
@@ -61,6 +80,9 @@ public final class DataPoller {
      * anybody's API budget.
      */
     private static final long INTERVAL_MS = 60_000L;
+
+    /** What the page is told when the PC did not say. Matches server/actions.py. */
+    private static final String STATE_UNKNOWN = "unknown";
 
     /** Retried sooner than a success, but not so soon that a dead server is hammered. */
     private static final long RETRY_MS = 15_000L;
@@ -83,10 +105,14 @@ public final class DataPoller {
      */
     public interface ResultListener {
         /**
-         * @param id an id from {@link Actions#ALLOWED}, never the page's string
-         * @param ok whether the PC answered 200
+         * @param id    an id from {@link Actions#ALLOWED}, never the page's string
+         * @param ok    whether the PC answered 200
+         * @param state what the PC said the mixer now holds -- {@code muted},
+         *              {@code unmuted}, or {@code unknown}. Never null, and
+         *              {@code unknown} on any failure: a state the panel drew
+         *              on a guess is the one thing ADR 0015 forbids
          */
-        void onActionResult(String id, boolean ok);
+        void onActionResult(String id, boolean ok, String state);
     }
 
     private final String quotesUrl;
@@ -191,10 +217,12 @@ public final class DataPoller {
         }
         try {
             owner.execute(() -> {
-                boolean ok = post(url);
+                String state = post(url);
+                boolean ok = state != null;
                 Log.i(Markers.TAG, Markers.action(id, ok ? "ok" : "err"));
+                final String reported = ok ? state : STATE_UNKNOWN;
                 if (onResult != null) {
-                    main.post(() -> onResult.onActionResult(id, ok));
+                    main.post(() -> onResult.onActionResult(id, ok, reported));
                 }
             });
         } catch (RejectedExecutionException stopped) {
@@ -215,16 +243,23 @@ public final class DataPoller {
      * own, which is what makes the check free here — but it is worth knowing
      * before somebody adds a header for an unrelated reason.
      *
-     * @return true only on a 200. Every other outcome is a failed press, and
-     *         the button says so rather than pretending.
+     * @return the {@code state} field of the 200's body -- {@code muted},
+     *         {@code unmuted} or {@code unknown} -- or **null** for anything
+     *         that was not a 200. Null is the failed press; every other
+     *         outcome is a press that worked and a state the panel may draw.
+     *         A 200 whose body cannot be read is {@code unknown} and not a
+     *         failure: the PC did the thing, it just did not manage to say
+     *         what the result was.
      */
-    private boolean post(String url) {
+    private String post(String url) {
         HttpURLConnection connection = null;
         try {
             connection = (HttpURLConnection) new URL(url).openConnection();
             connection.setRequestMethod("POST");
             connection.setConnectTimeout(TIMEOUT_MS);
-            connection.setReadTimeout(TIMEOUT_MS);
+            // Not TIMEOUT_MS: the PC is allowed 15s for this on Windows. See
+            // ACTION_TIMEOUT_MS.
+            connection.setReadTimeout(ACTION_TIMEOUT_MS);
             connection.setUseCaches(false);
             // No body at all: the id is in the path and there is nothing else
             // to say (ADR 0015). setFixedLengthStreamingMode(0) rather than
@@ -232,12 +267,15 @@ public final class DataPoller {
             // accident later.
             connection.setDoOutput(false);
             connection.setFixedLengthStreamingMode(0);
-            return connection.getResponseCode() == HttpURLConnection.HTTP_OK;
+            if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) {
+                return null;
+            }
+            return DataPayload.actionState(read(connection.getInputStream()));
         } catch (IOException | RuntimeException thrown) {
             // Swallowed like get()'s: an exception escaping here would kill
             // the executor's task and the panel would keep polling with one
             // button that silently never works again.
-            return false;
+            return null;
         } finally {
             if (connection != null) {
                 connection.disconnect();

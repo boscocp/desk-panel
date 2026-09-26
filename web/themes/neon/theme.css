@@ -173,11 +173,24 @@ body {
  * was in it. */
 #shortcuts {
     align-self: end;
-    min-height: 56px;
+    /* Taller than the 56px floor and narrower than the column, both asked for
+     * from the chair. `1fr` gave each button the full half of a 296px sidebar,
+     * which is a 144px-wide box holding one 22px icon -- a target far past
+     * what a finger needs and a picture far under what a desk's distance
+     * wants. Fixed columns instead, with the icon taking the space back. */
+    justify-self: start;
     display: grid;
     grid-auto-flow: column;
-    grid-auto-columns: 1fr;
-    gap: 8px;
+    grid-auto-columns: 104px;
+    gap: 10px;
+    /* **The clipped corner.** #sidebar is `overflow: hidden`, and with the
+     * strip flush against its bottom the button's own 1px border landed
+     * exactly on the clip and was shaved off along the bottom-left. Reported
+     * from the chair, and visible in a screenshot once you know to look. The
+     * margin is the fix and 6px is not arbitrary: the burn-in shift moves the
+     * whole panel up to 4px (BURN_IN_AMPLITUDE_PX), so anything smaller brings
+     * the cut back for a few minutes of every cycle. */
+    margin-bottom: 6px;
 }
 
 /* 56px on **both** axes, and it is not a style number. This is a phone at
@@ -186,21 +199,21 @@ body {
  * grid above already guarantees the width; min-height guarantees the rest
  * whatever the caption does. */
 .shortcut {
-    min-height: 56px;
+    /* 56px is the floor and not the target (T8.2 step 6): a phone at arm's
+     * length, no pointer, two buttons touching, and the failure the number
+     * prevents is muting the microphone when you meant the speakers. These are
+     * comfortably over it in both directions. */
+    min-height: 72px;
     min-width: 56px;
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 2px;
     padding: 0;
     border: 1px solid var(--accent-dim);
     border-radius: 8px;
     background: transparent;
     color: var(--accent);
     font: inherit;
-    font-size: 10px;
-    letter-spacing: 0.08em;
     /* The panel is never scrolled and the buttons are the only thing on it
      * that is touched, so a tap must not select their caption or raise a
      * context menu on a long press. */
@@ -210,14 +223,44 @@ body {
     cursor: pointer;
 }
 
+/* The whole message. There is no caption any more -- the word moved to the
+ * accessible name -- so the picture is what has to be legible from across a
+ * desk, and it gets the room the caption used to take. */
 .shortcut .s-icon {
-    width: 22px;
-    height: 22px;
+    width: 36px;
+    height: 36px;
     fill: none;
     stroke: currentColor;
     stroke-width: 1.8;
     stroke-linecap: round;
     stroke-linejoin: round;
+}
+
+/* The speaker is a solid cone; the microphone is drawn in line only. Both
+ * read better at 36px than the shared outline did at 22. */
+.shortcut[data-action="mute-audio"] .s-icon > path:first-child {
+    fill: currentColor;
+}
+
+/* The cross that says muted, and it is **hidden until the PC has said so**.
+ * `data-state` is only ever `muted` after a press the PC answered, so the
+ * resting panel makes no claim at all about a microphone (ADR 0015). */
+.shortcut .s-cross {
+    display: none;
+    stroke-width: 2.2;
+}
+
+.shortcut[data-state="muted"] .s-cross {
+    display: inline;
+}
+
+/* Muted is a state worth seeing without reading the icon, so the whole button
+ * shifts rather than only the cross appearing. Not red: red is this panel's
+ * colour for a loss and for a failed press, and a muted speaker is neither
+ * wrong nor a failure. */
+.shortcut[data-state="muted"] {
+    border-color: var(--accent);
+    color: var(--accent);
 }
 
 /* The press states, and every one of them is about the **last result** and

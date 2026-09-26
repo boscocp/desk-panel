@@ -194,6 +194,23 @@ check` reaches and no workflow runs, so they cannot arrive unwired.
 
 Phase 9 (T9.1, T9.2) is unblocked — ADR 0015 exists — and is still "suggested, not scheduled".
 
+### The chair changed step 7, and the fix was to stop guessing
+
+After the buttons were seen on the panel, four asks came back: no caption, a bigger icon, **a
+cross when the PC is muted**, and a border that was being clipped by `#sidebar`'s `overflow:
+hidden`.
+
+The cross contradicts T8.2 step 7 as written — *"shows the last result, not a live state"* — and
+step 7 said that because every Linux mixer toggles in silence, so the state was not knowable.
+The answer was not to relax the rule but to make the state real: **the server runs a second,
+read-only command after the toggle** and reports what the mixer actually holds. ADR 0015 carries
+the three limits that keep it honest, and the sentence step 7 exists to protect is untouched — a
+button that says the microphone is off while it is live is still a privacy failure.
+
+The clipped corner is worth one line of its own: the fix is 6px of clearance, and **6 rather than
+less because the burn-in shift moves the whole panel up to 4px**. A 2px margin would have looked
+right in a screenshot and brought the cut back for part of every cycle.
+
 ### The device caught a bug three green layers did not
 
 T8.2 was written end to end, unit tested, exercised in two themes in a real browser by a new

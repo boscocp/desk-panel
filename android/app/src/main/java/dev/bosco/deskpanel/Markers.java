@@ -147,11 +147,37 @@ public final class Markers {
      * and a mis-tap is the failure T8.2's 56px target exists to prevent —
      * which is only checkable if the log says which one was actually sent.
      *
-     * @param id      an id already resolved through {@link Actions}, so this
-     *                never logs a string the page made up
+     * <p><b>The id is not always one of {@link Actions#ALLOWED}.</b> The two
+     * refusal paths — an id the app will not relay, and a press while the PC
+     * is away — log the string the page handed over, on purpose: the only way
+     * either happens is a bug in a theme or in an asset that is not ours, and
+     * the string is the whole of the evidence. So it is stripped of anything
+     * that could make one line look like two. A marker is what every E2E
+     * assertion in this project reads (ADR 0009), and a candidate carrying a
+     * newline would let the page write its own {@code action=… result=ok}
+     * into logcat.
+     *
+     * @param id      an action id — from {@link Actions} on the paths that
+     *                send, and whatever the page said on the paths that refuse
      * @param outcome {@code ok}, {@code err}, or why it was not sent at all
      */
     public static String action(String id, String outcome) {
-        return "action=" + id + " result=" + outcome;
+        return "action=" + oneLine(id) + " result=" + outcome;
+    }
+
+    /**
+     * {@code value} with every control character replaced by {@code .}, so an
+     * untrusted string cannot forge a second marker line.
+     */
+    private static String oneLine(String value) {
+        if (value == null) {
+            return "null";
+        }
+        StringBuilder safe = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            safe.append(c < ' ' || c == 127 ? '.' : c);
+        }
+        return safe.toString();
     }
 }

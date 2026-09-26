@@ -228,9 +228,13 @@
     const pressed = new Map();
 
     function invoke(id, done) {
-        const report = (ok) => {
+        // `state` is what the PC said its mixer now holds, and it is always
+        // one of three words -- a refusal that never reached the PC reports
+        // 'unknown', because this layer knows nothing about a mixer it did not
+        // talk to.
+        const report = (ok, state) => {
             if (typeof done === 'function') {
-                done(!!ok);
+                done(!!ok, state || 'unknown');
             }
         };
         const allowed = (payload && payload.actions) || [];
@@ -267,20 +271,36 @@
 
     // MainActivity.pushActionResultToPage, once per press that was actually
     // sent. `id` comes from the app's own allowlist, never from the page.
-    window.onActionResult = (id, ok) => {
+    window.onActionResult = (id, ok, state) => {
         const report = pressed.get(id);
         pressed.delete(id);
         if (report) {
-            report(!!ok);
+            report(!!ok, state);
         }
     };
 
-    // The panel going dark abandons whatever was in flight. A result arriving
-    // after that has no button to land on -- the theme's markup was drawn for
-    // a panel nobody has looked at since -- and holding the callbacks would
-    // leak one per press across a night offline.
+    // The panel going dark abandons whatever was in flight, and every
+    // abandoned press is **settled as a failure on the way out**. Clearing the
+    // map in silence was the first cut and it leaves a button dead for ever:
+    // PanelService stops the poller on the transition down and DataPoller.stop
+    // calls shutdownNow, so the result for a press that was in flight when the
+    // PC went away never arrives -- the theme's button keeps its busy flag,
+    // press() returns early on it from then on, and renderShortcuts will not
+    // rebuild it because the id set has not changed. A press that cannot be
+    // answered has failed, which is exactly what the button should say.
+    //
+    // Holding the callbacks instead would leak one per press across a night
+    // offline, and a result arriving later has no button to land on anyway --
+    // the theme's markup was drawn for a panel nobody has looked at since.
     function forgetPresses() {
+        if (pressed.size === 0) {
+            return;
+        }
+        const abandoned = Array.from(pressed.values());
         pressed.clear();
+        for (const report of abandoned) {
+            report(false);
+        }
     }
 
     host.invoke = invoke;

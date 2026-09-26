@@ -97,6 +97,18 @@ public class MarkersTest {
     }
 
     @Test
+    public void aRejectedIdCannotForgeASecondMarkerLine() {
+        // The refusal paths log the string the page handed over, which is the
+        // only evidence there is that a theme asked for something. A newline
+        // in it would let the page write its own `action=... result=ok` into
+        // logcat, and that is what every E2E assertion here reads (ADR 0009).
+        assertEquals("action=x.action=mute-audio result=ok result=rejected",
+                Markers.action("x\naction=mute-audio result=ok", "rejected"));
+        assertEquals("action=a.b result=rejected", Markers.action("a\rb", "rejected"));
+        assertEquals("action=null result=offline", Markers.action(null, "offline"));
+    }
+
+    @Test
     public void heartbeatMarkers() {
         assertEquals("tick=1758240000", Markers.tick(1758240000L));
         assertEquals("ping=ok", Markers.ping("ok"));

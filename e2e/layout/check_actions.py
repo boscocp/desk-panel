@@ -101,6 +101,19 @@ def check(m, fails, theme):
 
     js(RECORDER)
 
+    # mock.js is live on a file: page and pushes its own payload every 3s, with
+    # `actions` holding **both** ids unless the URL said otherwise. Every
+    # assertion below is about a payload this file delivered, so a tick landing
+    # between a deliver() and the query after it puts the mock's two buttons
+    # back and reports a correct panel as broken -- `deliver([])` followed by
+    # "buttons were drawn for a PC that enabled none" is the clearest of them,
+    # and the failure is intermittent, which is worse than a failure.
+    #
+    # Clearing every interval id is blunt and is the only handle available;
+    # every other check in this directory stops the feed the same way, for the
+    # same reason. It stops app.js's clock too, which nothing here measures.
+    js(cl.FREEZE)
+
     # --- 1. which buttons exist is the PC's decision ------------------------
     deliver(["mute-mic", "mute-audio"])
     if ids() != ["mute-mic", "mute-audio"]:
@@ -200,6 +213,91 @@ def check(m, fails, theme):
               ".dataset.busy;")
     if busy:
         fails.append("a button left pressed for ever after the bridge refused")
+
+    # --- 6. the cross is the PC's answer, never the panel's guess -----------
+    # Asked for from the chair after T8.2 first landed: the icon carries a
+    # cross when the PC is muted. It is honest only because the server measures
+    # the state with a second read-only command (ADR 0015's amendment), so what
+    # is asserted here is the narrow version -- **the panel claims nothing it
+    # was not told.**
+    def state_of(action_id):
+        return js("var b = document.querySelector('#shortcuts [data-action=\"%s\"]');"
+                  "return b ? b.dataset.state : null;" % action_id)
+
+    def cross_visible(action_id):
+        return js("var b = document.querySelector('#shortcuts [data-action=\"%s\"]');"
+                  "if (!b) { return null; }"
+                  "var c = b.querySelector('.s-cross');"
+                  "if (!c) { return 'no-cross-element'; }"
+                  "return getComputedStyle(c).display !== 'none';" % action_id)
+
+    js("window.__sent = []; window.__accept = true;")
+    deliver(["mute-audio", "mute-mic"])
+    time.sleep(0.2)
+    # A button nobody has pressed makes no claim. This is the resting state of
+    # every panel in the world and the one most likely to be got wrong.
+    for action_id in ("mute-audio", "mute-mic"):
+        if state_of(action_id) != "unknown":
+            fails.append("%s claims %r before anyone pressed it"
+                         % (action_id, state_of(action_id)))
+        if cross_visible(action_id) is True:
+            fails.append("%s draws a cross before the PC has said anything" % action_id)
+
+    for reported, wanted_cross in (("muted", True), ("unmuted", False), ("muted", True)):
+        press("mute-mic")
+        js("window.onActionResult('mute-mic', true, '%s');" % reported)
+        time.sleep(0.1)
+        if state_of("mute-mic") != reported:
+            fails.append("the PC said %r and the button holds %r"
+                         % (reported, state_of("mute-mic")))
+        shown = cross_visible("mute-mic")
+        if shown is not None and shown != "no-cross-element" and shown != wanted_cross:
+            fails.append("the PC said %r and the cross is %s" % (reported, shown))
+        time.sleep(1.4)
+
+    # A failed press must not move it. The last thing the PC said is still the
+    # best thing known, and inventing a flip here is how a cross ends up lying
+    # about a live microphone.
+    before = state_of("mute-mic")
+    press("mute-mic")
+    js("window.onActionResult('mute-mic', false, 'unknown');")
+    time.sleep(0.1)
+    if state_of("mute-mic") != before:
+        fails.append("a failed press moved the state from %r to %r"
+                     % (before, state_of("mute-mic")))
+    time.sleep(1.4)
+
+    # And the acknowledgement fades while the state does not: they are two
+    # different things with two different lifetimes, which is the whole reason
+    # this is fiddly.
+    if state_of("mute-mic") != before:
+        fails.append("the state faded with the acknowledgement")
+
+    # --- 7. the buttons survive a theme switch away and back ----------------
+    # Added because the first cut of this file did not switch themes and missed
+    # a real bug: `drawnActions` is module scope, host.js empties the root on a
+    # switch, and a remount got a fresh empty strip with a signature that still
+    # matched -- so renderShortcuts returned early and drew nothing. `neon ->
+    # plain -> neon` rendered zero buttons, on a panel where every other check
+    # here passed.
+    #
+    # A switch is not exotic: `theme` is runtime config, so it happens whenever
+    # somebody edits a file on the PC (T3.12, ADR 0013).
+    other = "plain" if (theme or "neon") != "plain" else "neon"
+    for name in (other, theme or "neon", other):
+        js(payload(["mute-audio", "mute-mic"], theme=name))
+        time.sleep(0.2)
+        drawn = ids()
+        if drawn != ["mute-audio", "mute-mic"]:
+            fails.append("after switching to theme %s the buttons are %r" % (name, drawn))
+            break
+
+    # And they still work over there. A button that renders and does nothing is
+    # the failure this whole task calls worse than no button.
+    js("window.__sent = []; window.__accept = true;")
+    press("mute-mic")
+    if sent() != ["mute-mic"]:
+        fails.append("a press after a theme switch reached the bridge with %r" % sent())
 
 
 def main():

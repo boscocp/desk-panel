@@ -371,6 +371,13 @@ const LANGUAGES = {
         // the caption alone does not say the button *toggles*.
         actionHint: 'Alternar mudo',
         actionFailed: 'falhou',
+        // Said only to a screen reader, and only after the PC has reported --
+        // the picture carries it for everybody else. "Mudo agora" rather than
+        // "mudo": the panel knows the last state the PC gave it and not a live
+        // one, and the word has to carry that or the sentence is a claim the
+        // page cannot back.
+        actionMuted: 'mudo na última vez',
+        actionUnmuted: 'com som na última vez',
         weather: {
             0: 'Céu limpo',
             1: 'Predominantemente limpo',
@@ -418,6 +425,8 @@ const LANGUAGES = {
         actions: { 'mute-audio': 'SOUND', 'mute-mic': 'MIC' },
         actionHint: 'Toggle mute',
         actionFailed: 'failed',
+        actionMuted: 'muted when last asked',
+        actionUnmuted: 'not muted when last asked',
         weather: {
             0: 'Clear sky',
             1: 'Mainly clear',

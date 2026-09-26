@@ -174,6 +174,37 @@ public final class DataPayload {
     }
 
     /**
+     * The {@code state} field of an action response, or {@code unknown}.
+     *
+     * <p>Here rather than in {@code DataPoller} for the reason every parser in
+     * this project is here: {@code android/CLAUDE.md} says anything worth
+     * testing lives in a plain class with no Android imports, and what a panel
+     * does with a mixer's answer is worth testing — the value decides whether
+     * a cross is drawn over a microphone icon, and a cross that is wrong about
+     * a live microphone is a privacy failure rather than a cosmetic one.
+     *
+     * <p>Fails closed, always. A body that is not JSON, a JSON object with no
+     * {@code state}, a state that is not one of the three words the server
+     * uses: all of them are {@code unknown}, which the page renders as "no
+     * cross and no claim" rather than as "not muted".
+     */
+    public static String actionState(String body) {
+        if (body == null) {
+            return "unknown";
+        }
+        try {
+            String state = new JSONObject(body).optString("state", "unknown");
+            if ("muted".equals(state) || "unmuted".equals(state)) {
+                return state;
+            }
+        } catch (JSONException malformed) {
+            // Fall through: a response this class cannot read says nothing
+            // about the mixer.
+        }
+        return "unknown";
+    }
+
+    /**
      * The same payload with the device's {@code battery} object folded in
      * (T5.4).
      *
