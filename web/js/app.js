@@ -66,6 +66,9 @@
     // theme that forgot it (invariant 3, ADR 0005; T5.5, ADR 0012).
 
     function applyScreen() {
+        if (!visible()) {
+            forgetPresses();
+        }
         host.blackout(!visible());
         applyNight();
         // Whatever arrived while nobody could see it, drawn now that somebody
@@ -194,6 +197,93 @@
         }
         paintData();
     };
+
+    // --- The shortcut buttons (T8.2) ---------------------------------------
+    // The page cannot make the request. `web/` has no network code at all --
+    // the WebView is served from a virtual https origin, so reaching the PC's
+    // http:// address from JavaScript is mixed content and is refused
+    // (invariant 1, ADR 0002). So a tap crosses into Java, through the app's
+    // first *inbound* bridge: `window.__actions`, which MainActivity installs.
+    //
+    // Core's half is this one call, and it is here rather than in js/host.js
+    // because host.js is the core's contact with the *DOM* and this is a
+    // native bridge -- the same thing window.onData is, pointing the other
+    // way. host.js gains nothing (T8.2 step 5); `invoke` is added to the
+    // object it already exposes, so a theme has one place to look.
+    //
+    // Core decides whether a press is possible at all. Three reasons it is
+    // not, and the theme needs none of them:
+    //
+    //   - the PC is away. The buttons are dead offline (step 3): there is
+    //     nothing to mute, the panel is black, and a press that was queued and
+    //     fired on reconnect would mute the PC minutes after somebody pressed
+    //     a button they could not see. Java refuses again on its own side --
+    //     the poller's executor only exists while online -- so this is the
+    //     fast answer, not the guarantee.
+    //   - the id is not one the server said it would accept. `payload.actions`
+    //     is the list, and it is what decides which buttons exist at all.
+    //   - there is no bridge, which is every browser. js/mock.js stubs it so
+    //     the buttons can be developed without a phone; without either, a
+    //     press is refused rather than throwing into a theme's click handler.
+    const pressed = new Map();
+
+    function invoke(id, done) {
+        const report = (ok) => {
+            if (typeof done === 'function') {
+                done(!!ok);
+            }
+        };
+        const allowed = (payload && payload.actions) || [];
+        if (!visible() || allowed.indexOf(id) === -1) {
+            report(false);
+            return false;
+        }
+        const bridge = window.__actions;
+        if (!bridge || typeof bridge.invoke !== 'function') {
+            report(false);
+            return false;
+        }
+        let sent = false;
+        try {
+            sent = bridge.invoke(id) !== false;
+        } catch (err) {
+            // A bridge that throws is a bridge that is not there. A theme's
+            // click handler must not be where that surfaces.
+            console.error('desk-panel: the action bridge failed', err);
+            sent = false;
+        }
+        if (!sent) {
+            report(false);
+            return false;
+        }
+        // Keyed by id, and a second press replaces the first: two taps on one
+        // button are two toggles, and only the newer one has a button still
+        // waiting to hear. The older callback is told nothing rather than told
+        // the wrong thing -- its result is about a toggle that has already
+        // been superseded on screen.
+        pressed.set(id, report);
+        return true;
+    }
+
+    // MainActivity.pushActionResultToPage, once per press that was actually
+    // sent. `id` comes from the app's own allowlist, never from the page.
+    window.onActionResult = (id, ok) => {
+        const report = pressed.get(id);
+        pressed.delete(id);
+        if (report) {
+            report(!!ok);
+        }
+    };
+
+    // The panel going dark abandons whatever was in flight. A result arriving
+    // after that has no button to land on -- the theme's markup was drawn for
+    // a panel nobody has looked at since -- and holding the callbacks would
+    // leak one per press across a night offline.
+    function forgetPresses() {
+        pressed.clear();
+    }
+
+    host.invoke = invoke;
 
     // --- Start -------------------------------------------------------------
     // Synchronous, while the deferred scripts are still running and before the

@@ -109,7 +109,7 @@ the phone's real viewport.
   globals: `formatPrice`, `formatRate`, `formatPair`, `formatChange`,
   `changeClass`, `formatTemp`, `formatRange`, `weatherLabel`, `weatherGlyph`,
   `formatBattery`, `tempClass`, `sparklinePath`, `isNight`, `overflowsBy`,
-  `scrollPlan`, `worthScrolling`. Use them. A theme that reimplemented `formatPrice` would
+  `scrollPlan`, `worthScrolling`, `shortcutsFor`. Use them. A theme that reimplemented `formatPrice` would
   reintroduce the sub-1 rounding bug the yuan found in T6.5, once per theme —
   and one that joined a daily low and high with a hyphen would reintroduce
   `-12-42`, which is what `formatRange` exists to stop (T6.8).
@@ -141,9 +141,10 @@ the phone's real viewport.
   Every other id there is one both themes carry, so a missing one is a
   regression and is reported as such.
 
-  `shortcuts` is **not** in that list, and both themes still use the name: it is
-  the reserved strip in the sidebar that T8.2's buttons will fill, and it holds
-  nothing to measure until they do.
+  `shortcuts` is **not** in that list, and both themes use the name: it is the
+  strip the shortcut buttons live in. It is out of the harness because it holds
+  nothing when the PC has no actions enabled, which is the default — a section
+  that renders empty is a harness failure, and this one is empty legitimately.
 - **A card you are holding empty on purpose says `data-reserved`.** The harness
   fails a section that renders with no text — an empty card always fits, and
   before T6.1 the panel looked acceptable on the device for exactly that reason.
@@ -419,6 +420,93 @@ called with it the moment the panel comes back, immediately followed by `tick`.
 So do not hang anything on `tick` that has to keep running, and do not treat a
 `render` call as "this is new since the last one" — you may have missed several.
 Nothing in either theme needs to.
+
+## The shortcut buttons are yours to draw and not yours to wire
+
+`POST /action/{id}` mutes the PC's speakers and its microphone
+([ADR 0015](adr/0015-the-panel-can-act-on-the-pc.md), T8.1). The buttons that
+fire it are markup, so they are a theme's — and the wire is not.
+
+### The contract, in full
+
+```js
+const wanted = shortcutsFor(payload.actions, words.tag);
+// -> [{ id: 'mute-audio', label: 'SOUND', hint: 'Toggle mute' }, ...]
+
+button.addEventListener('click', () => {
+    const sent = DeskPanel.invoke(shortcut.id, (ok) => {
+        // The outcome, later. Show it briefly and let it fade.
+    });
+    if (!sent) {
+        // Refused outright: nothing was sent and no callback is coming.
+    }
+});
+```
+
+That is all of it. A theme never sees a URL, a host, a port or a method.
+
+### Which buttons exist is the PC's decision, not yours
+
+`payload.actions` is the list of ids the server says it will accept — its
+`actions` key in `config.toml`, already validated against the catalogue at
+startup. Draw those, in that order, and draw **nothing** for anything else.
+
+`shortcutsFor` is what enforces it: it drops an id this build has no word for,
+which is the state a PC running ahead of the APK puts the panel in. A button
+captioned `mute-everything` is one nobody can read, and a button nobody can
+read is worse than the gap where one would be.
+
+An empty list is normal and is the default. Render no buttons and leave the
+strip empty; do not draw a placeholder.
+
+### `invoke` returns false more often than you think
+
+Core decides whether a press is possible at all, and a theme needs none of the
+reasons:
+
+| | |
+|---|---|
+| the PC is away | the buttons are dead offline. There is nothing to mute, the panel is black, and a press that was queued and fired on reconnect would mute the PC minutes after somebody pressed a button they could not see |
+| the id is not in `payload.actions` | the server would answer 404 |
+| there is no bridge | every browser. `js/mock.js` stubs one so buttons can be built without a phone |
+
+`false` means **nothing was sent and no callback is coming**. Settle the button
+yourself when you get it, or it sits in its pressed state for ever.
+
+### Show the last result, never a state
+
+**The panel cannot know whether the PC is muted.** T8.1's actions are toggles
+and they report a state, but only for the instant of the call — somebody at the
+keyboard can change it a second later and nothing tells the phone.
+
+So a button shows what happened when it was last pressed, briefly, and then
+goes back to saying nothing. A button that displayed "muted" would be lying
+within seconds, and one that says the microphone is off while it is live is a
+privacy failure rather than a cosmetic one.
+
+Say the failure in **words as well as in colour**. The panel is read from
+across a desk, and a red tint on its own is not a message — `plain` has no
+palette to say it with at all, which is the honest test of whether a rule is
+about the rule or about `neon`'s CSS.
+
+### 56px, on both axes, and it is not a matter of taste
+
+This is a phone at arm's length with no pointer, and the two buttons touch. The
+failure the size prevents is muting the microphone when you meant the speakers.
+A theme may draw a button any way it likes and may not make it smaller than
+this. Both packaged themes carry the rule in their own stylesheet.
+
+Use a real `<button>`. It is focusable, it fires on a tap without waiting, and
+it is announced as a button; a styled `<div>` with a click handler is none of
+those.
+
+### Rebuild them only when the set changes
+
+The payload arrives once a minute and `actions` comes from a file a human
+edits, so the buttons almost never change. Rebuilding them on every render
+throws one away mid-press and loses the acknowledgement it was showing —
+compare the ids you are about to draw against the ones you drew, and return
+early. Both packaged themes do this with a one-line signature.
 
 ## Checking it
 

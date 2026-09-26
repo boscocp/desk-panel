@@ -150,7 +150,111 @@
         panel.append(quotes, fx, crypto, side, stale);
 
         root.append(sidebar, panel);
-        els = { root, clock, date, lists, weather, agenda, battery, stale };
+        els = { root, clock, date, lists, weather, agenda, battery, stale, shortcuts };
+    }
+
+    // --- The shortcut buttons (T8.2) ---------------------------------------
+    //
+    // Markup, so they are the theme's. Core's half is one call:
+    // `DeskPanel.invoke(id, done)`, which decides whether a press is possible
+    // at all -- the PC being away, the id not being one the server enabled,
+    // there being no bridge because this is a browser -- and reaches Java.
+    // Nothing here knows any of that, and nothing here knows a URL.
+    //
+    // Rebuilt only when the set of ids changes, which is almost never: the
+    // payload arrives once a minute and `actions` comes from a file a human
+    // edits. Rebuilding on every payload would throw away a button mid-press
+    // and lose the acknowledgement it was showing.
+    let drawnActions = null;
+
+    function renderShortcuts(actions) {
+        const wanted = shortcutsFor(actions, words.tag);
+        const signature = wanted.map((s) => s.id + ':' + s.label).join(',');
+        if (signature === drawnActions) {
+            return;
+        }
+        drawnActions = signature;
+        els.shortcuts.textContent = '';
+        for (const shortcut of wanted) {
+            els.shortcuts.appendChild(buildButton(shortcut));
+        }
+    }
+
+    function buildButton(shortcut) {
+        // A real <button>: it is focusable, it fires on a tap without a
+        // 300ms wait, and it is announced as a button. A styled <div> with a
+        // click handler is none of those and is the shape this would have
+        // taken if the CSS had been written first.
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'shortcut';
+        button.id = 'action-' + shortcut.id;
+        // The id is data, never part of a string that becomes a request. The
+        // click handler below reads it back and hands it to core, which
+        // matches it against what the PC sent; Java matches it again against
+        // its own allowlist (ADR 0015, Actions.java).
+        button.dataset.action = shortcut.id;
+        button.title = shortcut.hint;
+        // The caption is the visible label; the hint says that it toggles,
+        // which the caption alone does not.
+        button.setAttribute('aria-label', shortcut.label + ' \u2014 ' + shortcut.hint);
+
+        const icon = svgIcon(ICONS[shortcut.id], 's-icon');
+        if (icon) {
+            button.appendChild(icon);
+        }
+        const caption = el('span', null, 's-label');
+        caption.textContent = shortcut.label;
+        button.appendChild(caption);
+
+        button.addEventListener('click', () => press(button, shortcut));
+        return button;
+    }
+
+    // What the button says after a press, and the rule is T8.2 step 7: it
+    // shows **the last result**, never a state.
+    //
+    // The panel cannot know whether the PC is muted. T8.1's toggles report a
+    // state, but only for the instant of the call -- somebody at the keyboard
+    // can change it a second later and nothing tells the phone. So a button
+    // that displayed "muted" would be lying within seconds, and a button that
+    // lies about whether the microphone is live is a privacy failure rather
+    // than a cosmetic one. The acknowledgement fades; nothing persists.
+    const ACK_MS = 1200;
+
+    function press(button, shortcut) {
+        if (button.dataset.busy) {
+            // A second tap while one is in flight is dropped rather than
+            // queued. Queued presses on a toggle are how twenty taps become
+            // an unknown number of toggles arriving over the next minute.
+            return;
+        }
+        button.dataset.busy = '1';
+        button.classList.remove('ok', 'err');
+        button.classList.add('sending');
+        const settle = (ok) => {
+            delete button.dataset.busy;
+            button.classList.remove('sending');
+            button.classList.add(ok ? 'ok' : 'err');
+            // The failure says so in words as well as in colour: the panel is
+            // looked at from across a desk and a red tint alone is not a
+            // message.
+            caption(button).textContent = ok ? shortcut.label : words.actionFailed;
+            window.setTimeout(() => {
+                button.classList.remove('ok', 'err');
+                caption(button).textContent = shortcut.label;
+            }, ACK_MS);
+        };
+        // false means core refused outright -- offline, no bridge, or an id
+        // the PC did not send -- and no result is coming. Settling here is
+        // what stops a button sitting in `sending` for ever.
+        if (!DeskPanel.invoke(shortcut.id, settle)) {
+            settle(false);
+        }
+    }
+
+    function caption(button) {
+        return button.querySelector('.s-label');
     }
 
     // The four card titles, as data on the sections ::before reads them from.
@@ -474,6 +578,23 @@
         // else on a panel has.
         thermometer: 'M12 3a2.4 2.4 0 0 1 2.4 2.4v7.4a4.4 4.4 0 1 1-4.8 0V5.4A2.4 2.4 0 0 1 12 3z',
         thermometerTicks: ['M15.6 7.4h2.2', 'M15.6 10.2h1.5', 'M15.6 13h2.2'],
+
+        // The two shortcut buttons (T8.2), keyed by the server's action id so
+        // `ICONS[shortcut.id]` is the whole lookup and an id with no drawing
+        // gets a button with a caption and no picture rather than an empty
+        // <svg> holding a flex basis open.
+        //
+        // Silhouettes, not outlines of devices. The two sit side by side at
+        // 56px and the failure they have to avoid is a mis-tap, so what
+        // matters is that they are distinguishable at a glance across a desk:
+        // a squat cone pointing right, and a tall capsule on a stand. That is
+        // the same argument the battery and thermometer icons above lost
+        // twice before it was taken seriously.
+        'mute-audio': 'M4 9.5h3.2L12 5.4v13.2L7.2 14.5H4a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1z'
+                    + 'M15.6 9.2l4.4 5.6M20 9.2l-4.4 5.6',
+        'mute-mic': 'M12 3.2a2.6 2.6 0 0 1 2.6 2.6v5.4a2.6 2.6 0 1 1-5.2 0V5.8'
+                  + 'A2.6 2.6 0 0 1 12 3.2zM6.4 11.2a5.6 5.6 0 0 0 11.2 0M12 16.8v3.4'
+                  + 'M9.2 20.2h5.6',
     };
 
     // One <svg> with one path in it. Both icon sets go through this: the only
@@ -908,6 +1029,7 @@
         renderList(els.lists.crypto, payload.crypto || [], 'symbol', 'price', 'USD');
         renderWeather(payload.weather);
         renderBattery(payload.battery);
+        renderShortcuts(payload.actions);
         els.stale.hidden = !payload.stale;
     }
 

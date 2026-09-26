@@ -74,8 +74,25 @@ public final class DataPoller {
         void onData(String json);
     }
 
+    /**
+     * Receives the outcome of one shortcut press, on the main thread.
+     *
+     * <p>Separate from {@link Listener} because the two have different
+     * lifetimes: the data listener is the panel for as long as the poller
+     * lives, and this is one press.
+     */
+    public interface ResultListener {
+        /**
+         * @param id an id from {@link Actions#ALLOWED}, never the page's string
+         * @param ok whether the PC answered 200
+         */
+        void onActionResult(String id, boolean ok);
+    }
+
     private final String quotesUrl;
     private final String weatherUrl;
+    /** The PC's address, kept so {@link Actions#urlFor} can build a route per press. */
+    private final String host;
     private final Listener listener;
 
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -95,6 +112,7 @@ public final class DataPoller {
     private volatile ScheduledExecutorService scheduler;
 
     public DataPoller(String host, Listener listener) {
+        this.host = host;
         this.quotesUrl = "http://" + host + ":" + PORT + "/quotes";
         this.weatherUrl = "http://" + host + ":" + PORT + "/weather";
         this.listener = listener;
@@ -128,6 +146,102 @@ public final class DataPoller {
         scheduler = null;
         if (owner != null) {
             owner.shutdownNow();
+        }
+    }
+
+    /**
+     * Fires one shortcut action at the PC (T8.2). Returns whether it was sent.
+     *
+     * <p><b>Why this lives in the data poller.</b> T8.2 asks for the request to
+     * go onto the executor this class already owns rather than a new one, and
+     * the reason turns out to be stronger than thread economy: that executor
+     * exists exactly while the PC is online, because {@code PanelService}
+     * starts this poller on the transition up and stops it on the way down.
+     * So "the buttons are dead while the PC is away" (T8.2 step 3) is a
+     * property of where the code lives rather than a check somebody has to
+     * remember — there is no thread to run on, and {@link #running} is already
+     * false.
+     *
+     * <p>That matters more than it sounds. A queued action would fire on
+     * reconnect and mute the PC minutes after somebody pressed a button they
+     * could not see, on a panel that was black at the time. Nothing here
+     * queues: a press while offline is refused, logged and forgotten.
+     *
+     * @param candidate an id straight off the JavaScript bridge, untrusted and
+     *                  resolved through {@link Actions} before it reaches a URL
+     * @return false if it was refused outright — an unknown id, or the PC being
+     *         away. True only means it was dispatched; the outcome arrives
+     *         later through {@code onResult}.
+     */
+    public boolean invoke(String candidate, ResultListener onResult) {
+        final String id = Actions.resolve(candidate);
+        if (id == null) {
+            // The page asked for something this app does not relay. Logged
+            // with the raw string, because the only way this happens is a bug
+            // in a theme or an asset that is not ours, and both are worth
+            // seeing.
+            Log.w(Markers.TAG, Markers.action(String.valueOf(candidate), "rejected"));
+            return false;
+        }
+        final String url = Actions.urlFor(host, PORT, id);
+        final ScheduledExecutorService owner = scheduler;
+        if (!running || owner == null || url == null) {
+            Log.i(Markers.TAG, Markers.action(id, "offline"));
+            return false;
+        }
+        try {
+            owner.execute(() -> {
+                boolean ok = post(url);
+                Log.i(Markers.TAG, Markers.action(id, ok ? "ok" : "err"));
+                if (onResult != null) {
+                    main.post(() -> onResult.onActionResult(id, ok));
+                }
+            });
+        } catch (RejectedExecutionException stopped) {
+            // The PC went away between the check above and here.
+            Log.i(Markers.TAG, Markers.action(id, "offline"));
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * {@code POST url}, blocking, on the poller thread. No body and no headers.
+     *
+     * <p>Deliberately sends neither {@code Origin} nor {@code Sec-Fetch-Site}:
+     * the server refuses a request carrying either, because those are what a
+     * browser puts on a cross-origin form post and that is the drive-by ADR
+     * 0015 was amended to close. {@code HttpURLConnection} sets neither on its
+     * own, which is what makes the check free here — but it is worth knowing
+     * before somebody adds a header for an unrelated reason.
+     *
+     * @return true only on a 200. Every other outcome is a failed press, and
+     *         the button says so rather than pretending.
+     */
+    private boolean post(String url) {
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(url).openConnection();
+            connection.setRequestMethod("POST");
+            connection.setConnectTimeout(TIMEOUT_MS);
+            connection.setReadTimeout(TIMEOUT_MS);
+            connection.setUseCaches(false);
+            // No body at all: the id is in the path and there is nothing else
+            // to say (ADR 0015). setFixedLengthStreamingMode(0) rather than
+            // letting the connection buffer, so this cannot grow one by
+            // accident later.
+            connection.setDoOutput(false);
+            connection.setFixedLengthStreamingMode(0);
+            return connection.getResponseCode() == HttpURLConnection.HTTP_OK;
+        } catch (IOException | RuntimeException thrown) {
+            // Swallowed like get()'s: an exception escaping here would kill
+            // the executor's task and the panel would keep polling with one
+            // button that silently never works again.
+            return false;
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
         }
     }
 

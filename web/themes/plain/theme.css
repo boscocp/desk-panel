@@ -285,8 +285,42 @@ body {
 #battery .warm { color: #FFC04D; }
 #battery .hot  { color: #FF7A7A; }
 
-/* Reserved for the shortcut buttons, as in neon: nothing in it yet, and no
- * height claimed until there is. */
+/* The device line and the shortcut buttons, one row. See theme.js's mount()
+ * for why they share it rather than stacking: two rows cost the columns 66px
+ * and made #quotes hide 42px of rows without scrolling. */
+.footer {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+/* The shortcut buttons (T8.2), pushed to the far end so the device line keeps
+ * the left edge every other row in this theme starts at. */
 #shortcuts {
     flex: 0 0 auto;
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+}
+
+/* 56px on both axes, the same as neon and for the same reason: it is a fact
+ * about a finger on a phone at arm's length, not a matter of taste. A theme
+ * is free to draw a button any way it likes and is not free to make it
+ * smaller than this (docs/THEMING.md). */
+.shortcut {
+    min-height: 56px;
+    min-width: 56px;
+    padding: 0 12px;
+    border: 1px solid #555;
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 13px;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    user-select: none;
+    cursor: pointer;
 }
