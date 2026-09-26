@@ -23,6 +23,15 @@ import sys
 # to OFFLINE on a single missed ping (see `Server`'s docstring).
 TIMEOUT_S = 2.0
 
+# Windows is the exception, and not by a little. `Add-Type -TypeDefinition`
+# compiles that C# with the real compiler on **every** press -- the process
+# exits, so nothing is cached between them -- and `powershell -NoProfile` has
+# to start first. Two seconds is not enough for that on any machine, so the
+# whole platform would answer 500 on a timeout every time. It is still a
+# bound and still a failure rather than a hang, which is what invariant 2
+# needs; a request thread of its own is holding it, not a shared worker.
+WINDOWS_TIMEOUT_S = 15.0
+
 MUTED, UNMUTED, UNKNOWN = "muted", "unmuted", "unknown"
 
 # Every id this server will ever answer to. Config says which of these are
@@ -45,8 +54,19 @@ class Unsupported(Exception):
 # element -- there is nothing for a request to reach.
 # --------------------------------------------------------------------------
 
+# `set volume output muted ...` is a command that returns no result, so an
+# osascript that ends on it prints nothing and every press would report
+# `unknown`. The word is said explicitly instead, the way the input toggle
+# below already does -- the state in the response is the state the command
+# observed, which is the only kind ADR 0015 allows a button to show.
 _MACOS_OUTPUT_TOGGLE = (
-    "set volume output muted not (output muted of (get volume settings))"
+    'set wanted to not (output muted of (get volume settings))\n'
+    'set volume output muted wanted\n'
+    'if wanted then\n'
+    '    return "muted"\n'
+    'else\n'
+    '    return "unmuted"\n'
+    'end if'
 )
 
 # Input has no toggle in the `volume settings` API, so this reads the current
@@ -95,10 +115,21 @@ def _windows_toggle(data_flow):
         "using System.Runtime.InteropServices;\n"
         "[Guid(\"5CDF2C82-841E-4546-9722-0CF74078229A\"),"
         "InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]\n"
+        # Eleven placeholders, not eight, and the count is the whole thing
+        # working: COM dispatches by vtable slot, so a short interface does
+        # not fail, it calls the wrong method. `SetMute` is the *twelfth*
+        # entry of `IAudioEndpointVolume` (endpointvolume.h) -- after the two
+        # notify registrations, `GetChannelCount`, the four master-volume
+        # calls and the four per-channel ones. Declaring eight would land
+        # `SetMute` on `SetChannelVolumeLevelScalar`.
         "interface IAudioEndpointVolume {\n"
-        "  int f();int g();int h();int i();int j();int k();int l();int m();\n"
-        "  int SetMute(bool m,System.Guid c);\n"
-        "  int GetMute(out bool m);\n"
+        "  int f();int g();int h();int i();int j();int k();\n"
+        "  int l();int m();int n();int o();int p();\n"
+        # `BOOL` is the 4-byte Win32 one; a bare C# `bool` on a COM interface
+        # marshals as a 2-byte VARIANT_BOOL. And `pguidEventContext` is a
+        # *pointer* that may be null, not a Guid by value.
+        "  int SetMute([MarshalAs(UnmanagedType.Bool)] bool m,System.IntPtr c);\n"
+        "  int GetMute([MarshalAs(UnmanagedType.Bool)] out bool m);\n"
         "}\n"
         "[Guid(\"D666063F-1587-4E43-81F1-B948E807363F\"),"
         "InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]\n"
@@ -121,7 +152,7 @@ def _windows_toggle(data_flow):
         "    var iid=typeof(IAudioEndpointVolume).GUID;\n"
         "    IAudioEndpointVolume ep; dev.Activate(ref iid,23,System.IntPtr.Zero,out ep);\n"
         "    bool muted; ep.GetMute(out muted);\n"
-        "    ep.SetMute(!muted,System.Guid.Empty);\n"
+        "    ep.SetMute(!muted,System.IntPtr.Zero);\n"
         "    return muted ? \"unmuted\" : \"muted\";\n"
         "  }\n"
         "}\n"
@@ -178,7 +209,20 @@ def candidates(action, platform=None):
     """
     if action not in CATALOGUE:
         raise KeyError(action)
-    return list(_TABLE[action].get(platform_key(platform or sys.platform), []))
+    # A copy of each argument list too, not only of the list of them: a
+    # shallow copy still hands the caller `_TABLE`'s own inner lists, and one
+    # `.append()` on one of those would edit the catalogue for the process.
+    return [list(option)
+            for option in _TABLE[action].get(platform_key(platform or sys.platform), [])]
+
+
+def timeout_for(platform=None):
+    """Pure: the seconds a press on `platform` is allowed to take.
+
+    One number everywhere would have to be the Windows number, and 15s is far
+    too long to wait on a mixer call that takes milliseconds.
+    """
+    return WINDOWS_TIMEOUT_S if platform_key(platform or sys.platform) == "win32" else TIMEOUT_S
 
 
 def enabled_actions(raw):
@@ -232,8 +276,12 @@ def state_from(action, stdout, returncode):
     text = (stdout or "").strip().lower()
     if text in {MUTED, UNMUTED}:
         return text
-    # osascript's output toggle prints the boolean it set, not a word.
-    if text in {"true", "missing value"}:
+    # An AppleScript that ends on a boolean rather than a word still reads.
+    # `missing value` does **not** belong in this list: it is AppleScript for
+    # "the audio API would not say", and answering `muted` to it is inventing
+    # the one state a button must never invent -- a microphone that reads
+    # muted while it is live is a privacy failure, not a cosmetic one.
+    if text == "true":
         return MUTED
     if text == "false":
         return UNMUTED
@@ -269,18 +317,28 @@ def _default_runner(argv, timeout):
     for it passes against the same keyword written with spaces around the
     equals sign -- and the acceptance also greps this directory for that
     literal, so writing it out here would fail the build on a comment.
+
+    `CREATE_NO_WINDOW` exists only on Windows and is the difference between a
+    silent press and a console window flashing over whatever the owner is
+    doing, every time -- the server is started by a Scheduled Task with no
+    console of its own, so `powershell.exe` would allocate one.
     """
-    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+    return subprocess.run(
+        argv, capture_output=True, text=True, timeout=timeout,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
 
 
-def run_action(action, platform=None, runner=None, which=None, timeout=TIMEOUT_S):
+def run_action(action, platform=None, runner=None, which=None, timeout=None):
     """Execute `action`. Returns a state; raises `Unsupported` or `ActionError`.
 
     `runner` and `which` are injected so the tests can assert on the argument
-    list without a mixer, a desktop session or a subprocess.
+    list without a mixer, a desktop session or a subprocess. `timeout`
+    defaults to the platform's, which is not one number -- see `timeout_for`.
     """
     runner = runner or _default_runner
     which = which or shutil.which
+    timeout = timeout_for(platform) if timeout is None else timeout
 
     options = candidates(action, platform)
     argv = next((option for option in options if which(option[0])), None)

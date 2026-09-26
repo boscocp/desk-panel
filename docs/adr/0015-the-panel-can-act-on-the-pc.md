@@ -1,6 +1,6 @@
 # 0015 — The panel can act on the PC, and the id is the whole interface
 
-Status: accepted · 2026-09-26 (T8.1)
+Status: accepted · 2026-09-26 (T8.1) · amended the same day, see *A `POST`-only rule is not enough*
 
 ## Context
 
@@ -103,15 +103,55 @@ exists because the alternative — two commands per press, sequenced by a state 
 — is more moving parts guarding the same constant. Nothing from the request is anywhere near it,
 which is the property that matters.
 
+### A `POST`-only rule is not enough, and this record said otherwise for an afternoon
+
+**Amended 2026-09-26, found by review of the implementation this record governs.**
+
+The section above rules out `GET` because a prefetch could fire it, and then the consequences
+below called the endpoint "as trustworthy as the LAN". Both sentences were written on the belief
+that requiring `POST` keeps a web page out. It does not.
+
+A cross-origin form is a CORS **simple request** when its `enctype` is `text/plain`:
+
+```html
+<form method="post" enctype="text/plain"
+      action="http://192.168.15.3:8777/action/mute-audio">
+```
+
+No preflight is sent, so nothing on this server is ever asked whether it consents. The attacker
+cannot *read* the response — and does not need to, because the microphone is already muted. The
+real reach of the endpoint was therefore not "anyone on the LAN" but **anyone whose page the
+owner opens**, from anywhere.
+
+The defence is not a token. A token would have to ship inside the APK, which is the thing
+[ADR 0013](0013-local-configuration-boundaries.md) exists to prevent, and it would be readable
+off `/app` anyway. It is that **a browser announces itself**: the Fetch standard requires an
+`Origin` header on every non-`GET` request, and `Sec-Fetch-Site` rides along on the engines that
+implement it. `POST /action/<id>` refuses with **403** when either is present.
+
+The panel's own client is Java's `HttpURLConnection`, which sends neither. Nor do `curl` and
+`probe.py`, which is what keeps T8.1's acceptance line meaning what it says, and what makes this
+check free rather than a thing every future client has to remember.
+
+A LAN attacker holding a socket can of course omit both headers. That is unchanged, and it is
+the threat model this record already states. What is closed is the far wider hole of **not
+needing to be on the LAN at all**.
+
+The check sits *after* the allowlist, so an unknown id is still 404 whether a browser sent it or
+not: it runs nothing either way, and ordering it first would only change what a probe means.
+
 ## Consequences
 
 - **The server keeps no authentication.** This record is what makes that defensible, and it is
   defensible only while every catalogue entry stays repeatable and harmless. The day someone
   wants `lock`, the authentication question reopens — it does not get waived because an
   allowlist exists.
-- **The endpoint is as trustworthy as the LAN.** `docs/SERVER-SETUP.md` already assumes a home
-  network the owner controls; this makes that assumption load-bearing rather than incidental. On
-  a shared or untrusted network, `actions = []` is the correct configuration and is the default.
+- **The endpoint is as trustworthy as the LAN, and only because of the browser check above.**
+  `docs/SERVER-SETUP.md` already assumes a home network the owner controls; this makes that
+  assumption load-bearing rather than incidental. On a shared or untrusted network,
+  `actions = []` is the correct configuration and is the default. Without the `Origin` /
+  `Sec-Fetch-Site` refusal this sentence would be false: the reach would be every website the
+  owner visits, not every machine on their network.
 - **`actions` changes shape.** It was a reserved empty table (`[actions]`); it is a list of names
   now. An empty table is still read as "nothing enabled", because that is what shipped in
   `config.example.toml` and in installed configs, and an update that refuses to start is a worse
@@ -120,6 +160,9 @@ which is the property that matters.
   macOS (`osascript`) and Windows (PowerShell against Core Audio, no third-party download) are
   implemented; anything else answers **501**, which is "this machine cannot", not "you asked
   wrongly".
+- **A request carrying `Origin` or `Sec-Fetch-Site` is 403**, and any future client has to be
+  one that does not set them — which every non-browser HTTP client already is. T8.2's bridge
+  goes through Java for a different reason (invariant 1) and inherits this one for free.
 - **Failure never leaks.** A non-zero exit or a timeout is a 500 with a short body; the command's
   stderr goes to the server log, where the owner can read it, and never into the response.
 
