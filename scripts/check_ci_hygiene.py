@@ -14,9 +14,12 @@ fine in a diff and is wrong in a way nothing else notices:
      leave one run.
   4. `.github/dependabot.yml` names exactly the ecosystems this repo has --
      it fails on a missing one and on an invented one.
-  5. every `scripts/check_*.py` is run by a workflow *and* named in the
-     Makefile. A guard nobody runs is a rule nobody enforces -- which is what
-     TT.12 found for the self-tests, one layer down.
+  5. every `scripts/check_*.py` is named in the Makefile, and every one that
+     `make check` reaches is also run by a workflow. A guard nobody runs is a
+     rule nobody enforces -- which is what TT.12 found for the self-tests, one
+     layer down. The two halves are not the same rule: `check_branch_base.py`
+     belongs to `make wave-start` and is meaningless on a runner, whose
+     checkout is a pull request branch by construction.
   6. no `continue-on-error:` and no `if:` on a step, anywhere. Wave 23 found
      both in ci.yml turning a red suite into a green check, and the rule there
      is the rule here: a check that tries to decide which conditions are
@@ -160,8 +163,34 @@ def check_dependabot(root):
     return problems
 
 
+def check_reachable(makefile_text):
+    """The recipe text of every target `check:` depends on, plus its own.
+
+    One level of dependency, which is all this Makefile has. A guard invoked
+    from a target nothing depends on is exactly the state TT.12 found.
+    """
+    deps = re.search(r"^check:(.*)$", makefile_text, re.M)
+    targets = set(deps.group(1).split()) if deps else set()
+    recipes = []
+    for name in sorted(targets):
+        body = re.search(rf"^{re.escape(name)}:.*\n((?:[\t#].*\n|\n)*)", makefile_text, re.M)
+        if body:
+            recipes.append(body.group(1))
+    return "\n".join(recipes)
+
+
 def check_guards_are_run(root, workflows):
-    """Every `scripts/check_*.py` is run by a workflow and named in the Makefile.
+    """Every `scripts/check_*.py` is wired, and the two halves differ.
+
+    Named in the Makefile: always. A guard that only a workflow runs cannot be
+    failed before pushing, which is half the value of having it.
+
+    Run by a workflow: only for the guards `make check` reaches. The others are
+    reached by a target with a different job -- `make wave-start` runs
+    `check_branch_base.py` against `origin/main`, which on a runner compares a
+    pull request branch against the base it was opened from and is green by
+    construction. A rule that demanded it would be asking for a green tick that
+    means nothing.
 
     Found by glob, deliberately: T7.4 and T7.5 each land another guard, and the
     point is that they arrive already wired rather than waiting for somebody to
@@ -171,12 +200,13 @@ def check_guards_are_run(root, workflows):
     workflow_text = "\n".join(strip_comments(p.read_text(encoding="utf-8")) for p in workflows)
     makefile = root / "Makefile"
     makefile_text = makefile.read_text(encoding="utf-8") if makefile.is_file() else ""
+    reachable = check_reachable(makefile_text)
     problems = []
     for guard in guards:
-        if guard not in workflow_text:
-            problems.append(f"scripts/{guard}: no workflow runs it")
         if guard not in makefile_text:
             problems.append(f"scripts/{guard}: the Makefile never runs it, so it is CI-only")
+        elif guard in reachable and guard not in workflow_text:
+            problems.append(f"scripts/{guard}: `make check` runs it and no workflow does")
     return problems
 
 
@@ -311,6 +341,24 @@ def self_test_cases():
             lambda: _one(CLEAN.replace("name: x", "# never write `continue-on-error: true` here\nname: x")) == [],
         ),
         (
+            "a guard `make check` reaches and no workflow runs is caught",
+            lambda: any(
+                "no workflow does" in p
+                for p in _guard_case("check: lint-x\n\nlint-x:\n\tpython scripts/check_x.py\n", workflow_runs=False)
+            ),
+        ),
+        (
+            "a guard reached only by another target needs no workflow",
+            lambda: _guard_case(
+                "check: lint-y\n\nlint-y:\n\ttrue\n\nwave-start:\n\tpython scripts/check_x.py\n",
+                workflow_runs=False,
+            ) == [],
+        ),
+        (
+            "a guard no target runs at all is caught",
+            lambda: any("CI-only" in p for p in _guard_case("check: lint-y\n\nlint-y:\n\ttrue\n", workflow_runs=True)),
+        ),
+        (
             "an ecosystem the repo has and the config omits is caught",
             lambda: any("does not name it" in p for p in _dependabot_case(["github-actions"])),
         ),
@@ -342,6 +390,22 @@ def _caught(fragment, text):
 def _quiet(call):
     with contextlib.redirect_stdout(io.StringIO()):
         return call()
+
+
+def _guard_case(makefile, workflow_runs):
+    """check_guards_are_run against a throwaway tree holding one guard."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / "scripts").mkdir()
+        (root / "scripts" / "check_x.py").write_text("# a guard\n", encoding="utf-8")
+        (root / "Makefile").write_text(makefile, encoding="utf-8")
+        (root / ".github" / "workflows").mkdir(parents=True)
+        body = CLEAN if workflow_runs else CLEAN.replace(GUARD_STEP, "      - run: true")
+        path = root / ".github" / "workflows" / "x.yml"
+        path.write_text(body.replace("check_acceptance.py", "check_x.py"), encoding="utf-8")
+        return check_guards_are_run(root, [path])
 
 
 def _dependabot_case(ecosystems):
