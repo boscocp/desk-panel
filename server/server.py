@@ -35,6 +35,7 @@ if __package__ in (None, ""):
 
 from server import (providers_awesomeapi, providers_binance, providers_brapi,  # noqa: E402
                     providers_openmeteo, providers_usno)
+from server import actions as actions_module  # noqa: E402
 from server.config_format import ConfigError, format_for_path, merge, parse  # noqa: E402
 from server.upstream import UpstreamError  # noqa: E402
 
@@ -123,7 +124,10 @@ DEFAULT_CONFIG = {
     # languages the installed APK was built with and guessing would turn a
     # typo into a panel nobody can read.
     "language": "pt-BR",
-    "actions": {},
+    # A list of ids from `actions.CATALOGUE`, never commands. Empty is the
+    # right default and the right setting on a network the owner does not
+    # control -- see ADR 0015.
+    "actions": [],
 }
 
 
@@ -452,6 +456,21 @@ class App:
         # Coordinates never change, so the geocode is cached for the life of
         # the process rather than on a TTL (T3.4 step 1).
         self.coords = None
+        # Validated once, here, rather than per request. A bad name is a
+        # startup failure with a console in front of the owner (ADR 0015);
+        # `main` catches the ValueError and exits. Constructing an App with a
+        # broken `actions` in a test raises for the same reason and that is
+        # the behaviour being asserted.
+        self.enabled_actions = actions_module.enabled_actions(config.get("actions"))
+
+    def run_action(self, action):
+        """Execute an enabled action, or raise. Never called with an unknown id.
+
+        The membership test is the caller's (`route`), and it is deliberately
+        not repeated here: two places deciding what is enabled is two places
+        that can disagree about it.
+        """
+        return actions_module.run_action(action)
 
     def quotes(self):
         """`{quotes, fx, crypto, stale}` -- the three markets in one payload.
@@ -757,21 +776,32 @@ def key_for(market):
     return "pair" if market == "fx" else "symbol"
 
 
+# An id is lowercase letters, digits and hyphens, and starts with one of the
+# first two. Everything else -- a separator, a semicolon, an ampersand, a
+# newline, a space, a percent-escape -- is not an id and never reaches the
+# catalogue. This is an allowlist of *characters* in front of an allowlist of
+# *names*, which is belt and braces on purpose: ADR 0015's promise is that
+# nothing from the request is ever interpolated, and the cheapest way to keep
+# a promise like that is to have nothing interesting survive the front door.
+#
+# Matched with `fullmatch`, not `match`: Python's `$` also matches *before* a
+# trailing newline, so `^...$` would accept `mute-audio\n` -- an id with a
+# newline in it, which the paragraph above says is not an id.
+ACTION_ID_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
+
+
 def action_id(path):
     """Pure: the id in `/action/<id>`, or None if `path` is not that shape.
 
-    One segment, non-empty, no nesting. The id is not used for anything yet
-    (T3.7 returns 501), and when it is it will be looked up in a closed
-    allowlist from config -- never turned into a command, a path or an
-    argument. Matching narrowly here is the first half of that promise.
+    One segment, non-empty, no nesting, and nothing outside `[a-z0-9-]`. The
+    id is a key in `actions.CATALOGUE` and is never turned into a command, a
+    path or an argument; matching narrowly here is the first half of that.
     """
     prefix = "/action/"
     if not path.startswith(prefix):
         return None
     rest = path[len(prefix):]
-    if not rest or "/" in rest or "?" in rest:
-        return None
-    return rest
+    return rest if ACTION_ID_RE.fullmatch(rest) else None
 
 
 def apk_to_serve(directory):
@@ -914,16 +944,23 @@ def index_page(directory):
     return 200, body.encode("utf-8"), "text/html; charset=utf-8", ()
 
 
-def route(method, path, app=None):
+def route(method, path, app=None, request_headers=None):
     """Routing: (method, path) -> (status, body_bytes, content_type, headers).
 
-    `headers` is extra headers only -- Content-Type and Content-Length are the
-    handler's, and every route but `/app` leaves it empty.
+    The returned `headers` is extra response headers only -- Content-Type and
+    Content-Length are the handler's, and every route but `/app` leaves it
+    empty.
 
     `app` supplies the data routes; without one they answer 503 rather than
     pretending, which is what lets the existing two-argument tests keep
     asserting that /ping and 404 need no state at all. `/app` needs no app:
     what it serves is a property of the checkout, not of the panel.
+
+    `request_headers` is the *incoming* headers and exists for exactly one
+    route: `POST /action/<id>` is the only one that changes the machine, and
+    it is the only one that has to know whether a browser sent the request.
+    Every other route reads none of it, which is why it stays optional rather
+    than becoming a parameter the whole file threads around.
     """
     if method == "GET" and path == "/ping":
         return _json(200, {"ok": True})
@@ -944,13 +981,93 @@ def route(method, path, app=None):
             return _json(503, {"error": "not configured"})
         return _json(200, app.weather())
 
-    if method == "POST" and action_id(path) is not None:
-        # T3.7: the v2 placeholder. 501 is "not implemented", which is
-        # exactly what this is -- 404 would say the route does not exist and
-        # 200 would say something happened.
-        return _json(501, {"error": "not implemented"})
+    if method == "POST":
+        action = action_id(path)
+        if action is not None:
+            return run_action(action, app, request_headers)
 
     return 404, b"", "text/plain", ()
+
+
+def sent_by_a_browser(request_headers):
+    """True if this POST came from a page rather than from the panel.
+
+    **The drive-by this closes.** A cross-origin
+    `<form method=post enctype=text/plain action="http://<pc>:8777/action/mute-audio">`
+    is a CORS *simple request*: no preflight, so nothing on this server gets a
+    chance to refuse it, and the response being unreadable does not matter
+    because the side effect has already happened. Any page the owner visits
+    could toggle their microphone. ADR 0015 ruled out `GET` for exactly that
+    reason and then described the endpoint as "as trustworthy as the LAN",
+    which this widens to "as trustworthy as every site the owner opens".
+    Found by review.
+
+    The test is not a token, because a token would have to live in the APK and
+    that is the thing `.env` and config.toml exist to prevent (ADR 0013). It is
+    that **a browser says so about itself**: the Fetch standard requires
+    `Origin` on every non-GET request, and `Sec-Fetch-Site` rides along on the
+    engines that have it. The panel's own client is Java's
+    `HttpURLConnection`, which sends neither, and so do `curl` and `probe.py`
+    -- which is what keeps T8.1's acceptance line meaning what it says.
+
+    A LAN attacker with a socket can of course omit both. That is unchanged
+    and is the threat model the ADR already states; this closes the far wider
+    hole of not needing to be on the LAN at all.
+    """
+    if request_headers is None:
+        return False
+    if request_headers.get("Origin"):
+        return True
+    site = (request_headers.get("Sec-Fetch-Site") or "").strip().lower()
+    return bool(site) and site != "none"
+
+
+def run_action(action, app, request_headers=None):
+    """`POST /action/<id>` -- the only route that changes this machine.
+
+    ADR 0015 is the decision and `server/actions.py` is the catalogue. The
+    order of the checks below is the security property, not a style: an id
+    that is not enabled returns **404 having run nothing at all**, which is
+    why membership is tested before anything is looked up, let alone spawned.
+
+    The browser check sits *after* the allowlist on purpose. An unknown id
+    does nothing either way, so refusing it first would buy nothing and would
+    change what `probe.py --serve --url /action/not-an-action` means, which
+    T8.1's acceptance asserts.
+
+    The status codes say different things and a caller depends on it:
+      404  no such action here -- unknown, or known and not enabled
+      403  a browser sent it; see sent_by_a_browser
+      501  this platform has no implementation of an action that is enabled
+      500  it ran and failed, or timed out
+      503  the server has no config loaded, like every other data route
+    """
+    if app is None:
+        return _json(503, {"error": "not configured"})
+    if action not in getattr(app, "enabled_actions", ()):
+        # Deliberately the same answer for "no such id" and "not enabled":
+        # the endpoint does not tell an unauthenticated caller which actions
+        # exist but are switched off.
+        return _json(404, {"error": "unknown action"})
+    if sent_by_a_browser(request_headers):
+        print(
+            f"action {action}: refused, the request carries browser headers "
+            f"(Origin={request_headers.get('Origin')!r})",
+            file=sys.stderr,
+        )
+        return _json(403, {"error": "not from a browser"})
+
+    try:
+        state = app.run_action(action)
+    except actions_module.Unsupported as exc:
+        print(f"action {action}: {exc}", file=sys.stderr)
+        return _json(501, {"error": "not implemented on this platform"})
+    except actions_module.ActionError as exc:
+        # The command's own stderr goes to the log, where the owner can read
+        # it, and never into the response (ADR 0015).
+        print(f"action {action}: {exc}", file=sys.stderr)
+        return _json(500, {"error": "action failed"})
+    return _json(200, {"ok": True, "id": action, "state": state})
 
 
 def _json(status, payload):
@@ -976,7 +1093,9 @@ class Handler(BaseHTTPRequestHandler):
         # downloading two megabytes.
         routed = "GET" if method == "HEAD" else method
         try:
-            status, body, content_type, headers = route(routed, self.path, getattr(self, "app", None))
+            status, body, content_type, headers = route(
+                routed, self.path, getattr(self, "app", None), self.headers
+            )
         except Exception:  # noqa: BLE001 - deliberately everything
             # route() used to be pure; it does I/O now, and TimedCache
             # re-raises anything that is not an UpstreamError on purpose --
@@ -1134,6 +1253,26 @@ def main(argv=None):
     notice = legacy_format_notice(config_path, explicit=config_is_explicit)
     if notice:
         print(notice, file=sys.stderr)
+
+    # Before --check-only returns, not after: `--check-only` is what the
+    # launchers and `scripts/after_update.py` run, and a misspelled action is
+    # exactly the kind of thing that must be found there rather than by
+    # somebody at the desk pressing a button that does nothing (ADR 0015).
+    try:
+        enabled = actions_module.enabled_actions(config.get("actions"))
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        sys.exit(1)
+    if enabled:
+        # Said out loud at every start. This endpoint changes the machine and
+        # the server has no authentication; which actions are live is not
+        # something to have to go and read a file for. The second half names
+        # the command each one resolved to, because a box with neither wpctl
+        # nor pactl installed otherwise looks exactly like a working one until
+        # somebody presses a button and nothing happens.
+        print(f"notice: actions enabled: {', '.join(enabled)}", file=sys.stderr)
+        for line in actions_module.describe(enabled):
+            print(line, file=sys.stderr)
 
     if args.check_only:
         print(f"config OK: {config_path}")

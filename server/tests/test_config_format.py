@@ -96,11 +96,11 @@ class MergeTests(unittest.TestCase):
         self.assertEqual(defaults, {"port": 8777, "city": "Sao Paulo"})
 
     def test_a_nested_value_is_replaced_and_not_deep_merged(self):
-        # `actions` is a closed allowlist (server/CLAUDE.md). A config that
-        # sets it means to replace the default, and a deep merge would
-        # silently reopen the list with whatever the default happened to hold.
-        merged = merge({"actions": {"lock": "x"}}, {"actions": {"reboot": "y"}})
-        self.assertEqual(merged["actions"], {"lock": "x"})
+        # `actions` is a closed allowlist (ADR 0015). A config that sets it
+        # means to replace the default, and a deep merge would silently
+        # reopen the list with whatever the default happened to hold.
+        merged = merge({"actions": ["mute-mic"]}, {"actions": ["mute-audio"]})
+        self.assertEqual(merged["actions"], ["mute-mic"])
 
 
 class LegacyFormatNoticeTests(unittest.TestCase):
