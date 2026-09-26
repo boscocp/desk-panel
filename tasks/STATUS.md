@@ -167,7 +167,7 @@ or phase 6.
 
 | # | Task | State | Notes |
 |---|---|---|---|
-| T8.1 | **`POST /action/{id}` actually acts** | todo | The first route that changes the machine the server runs on, and the server has no authentication — deliberately, because it is LAN-only and session-bound (ADR 0004). Those two facts were compatible only while the worst a stranger on the Wi-Fi could do was read a stock price, so **ADR 0015 comes first** and states the threat model. The catalogue of what an action runs lives in code; config only names which ones are enabled, and an unknown name fails the load with a console in front of the owner rather than 404ing at the desk. Two toggles to start (`mute-audio`, `mute-mic`), per-platform like T3.11 — `wpctl`/`pactl`, `osascript`, and PowerShell against Core Audio on Windows with no third-party download. `subprocess` argument lists, never `shell=True`, asserted through the AST because `grep` passes against `shell = True`. `shutdown` and `lock` are deliberately absent: the ADR's model is written around actions that are safe to repeat |
+| T8.1 | **`POST /action/{id}` actually acts** | done | 2026-09-26, wave 26. **ADR 0015 first**, before `server/actions.py` existed, as the task file demands — the server has no authentication and every other route only answers a question, so what the endpoint may do was written before there was an implementation to defend. Two toggles, `mute-audio` and `mute-mic`; `shutdown`, `sleep` and `lock` are absent because the honest threat model is that anyone on the LAN can repeat an action as often as they like, and adding one is a change to the ADR rather than to a table. **The catalogue is in code and config can only switch its entries on and off** — a config that could name a command is a remote shell with extra steps, and it moves the security argument out of the reviewed repository into an untracked file nobody reads, which is why the earlier `ARCHITECTURE.md` sketch of "a Steam URI or an executable path from config" was dropped rather than built. **The order of the checks is the security property**: an id that is not enabled returns 404 having run *nothing at all*, and the tests assert that on the fake runner's call count, because a status-only test cannot tell 404-before-spawning from 404-after. `action_id()` widened from "no `/` and no `?`" to `[a-z0-9-]` — an allowlist of characters in front of an allowlist of names, so the promise that nothing is interpolated does not rest on the lookup being written carefully. `actions` went from a reserved table to a list of names and **an empty table still loads**, because `config.example.toml` shipped `[actions]` and an update that refuses to start is worse than a shape change (T3.13 from a direction it cannot see). An unknown name is fatal *before* `--check-only` returns, which is what the launchers and `after_update.py` run. Linux was exercised for real: both toggles moved `wpctl get-volume` and came back |
 | T8.2 | **Two buttons under the clock** | todo | After T8.1. `#shortcuts` has been in the sidebar since T6.1, empty on purpose so this would be a fill and not a re-layout. The hard part is invariant 1: the page cannot make the request, so a tap has to cross into Java through the app's **first inbound bridge** — everything so far runs Java→page. `invoke(id)` matches the id against a set Java already knows and never concatenates it into a URL, which is T8.1's rule made on the other side of the wire. Dead while the PC is away: a queued action that fired on reconnect would mute the PC minutes after somebody pressed a button they could not see. Which buttons exist rides the payload like `theme` does, so a third one is config and not a rebuild; the buttons are markup, so they belong to a theme (T6.7). 56px targets — a phone at arm's length with no pointer, and a mis-tap mutes the wrong device. And the button shows the last *result*, never a state it cannot know: one that lies about whether the mic is live is worse than no button |
 
 ## Phase 9 — Suggested, not scheduled
@@ -180,6 +180,88 @@ and the first line of each file says so.
 |---|---|---|---|
 | T9.1 | **The next meeting, under the clock** | todo | Google Calendar and Microsoft Outlook merged, the soonest event under the clock in the `#shortcuts` strip, between T8.2's two buttons. Blocked behind T8.2 for a layout reason and behind **ADR 0016** for a bigger one: this is the first feature that puts *personal data* on a panel whose server has no authentication, and the refresh tokens it needs are credentials sitting on a desktop PC. OAuth stays on the PC and never reaches the APK — two acceptance lines exist for exactly that. The merge is where the design is: the two providers disagree about all-day events, about time zones and about the word for "declined" |
 | T9.2 | **Spike: can the panel talk to an assistant for nothing?** | todo | A button to ask something out loud and hear an answer, with the whole pipeline on the PC — invariant 1 means the page cannot call anything. Time-boxed, produces `docs/spikes/2026-voice-assistant.md` and a throwaway prototype under `spikes/`, and is allowed to conclude *do not build this*. The unknown is whether offline STT, a small local model and offline TTS fit inside a latency a person will stand at a panel for; Claude and DeepSeek are the paid comparison, not the plan. Also has to answer the awkward ones: `RECORD_AUDIO` would be the app's first dangerous permission, and an unauthenticated LAN endpoint that runs a model and speaks in someone's room is not in ADR 0015's family |
+
+## Resuming after 2026-09-26 (wave 26)
+
+Wave 26 is **T8.1**, on `wave/26-actions-execute`. `POST /action/{id}` stops being a 501 and
+starts muting this PC, and **ADR 0015** is the half that had to be written first.
+
+**Next: T8.2**, the two buttons under the clock. It is the only thing T8.1 was blocking and the
+task file says so in its own notes: *"the buttons are useless without it, and the temptation
+while building them is to have the page do something else in the meantime."* The hard part is
+invariant 1 — the page cannot make the request, so a tap has to cross into Java through the
+app's **first inbound bridge**, and `invoke(id)` must match the id against a set Java already
+knows rather than concatenating it into a URL. That is ADR 0015's rule made again on the other
+side of the wire, and it is the reason to do it now while the argument is fresh.
+
+After that the documentation cluster **T7.4 + T7.5 + T7.6**, which is the only thing left before
+T7.7 and T7.3 — and which wave 25's `check_ci_hygiene.py` rule 5 has already wired: the moment
+either lands a `scripts/check_*.py` that `make check` reaches and no workflow runs, CI goes red.
+
+**Phase 9 is unblocked as a side effect.** T9.1 and T9.2 both declared `ADR 0015` as a prereq
+and it exists now. Neither is scheduled — phase 9 is "suggested, not scheduled" — but
+`check_status.py` no longer reports them as reserving a number.
+
+### Writing the ADR first changed the implementation, which is the argument for the rule
+
+`docs/ARCHITECTURE.md` had carried a sketch of this endpoint since the beginning: *"`id` indexes
+a closed allowlist in server config that maps to a Steam URI or an executable path."* Writing the
+threat model down killed it. A config that can name a path **is** a remote shell with extra
+steps for anyone who can write that file, and worse, it moves the security argument out of the
+reviewed repository into an untracked file nobody reads. The catalogue is in code now and config
+only switches its entries on and off; the sketch is recorded as dropped rather than quietly
+replaced.
+
+The same order produced the `[a-z0-9-]` narrowing of `action_id()`. The ADR's promise is that
+nothing from the request is ever interpolated — and the cheapest way to keep a promise like that
+is to have nothing interesting survive the front door, rather than to rely on the lookup being
+written carefully forever.
+
+### The tests that matter assert on a call count, not on a status code
+
+`404` for an id that is not enabled is easy to get right and easy to get subtly wrong: a 404
+produced *after* spawning something passes every status-only test and fails the endpoint. So the
+fake runner counts its calls, and three tests assert it was never called — for a disabled id, for
+an id outside the catalogue, and for a `GET`.
+
+Two more are worth keeping if the file ever shrinks. **The id never appears in any argument
+list**, asserted for every action on every platform: that is the direct statement of "the id is a
+key, not a value". And **`candidates()` returns a copy**, because without it one caller appending
+to the list it was handed would extend the catalogue for the whole process.
+
+A third was written, failed, and was replaced rather than relaxed: a scan for `{}` and `%s` in
+every argument, meant to prove there was nothing to interpolate into. The Windows command is C#
+and the test failed on `class MMDeviceEnumeratorComObject {}`. A bad proxy for a real property,
+and the real property was available.
+
+### One shell survives in the table, and it is named
+
+The macOS microphone command is an AppleScript literal that calls `do shell script` to keep the
+remembered input level in `dev.bosco.deskpanel`'s preferences — because `volume settings` has no
+input toggle, and muting to 0 and unmuting to 100 hands somebody's carefully set level back as a
+shout. It is a constant from end to end and the only value concatenated into it is an integer
+AppleScript itself read from the audio API. The alternative was two commands per press and a
+state machine in Python to sequence them: more moving parts guarding the same constant. Named in
+the ADR, in the module, and here, because an unnamed exception is how a rule stops being one.
+
+### What is only true on this desk
+
+- **Linux is the only platform actually exercised.** Both toggles were driven through a real
+  server on a spare port and observed moving `wpctl get-volume @DEFAULT_AUDIO_SINK@` and
+  `@DEFAULT_AUDIO_SOURCE@` to `[MUTED]` and back. **macOS and Windows are written and unrun** —
+  the macOS input-volume restore in particular has never executed anywhere, and it is the one
+  branch with logic rather than a single call.
+- **The `--serve` acceptance line needs port 8777 free**, and the installed user unit holds it on
+  this machine. It was run against a temp config on port 8791 instead, which probes the same
+  code; running the literal line means `systemctl --user stop desk-panel` first, and that takes
+  the panel down while it runs. Noted in the task file.
+- **The installed server is still running the old code.** It was started at login and holds
+  `server.py` as it was then — `POST /action/mute-audio` against the live panel answers 501 until
+  someone runs `python scripts/after_update.py`. That is exactly the failure T3.13 exists for,
+  arriving on schedule.
+- **The phone is still not on adb**, unchanged since wave 22. TT.7, TT.8, T2.4 and T7.2 need it.
+- `server/config.json` is still mode 0644 and holds the brapi token. One `chmod 600`; T7.3 wants
+  it. Carried from wave 19 through 25.
 
 ## Resuming after 2026-09-26 (wave 25)
 

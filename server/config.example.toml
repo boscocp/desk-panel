@@ -208,8 +208,21 @@ language = "pt-BR"
 # Actions — reserved
 # ---------------------------------------------------------------------------
 
-# A closed allowlist of ids the panel may POST back to, for a future version.
-# It is empty, `POST /action/{id}` answers 501, and nothing reads this yet.
-# When it does, only ids named here will exist — never a command, path or
-# argument taken from the request.
-[actions]
+# Which actions the panel may POST back. A list of **names**, never commands:
+# the catalogue lives in `server/actions.py` and this file can only switch its
+# entries on and off. That direction is the whole security argument, because
+# this server has no authentication — anyone who can reach the port can run
+# whatever is listed here, as often as they like. See
+# docs/adr/0015-the-panel-can-act-on-the-pc.md.
+#
+# Two exist today, both toggles, both harmless to repeat:
+#   "mute-audio"  mute/unmute the speakers
+#   "mute-mic"    mute/unmute the microphone
+#
+# A name this server has no implementation for is a fatal error at startup,
+# with the name in the message — not a button that quietly does nothing.
+#
+# Empty is the default and is the right setting on any network you do not
+# control. `shutdown`, `sleep` and `lock` are deliberately not available: the
+# threat model above only holds for actions that are safe to repeat.
+actions = []

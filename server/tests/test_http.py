@@ -162,14 +162,17 @@ class DataRouteTests(unittest.TestCase):
         self.assertEqual(int(resp.getheader("Content-Length")), len(body))
         json.loads(body.decode("utf-8"))
 
-    def test_post_to_an_action_returns_501(self):
-        resp, body = self._request("/action/x", method="POST")
-        self.assertEqual(resp.status, 501)
+    def test_post_to_an_action_nobody_enabled_returns_404(self):
+        # The fixture app enables nothing, which is the default. 404 and not
+        # 501: an action that is not enabled does not exist as far as an
+        # unauthenticated caller is concerned (ADR 0015).
+        resp, body = self._request("/action/mute-audio", method="POST")
+        self.assertEqual(resp.status, 404)
         self.assertEqual(resp.getheader("Content-Type"), "application/json")
-        self.assertEqual(json.loads(body.decode("utf-8")), {"error": "not implemented"})
+        self.assertEqual(json.loads(body.decode("utf-8")), {"error": "unknown action"})
 
     def test_get_to_an_action_is_still_404(self):
-        resp, _ = self._request("/action/x")
+        resp, _ = self._request("/action/mute-audio")
         self.assertEqual(resp.status, 404)
 
     def test_ping_still_works_on_a_server_that_has_an_app(self):
