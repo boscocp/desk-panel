@@ -1,0 +1,98 @@
+# What a stranger's pull request should meet before a human reads it (T7.8).
+#
+# `ci.yml` is not this file. That one runs the three test suites and is kept
+# string-for-string in step with the Makefile by `scripts/check_workflow.py`.
+# This one runs the linters and the repo's own guards, and its shape is
+# constrained by decisions this project already made:
+#
+#   - `ruff` is installed here and never in `server/`. The server is standard
+#     library only (server/CLAUDE.md); a linter that shipped with it would be
+#     the rule it exists to keep.
+#   - JavaScript gets `node --check`, not ESLint. `web/` has no package.json
+#     and no build step by design (ADR 0006), and adding a node toolchain to
+#     lint a no-toolchain directory is the tail wagging the dog.
+#   - PSScriptAnalyzer reads `server/install_task.ps1`, the one file in this
+#     repo nobody here can run. That makes it the file most worth having a
+#     machine read.
+#
+# Two jobs, not seven. A dashboard with fifteen green ticks is one nobody
+# reads, and one job running five commands fails just as loudly.
+
+name: lint
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# Nothing here writes to the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      # Pinned exactly. An unpinned linter turns somebody else's release into a
+      # red pull request on a branch that changed nothing.
+      - run: pip install ruff==0.16.9
+      # Configuration lives in pyproject.toml, which also says why the rule set
+      # is small: a gate that arrives red teaches everyone to scroll past it.
+      - run: ruff check .
+
+      # Every file under web/, parsed. This is already more than a directory
+      # with no build step promises.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - name: node --check every file under web/
+        run: find web -name '*.js' -print0 | xargs -0 -n1 node --check
+
+      # pwsh is preinstalled on the GitHub-hosted Ubuntu runner, so this needs
+      # no Windows and no container. Errors fail the job; warnings are printed
+      # and do not, because the file cannot be exercised anywhere in this
+      # project and a style opinion about it is not worth blocking a stranger.
+      - name: PSScriptAnalyzer on install_task.ps1
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction Stop
+          $found = Invoke-ScriptAnalyzer -Path server/install_task.ps1 -Recurse
+          $found | Format-Table -AutoSize | Out-String | Write-Host
+          $errors = @($found | Where-Object Severity -eq 'Error')
+          if ($errors.Count) { throw "$($errors.Count) PSScriptAnalyzer error(s)" }
+
+      # shellcheck is preinstalled on the runner. One .sh exists today
+      # (server/install_user_unit.sh); the glob covers the next one.
+      - name: shellcheck every .sh
+        run: find . -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -r shellcheck
+
+  guards:
+    # Each of these is a rule somebody wrote down, and none of them ran unless a
+    # human remembered. That is the whole reason this job exists.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      # No `continue-on-error:` and no `if:` anywhere in this file. Both were
+      # found in ci.yml during wave 23 turning a red suite into a green check,
+      # and `scripts/check_ci_hygiene.py` bans them outright rather than trying
+      # to decide which ones are harmless.
+      - run: python scripts/check_acceptance.py
+      - run: python scripts/check_status.py
+      - run: python scripts/check_harness_notes.py
+      - run: python scripts/check_permission_parity.py
+      - run: python scripts/check_workflow.py
+      - run: python scripts/check_ci_hygiene.py
+      # Not a list of scripts: `lint-selftests` discovers them by grep over a
+      # glob, so the next one to grow a --self-test is covered by being written.
+      - run: make lint-selftests
