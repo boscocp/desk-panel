@@ -162,6 +162,36 @@ class RunActionTests(unittest.TestCase):
         self.assertEqual(runner.calls[0][1], actions.TIMEOUT_S)
 
 
+class DescribeTests(unittest.TestCase):
+    """The startup line. T8.1 step 4 asks for it by name, and the reason is
+    that "nothing happened" is the hardest failure on this project to diagnose
+    from the desk."""
+
+    def test_it_names_the_command_that_will_run(self):
+        lines = actions.describe(["mute-audio"], platform="linux", which=always_present)
+        self.assertEqual(lines, ["  mute-audio: wpctl"])
+
+    def test_it_names_the_fallback_when_the_first_is_missing(self):
+        lines = actions.describe(
+            ["mute-audio"], platform="linux",
+            which=lambda name: "/usr/bin/pactl" if name == "pactl" else None,
+        )
+        self.assertEqual(lines, ["  mute-audio: pactl"])
+
+    def test_a_box_with_no_mixer_says_so_before_anyone_presses_anything(self):
+        line, = actions.describe(["mute-mic"], platform="linux", which=never_present)
+        self.assertIn("no command available", line)
+        self.assertIn("wpctl", line)
+        self.assertIn("501", line)
+
+    def test_an_unknown_platform_says_so_too(self):
+        line, = actions.describe(["mute-mic"], platform="aix", which=always_present)
+        self.assertIn("nothing", line)
+
+    def test_nothing_enabled_is_no_lines(self):
+        self.assertEqual(actions.describe([], platform="linux", which=always_present), [])
+
+
 class StateTests(unittest.TestCase):
     def test_silence_is_unknown_and_never_a_guess(self):
         # wpctl and pactl print nothing. A button showing a state this server
