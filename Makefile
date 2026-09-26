@@ -1,7 +1,7 @@
 # Entry point for humans, CI and agents alike. Every target exits non-zero on failure.
 DC := docker compose -f docker/compose.yml run --rm build
 
-.PHONY: help check lint-tasks lint-notes lint-status lint-permissions lint-workflow lint-selftests test-server test-web test-android connected build apk contract e2e clean
+.PHONY: help check lint-tasks lint-notes lint-status lint-permissions lint-workflow lint-ci-hygiene lint-selftests test-server test-web test-android connected build apk contract e2e clean
 
 help:
 	@echo "check         run everything that does not need the phone"
@@ -17,10 +17,11 @@ help:
 	@echo "lint-status   STATUS.md and tasks/*.md still agree"
 	@echo "lint-permissions  .claude/settings.json and reasonix.toml are still twins"
 	@echo "lint-workflow ci.yml runs the same commands these targets do"
+	@echo "lint-ci-hygiene  permissions, SHA pins, concurrency, dependabot"
 	@echo "lint-selftests  every scripts/*.py that has a --self-test runs it"
 	@echo "clean         remove build output"
 
-check: lint-tasks lint-notes lint-status lint-permissions lint-workflow lint-selftests test-server test-web test-android
+check: lint-tasks lint-notes lint-status lint-permissions lint-workflow lint-ci-hygiene lint-selftests test-server test-web test-android
 
 lint-tasks:
 	python scripts/check_acceptance.py
@@ -39,6 +40,11 @@ lint-permissions:
 lint-workflow:
 	python scripts/check_workflow.py --self-test
 	python scripts/check_workflow.py
+
+# Runs against this checkout, so the properties hold before the push rather
+# than after a runner says so. Its own rules are checked by lint-selftests.
+lint-ci-hygiene:
+	python scripts/check_ci_hygiene.py
 
 # A self-test no target invokes is a test suite with no runner. after_update.py
 # had one, nothing ran it, and it was red on Linux from the day it was written

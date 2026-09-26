@@ -28,16 +28,24 @@ on:
   workflow_dispatch:
 
 # Least privilege, and it is enough: nothing here writes to the repository.
-# T7.8 owns hardening the rest of what a public repo gets.
+# The default token is read/write across the repo unless a workflow says
+# otherwise, so saying otherwise is the whole point of the line (T7.8).
 permissions:
   contents: read
+
+# Three pushes to a branch should leave one run, not three. Free minutes on a
+# public repo are not a reason to spend twenty of them per push, and on a
+# private one they are billed -- see docs/MAINTAINING.md.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   server:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
       # No install step by design: the server uses only the standard library.
@@ -47,8 +55,8 @@ jobs:
   web:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
       # No npm ci by design: there is no package.json.
@@ -57,8 +65,8 @@ jobs:
   android:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: "21"
@@ -67,15 +75,15 @@ jobs:
       # lives -- and the run went green while the action printed "Unexpected
       # input(s) 'build-root-directory'" into its annotations and ignored it.
       # The input belongs to the older gradle/gradle-build-action, not to this
-      # one. setup-gradle v4 caches the Gradle User Home, which is the same
+      # one. setup-gradle caches the Gradle User Home, which is the same
       # directory whichever subproject invoked it, so there was nothing to
       # point at. Noted rather than deleted quietly: a green check with a
       # silently discarded input is this wave's own subject arriving in its own
       # workflow.
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
       - run: ./gradlew test
       - run: ./gradlew assembleDebug
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: desk-panel-debug
           # android/app/build.gradle.kts copies the APK here; see its copyApk task.

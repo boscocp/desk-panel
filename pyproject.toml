@@ -1,0 +1,23 @@
+# Linter configuration only. There is no package here and there never will be:
+# `server/` is standard library by design (server/CLAUDE.md) and nothing in this
+# repo is installed with pip. `ruff` runs in CI and never ships -- a linter that
+# became a runtime dependency of the server would be the rule it exists to keep.
+#
+# The rule set is deliberately small and green, not `ALL` with fifty ignores. A
+# lint gate that arrives red teaches everyone to scroll past it, which is the
+# failure the bootstrap ci.yml demonstrated for twenty-two waves. `I` (import
+# order) and `UP` (pyupgrade) are the obvious next two; each is a repo-wide
+# mechanical diff and belongs in its own commit, not smuggled into this one.
+
+[tool.ruff]
+# What this repo already writes to. Two lines exceeded it when the gate was
+# added, both in one table of test cases, and both were wrapped rather than
+# excused.
+line-length = 120
+# Vendored agent skills. Not this project's code, not this project's style.
+exclude = [".claude"]
+
+[tool.ruff.lint]
+# E/W  pycodestyle -- the errors, and the whitespace warnings
+# F    pyflakes -- unused imports and names, undefined names
+select = ["E", "W", "F"]
