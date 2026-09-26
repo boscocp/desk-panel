@@ -138,8 +138,12 @@ class RunActionTests(unittest.TestCase):
             "mute-audio", platform="linux", runner=runner,
             which=lambda name: "/usr/bin/pactl" if name == "pactl" else None,
         )
-        self.assertEqual(len(runner.calls), 1)
-        self.assertEqual(runner.calls[0][0][0], "pactl")
+        # Two calls on Linux: the toggle, then the read-back that asks what it
+        # did (see ReadbackTests). Both have to pick pactl -- a toggle through
+        # PulseAudio and a question asked of PipeWire would be two mixers.
+        self.assertEqual([call[0][0] for call in runner.calls], ["pactl", "pactl"])
+        self.assertEqual(runner.calls[0][0][1], "set-sink-mute")
+        self.assertEqual(runner.calls[1][0][1], "get-sink-mute")
 
     def test_no_command_present_is_unsupported_and_runs_nothing(self):
         runner = FakeRunner()
@@ -251,6 +255,94 @@ class StateTests(unittest.TestCase):
             argv, = actions.candidates(action, "darwin")
             self.assertIn('return "muted"', argv[-1], action)
             self.assertIn('return "unmuted"', argv[-1], action)
+
+
+class ReadbackTests(unittest.TestCase):
+    """The state is measured, not guessed.
+
+    ADR 0015 said a toggle's state is whatever the command reported, and on
+    Linux that is nothing at all -- so the honest answer was `unknown` and the
+    panel drew no state. Asked for from the chair: the button carries a cross
+    when the PC is muted. A second, read-only command is what makes that
+    honest rather than a guess, and these are the tests that keep it honest.
+    """
+
+    def test_wpctl_prints_the_flag_only_when_it_is_set(self):
+        self.assertEqual(actions.state_from_readback("Volume: 0.40 [MUTED]"), actions.MUTED)
+        self.assertEqual(actions.state_from_readback("Volume: 0.40"), actions.UNMUTED)
+
+    def test_pactl_answers_in_words(self):
+        self.assertEqual(actions.state_from_readback("Mute: yes"), actions.MUTED)
+        self.assertEqual(actions.state_from_readback("Mute: no"), actions.UNMUTED)
+
+    def test_anything_it_does_not_recognise_is_unknown(self):
+        # This function is the only thing between a mixer's stdout and a cross
+        # drawn over a microphone icon. It guesses nothing.
+        for text in ("", None, "garbage", "Volumen: 0.4", "Mute: perhaps", "0.40"):
+            self.assertEqual(actions.state_from_readback(text), actions.UNKNOWN, repr(text))
+
+    def test_the_readback_is_read_only(self):
+        # A command that could change the mixer would make asking the question
+        # change the answer. Asserted by shape, since nothing here runs it.
+        for action in actions.CATALOGUE:
+            for argv in actions.readback(action, "linux"):
+                self.assertTrue(argv[1].startswith("get-"), argv)
+                self.assertNotIn("set", argv[1])
+
+    def test_a_toggle_that_says_nothing_is_asked(self):
+        calls = []
+
+        def runner(argv, timeout):
+            calls.append(argv)
+            out = "" if argv[1] == "set-mute" else "Volume: 0.40 [MUTED]"
+            return subprocess.CompletedProcess(argv, 0, out, "")
+
+        state = actions.run_action("mute-audio", platform="linux",
+                                   runner=runner, which=always_present)
+        self.assertEqual(state, actions.MUTED)
+        self.assertEqual(len(calls), 2, "the mixer was not asked")
+        self.assertEqual(calls[1][1], "get-volume")
+
+    def test_a_toggle_that_answers_is_not_asked_twice(self):
+        # macOS says the word itself. Asking again would be a second process
+        # per press for an answer already in hand.
+        runner = FakeRunner(stdout="muted\n")
+        state = actions.run_action("mute-audio", platform="darwin",
+                                   runner=runner, which=always_present)
+        self.assertEqual(state, actions.MUTED)
+        self.assertEqual(len(runner.calls), 1)
+
+    def test_a_readback_that_fails_does_not_fail_the_action(self):
+        # The toggle already worked and the caller is owed its 200. All the
+        # read-back decides is whether a cross is drawn.
+        def runner(argv, timeout):
+            if argv[1] == "set-mute":
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            return subprocess.CompletedProcess(argv, 1, "", "no such sink")
+
+        self.assertEqual(
+            actions.run_action("mute-audio", platform="linux",
+                               runner=runner, which=always_present),
+            actions.UNKNOWN)
+
+    def test_a_readback_that_times_out_does_not_raise(self):
+        def runner(argv, timeout):
+            if argv[1] == "set-mute":
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            raise subprocess.TimeoutExpired("wpctl", timeout)
+
+        self.assertEqual(
+            actions.run_action("mute-audio", platform="linux",
+                               runner=runner, which=always_present),
+            actions.UNKNOWN)
+
+    def test_a_platform_with_no_readback_stays_unknown(self):
+        runner = FakeRunner(stdout="")
+        self.assertEqual(actions.readback("mute-audio", "win32"), [])
+        self.assertEqual(
+            actions.run_action("mute-audio", platform="win32",
+                               runner=runner, which=always_present),
+            actions.UNKNOWN)
 
 
 class EnabledActionsTests(unittest.TestCase):
@@ -441,6 +533,41 @@ class BrowserOriginTests(unittest.TestCase):
         )
         self.assertEqual(status, 404)
         self.assertEqual(app.ran, [])
+
+
+class PayloadTests(unittest.TestCase):
+    """Which buttons exist is config, not code (T8.2 step 4)."""
+
+    def _payload(self, config):
+        app = App(dict({"quotes": [], "fx": [], "crypto": []}, **config))
+        return app.quotes()
+
+    def test_the_enabled_ids_ride_the_payload(self):
+        self.assertEqual(self._payload({"actions": ["mute-mic"]})["actions"], ["mute-mic"])
+
+    def test_nothing_enabled_is_an_empty_list_and_not_a_missing_key(self):
+        # A missing key and an empty list are different things to the page:
+        # one is "no buttons", the other is "an older server that cannot tell
+        # you". The key is always present.
+        payload = self._payload({})
+        self.assertIn("actions", payload)
+        self.assertEqual(payload["actions"], [])
+
+    def test_the_catalogue_is_not_what_is_sent(self):
+        # The panel must never draw a button for an action the server would
+        # answer 404 to -- a button that does nothing is worse than no button
+        # (T8.2 step 7). So this is the *enabled* set, not actions.CATALOGUE.
+        payload = self._payload({"actions": ["mute-audio"]})
+        self.assertEqual(payload["actions"], ["mute-audio"])
+        self.assertNotIn("mute-mic", payload["actions"])
+
+    def test_the_page_cannot_mutate_the_app_through_the_payload(self):
+        # A copy, not the App's own list: the payload is serialised straight
+        # to JSON today and handing out the live allowlist is the kind of
+        # aliasing that costs nothing until something edits it.
+        app = App({"quotes": [], "fx": [], "crypto": [], "actions": ["mute-mic"]})
+        app.quotes()["actions"].append("shutdown")
+        self.assertEqual(app.enabled_actions, ["mute-mic"])
 
 
 class AppWiringTests(unittest.TestCase):

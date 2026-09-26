@@ -79,6 +79,36 @@ public class MarkersTest {
     }
 
     @Test
+    public void actionMarkers() {
+        // Written out by hand, like every other expected value in this file:
+        // e2e/run_e2e.py and T8.2's own acceptance grep for these strings.
+        assertEquals("action=mute-audio result=ok", Markers.action("mute-audio", "ok"));
+        assertEquals("action=mute-mic result=err", Markers.action("mute-mic", "err"));
+        assertEquals("action=mute-mic result=offline", Markers.action("mute-mic", "offline"));
+        assertEquals("action=shutdown result=rejected", Markers.action("shutdown", "rejected"));
+    }
+
+    @Test
+    public void theActionMarkerCarriesWhichButtonWasPressed() {
+        // Two buttons sit next to each other and a mis-tap is the failure the
+        // 56px target exists to prevent. That is only checkable if the log
+        // says which one was actually sent, so the two must differ.
+        assertNotEquals(Markers.action("mute-audio", "ok"), Markers.action("mute-mic", "ok"));
+    }
+
+    @Test
+    public void aRejectedIdCannotForgeASecondMarkerLine() {
+        // The refusal paths log the string the page handed over, which is the
+        // only evidence there is that a theme asked for something. A newline
+        // in it would let the page write its own `action=... result=ok` into
+        // logcat, and that is what every E2E assertion here reads (ADR 0009).
+        assertEquals("action=x.action=mute-audio result=ok result=rejected",
+                Markers.action("x\naction=mute-audio result=ok", "rejected"));
+        assertEquals("action=a.b result=rejected", Markers.action("a\rb", "rejected"));
+        assertEquals("action=null result=offline", Markers.action(null, "offline"));
+    }
+
+    @Test
     public void heartbeatMarkers() {
         assertEquals("tick=1758240000", Markers.tick(1758240000L));
         assertEquals("ping=ok", Markers.ping("ok"));

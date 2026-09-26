@@ -13,6 +13,7 @@ const {
     SCROLL_SECONDS_PER_ROW, SCROLL_MIN_TRAVEL_PX, SCROLL_MIN_HIDDEN_ROWS,
     offsetFor, burnInSchedule,
     BURN_IN_OFFSETS, BURN_IN_STEP_MINUTES, BURN_IN_AMPLITUDE_PX,
+    shortcutsFor,
 } = require('../js/format.js');
 
 test('formatPrice formats a BRL price with two decimals', () => {
@@ -1064,5 +1065,90 @@ test('every language has a word for the chance of rain', () => {
     for (const [tag, table] of Object.entries(LANGUAGES)) {
         assert.equal(typeof table.rainChance, 'string', `${tag} has no rainChance`);
         assert.ok(table.rainChance.length > 0, `${tag} has an empty rainChance`);
+    }
+});
+
+
+// --- The shortcut buttons (T8.2) -------------------------------------------
+
+test('shortcutsFor keeps the order the PC sent', () => {
+    // The server's config decides which buttons exist and in which order, so
+    // a theme drawing them in its own order would make `actions` half a
+    // setting.
+    const got = shortcutsFor(['mute-mic', 'mute-audio'], 'en').map((s) => s.id);
+    assert.deepEqual(got, ['mute-mic', 'mute-audio']);
+});
+
+test('shortcutsFor renders nothing for an id this build has no word for', () => {
+    // T8.2 step 5. A button captioned `mute-everything` is a button nobody
+    // can read, which is worse than the gap where one would be -- and it is
+    // the state a PC running ahead of the APK puts the panel in.
+    assert.deepEqual(shortcutsFor(['mute-everything'], 'en'), []);
+    assert.deepEqual(shortcutsFor(['mute-audio', 'mute-everything'], 'en').map((s) => s.id),
+                     ['mute-audio']);
+});
+
+test('shortcutsFor survives a payload that promises nothing', () => {
+    // `actions` absent is an older server; `actions: []` is a panel whose
+    // owner enabled none. Both draw no buttons, and neither may throw inside
+    // a theme's render.
+    for (const value of [undefined, null, [], 'mute-audio', 42, {}]) {
+        assert.deepEqual(shortcutsFor(value, 'en'), [], String(value));
+    }
+});
+
+test('shortcutsFor drops a repeat rather than drawing two of one button', () => {
+    assert.deepEqual(shortcutsFor(['mute-mic', 'mute-mic'], 'en').map((s) => s.id),
+                     ['mute-mic']);
+});
+
+test('shortcutsFor is translated, and the id is not', () => {
+    // The id is an identifier and crosses the wire; the caption is what a
+    // person reads. Getting that backwards is how an action id ends up
+    // translated and the POST 404s.
+    const [pt] = shortcutsFor(['mute-audio'], 'pt-BR');
+    const [en] = shortcutsFor(['mute-audio'], 'en');
+    assert.equal(pt.id, 'mute-audio');
+    assert.equal(en.id, 'mute-audio');
+    assert.notEqual(pt.label, en.label);
+});
+
+test('every language has a caption for every action and a hint', () => {
+    // The same rule the rain chance is held to: a panel in another language
+    // must not be half-English. Keyed off one table so a new action fails
+    // here rather than shipping with one caption.
+    const ids = Object.keys(LANGUAGES[FALLBACK_LANGUAGE].actions);
+    assert.ok(ids.length > 0, 'no actions are named at all');
+    for (const [tag, table] of Object.entries(LANGUAGES)) {
+        assert.equal(typeof table.actionHint, 'string', `${tag} has no actionHint`);
+        assert.ok(table.actionHint.length > 0, `${tag} has an empty actionHint`);
+        assert.equal(typeof table.actionFailed, 'string', `${tag} has no actionFailed`);
+        for (const key of ['actionMuted', 'actionUnmuted']) {
+            // Said to a screen reader after a press. Both have to carry "last
+            // asked" in whatever words the language uses -- the panel knows a
+            // state the PC reported, not a live one, and an accessible name
+            // that claimed otherwise would be the lie the picture avoids.
+            assert.equal(typeof table[key], 'string', `${tag} has no ${key}`);
+            assert.ok(table[key].length > 0, `${tag} has an empty ${key}`);
+        }
+        assert.notEqual(table.actionMuted, table.actionUnmuted,
+                        `${tag} says the same thing for muted and unmuted`);
+        for (const id of ids) {
+            assert.equal(typeof table.actions[id], 'string', `${tag} has no caption for ${id}`);
+            assert.ok(table.actions[id].length > 0, `${tag} has an empty caption for ${id}`);
+        }
+        assert.deepEqual(Object.keys(table.actions).sort(), ids.slice().sort(),
+                         `${tag} names a different set of actions`);
+    }
+});
+
+test('the captions are short enough for a 56px button', () => {
+    // Not a style opinion: the two buttons sit next to each other under the
+    // clock and a caption that wraps or clips is a button somebody mis-taps.
+    // Six characters is what fits at the size web/themes/*/theme.css draws.
+    for (const [tag, table] of Object.entries(LANGUAGES)) {
+        for (const [id, caption] of Object.entries(table.actions)) {
+            assert.ok(caption.length <= 6, `${tag} ${id} caption "${caption}" is too long`);
+        }
     }
 });

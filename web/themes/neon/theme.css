@@ -167,15 +167,138 @@ body {
     color: var(--accent-dim);
 }
 
-/* Reserved for the v2 shortcut buttons. Deliberately empty and invisible: it
- * holds the space now so adding the buttons later is a fill, not a re-layout. */
+/* The shortcut buttons (T8.2). The strip was reserved by T6.1 and held this
+ * shape empty for six phases, so filling it is a fill and not a re-layout —
+ * the grid, the 56px floor and the gap are all unchanged from when nothing
+ * was in it. */
 #shortcuts {
     align-self: end;
-    min-height: 56px;
+    /* Taller than the 56px floor and narrower than the column, both asked for
+     * from the chair. `1fr` gave each button the full half of a 296px sidebar,
+     * which is a 144px-wide box holding one 22px icon -- a target far past
+     * what a finger needs and a picture far under what a desk's distance
+     * wants. Fixed columns instead, with the icon taking the space back. */
+    justify-self: start;
     display: grid;
     grid-auto-flow: column;
-    grid-auto-columns: 1fr;
-    gap: 8px;
+    grid-auto-columns: 104px;
+    gap: 10px;
+    /* **The clipped corner.** #sidebar is `overflow: hidden`, and with the
+     * strip flush against its bottom the button's own 1px border landed
+     * exactly on the clip and was shaved off along the bottom-left. Reported
+     * from the chair, and visible in a screenshot once you know to look. The
+     * margin is the fix and 6px is not arbitrary: the burn-in shift moves the
+     * whole panel up to 4px (BURN_IN_AMPLITUDE_PX), so anything smaller brings
+     * the cut back for a few minutes of every cycle. */
+    margin-bottom: 6px;
+}
+
+/* 56px on **both** axes, and it is not a style number. This is a phone at
+ * arm's length with no pointer, the two buttons touch, and the failure the
+ * size prevents is muting the microphone when you meant the speakers. The
+ * grid above already guarantees the width; min-height guarantees the rest
+ * whatever the caption does. */
+.shortcut {
+    /* 56px is the floor and not the target (T8.2 step 6): a phone at arm's
+     * length, no pointer, two buttons touching, and the failure the number
+     * prevents is muting the microphone when you meant the speakers. These are
+     * comfortably over it in both directions. */
+    min-height: 72px;
+    min-width: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid var(--accent-dim);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--accent);
+    font: inherit;
+    /* The panel is never scrolled and the buttons are the only thing on it
+     * that is touched, so a tap must not select their caption or raise a
+     * context menu on a long press. */
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    user-select: none;
+    cursor: pointer;
+}
+
+/* The whole message. There is no caption any more -- the word moved to the
+ * accessible name -- so the picture is what has to be legible from across a
+ * desk, and it gets the room the caption used to take. */
+.shortcut .s-icon {
+    width: 36px;
+    height: 36px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+/* The speaker is a solid cone; the microphone is drawn in line only. Both
+ * read better at 36px than the shared outline did at 22. */
+.shortcut[data-action="mute-audio"] .s-icon > path:first-child {
+    fill: currentColor;
+}
+
+/* The cross that says muted, and it is **hidden until the PC has said so**.
+ * `data-state` is only ever `muted` after a press the PC answered, so the
+ * resting panel makes no claim at all about a microphone (ADR 0015). */
+.shortcut .s-cross {
+    display: none;
+    stroke-width: 2.2;
+}
+
+.shortcut[data-state="muted"] .s-cross {
+    display: inline;
+}
+
+/* Muted is a state worth seeing without reading the icon, so the whole button
+ * shifts rather than only the cross appearing. Not red: red is this panel's
+ * colour for a loss and for a failed press, and a muted speaker is neither
+ * wrong nor a failure. */
+.shortcut[data-state="muted"] {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+/* The press states, and every one of them is about the **last result** and
+ * not about the PC's mute state — the panel cannot know that, and a button
+ * claiming the microphone is off while it is live is a privacy failure
+ * (T8.2 step 7, ADR 0015). They all fade; nothing here persists. */
+.shortcut.sending {
+    opacity: 0.55;
+}
+
+.shortcut.ok {
+    border-color: var(--up);
+    color: var(--up);
+}
+
+.shortcut.err {
+    border-color: var(--down);
+    color: var(--down);
+}
+
+/* No transition on the way *in*: an acknowledgement that faded up over
+ * 200ms is an acknowledgement that arrives after the finger has gone. It
+ * fades out instead, which is the half a person is still looking at. */
+.shortcut.ok,
+.shortcut.err {
+    transition: none;
+}
+
+.shortcut {
+    transition: border-color 400ms linear, color 400ms linear, opacity 120ms linear;
+}
+
+/* At night the panel is dim and the buttons dim with it — they are the one
+ * thing on the panel a person reaches for in a dark room, so they keep more
+ * of their edge than the cards do. */
+:root[data-night="on"] .shortcut {
+    border-color: var(--accent-dim);
+    opacity: 0.8;
 }
 
 /* --- Right of the clock: the data cards ----------------------------------- */

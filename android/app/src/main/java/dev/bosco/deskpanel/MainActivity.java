@@ -8,6 +8,7 @@ import android.view.WindowManager;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 
 import androidx.annotation.NonNull;
@@ -146,6 +147,25 @@ public class MainActivity extends Activity implements PanelService.Panel {
         // Nothing legitimate in this app loads http:// into the page, so the
         // strictest mode is free. Never widen this to ALWAYS_ALLOW.
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+
+        // The app's first *inbound* bridge (T8.2). onData, onPcState and
+        // onThermal all run the other way — Java reaching into the page — and
+        // this is the only thing the page can call.
+        //
+        // addJavascriptInterface exposes this object to every script in the
+        // WebView, and that is safe here for one reason worth stating rather
+        // than assuming: the WebView loads exactly one URL, served from the
+        // APK's own assets over WebViewAssetLoader's virtual https origin, it
+        // has no other entry point, and mixed content is refused above — so
+        // "every script" is "the scripts in this APK". The moment that stops
+        // being true this call is a remote code path, not a convenience.
+        //
+        // One method taking one string, and the string is not trusted: the
+        // interface matches it against Actions.ALLOWED and sends the constant
+        // that matched. ADR 0015 made that argument about a request arriving
+        // over the LAN; this is the same argument on the other side of the
+        // wire.
+        webView.addJavascriptInterface(new ActionBridge(), "__actions");
 
         setContentView(webView);
 
@@ -353,6 +373,50 @@ public class MainActivity extends Activity implements PanelService.Panel {
     private void pushDataToPage() {
         if (lastPayload != null) {
             webView.evaluateJavascript("window.onData(" + lastPayload + ")", null);
+        }
+    }
+
+    /**
+     * Hands one shortcut's outcome back to the page (T8.2).
+     *
+     * <p>{@code id} comes from {@link Actions#ALLOWED} and never from the
+     * page, so it is a known-safe literal by the time it is interpolated here
+     * — which is the same rule {@code DataPayload} enforces for the payload.
+     */
+    private void pushActionResultToPage(String id, boolean ok, String state) {
+        // Both interpolated values are this app's own: `id` comes from
+        // Actions.ALLOWED and `state` from DataPayload.actionState, which
+        // answers one of three literals or "unknown". Neither is a string the
+        // page or the PC chose the characters of.
+        webView.evaluateJavascript(
+                "window.onActionResult('" + id + "'," + ok + ",'" + state + "')", null);
+    }
+
+    /**
+     * The one object the page can call. See the {@code addJavascriptInterface}
+     * comment in {@code onCreate} for why exposing it is safe, and
+     * {@link Actions} for why the id it is handed is not trusted.
+     *
+     * <p>Every method here runs on a WebView JavaScript thread, never the main
+     * thread, which is why nothing in it touches a View directly.
+     */
+    private final class ActionBridge {
+
+        /**
+         * Fires a shortcut. Returns immediately; the outcome arrives at
+         * {@code window.onActionResult(id, ok, state)} later, or not at all if this
+         * returned false.
+         *
+         * @param id an id the page asked for, untrusted
+         * @return whether anything was sent — false for an id this app does
+         *         not relay, and false while the PC is away, so a button can
+         *         say "no" at once instead of waiting for a result that is
+         *         never coming
+         */
+        @JavascriptInterface
+        public boolean invoke(String id) {
+            return PanelService.invokeAction(id, (resolved, ok, state) ->
+                    runOnUiThread(() -> pushActionResultToPage(resolved, ok, state)));
         }
     }
 

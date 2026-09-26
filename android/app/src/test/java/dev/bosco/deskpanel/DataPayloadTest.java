@@ -6,6 +6,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.Test;
 
@@ -83,6 +84,54 @@ public class DataPayloadTest {
 
         String empty = QUOTES.replace("\"stale\":false", "\"stale\":false,\"theme\":\"\"");
         assertFalse(new JSONObject(DataPayload.merge(empty, WEATHER)).has("theme"));
+    }
+
+    @Test
+    public void theActionsRideQuotesThroughUntouched() throws Exception {
+        // T8.2, and this test exists because the feature shipped without it:
+        // the buttons were written, tested in two themes in a real browser,
+        // built and installed, and drew nothing -- because this class rebuilds
+        // the payload key by key and `actions` was not among them. The night
+        // profile had the identical failure two waves earlier and left a
+        // warning in the file that nobody read while adding the next key.
+        String enabled = QUOTES.replace("\"stale\":false",
+                "\"stale\":false,\"actions\":[\"mute-audio\",\"mute-mic\"]");
+        JSONArray got = new JSONObject(DataPayload.merge(enabled, WEATHER))
+                .getJSONArray("actions");
+        assertEquals(2, got.length());
+        assertEquals("mute-audio", got.getString(0));
+        assertEquals("mute-mic", got.getString(1));
+
+        // Order is the PC's decision: the buttons are drawn in the order the
+        // config names them, so a merge that sorted or re-keyed would make
+        // half of `actions` a setting that does nothing.
+        String reversed = QUOTES.replace("\"stale\":false",
+                "\"stale\":false,\"actions\":[\"mute-mic\",\"mute-audio\"]");
+        assertEquals("mute-mic", new JSONObject(DataPayload.merge(reversed, WEATHER))
+                .getJSONArray("actions").getString(0));
+
+        // An id this app does not relay is still passed through. Rejecting it
+        // here would put the decision in the wrong layer twice over: the page
+        // drops what it has no word for (shortcutsFor) and Actions.java
+        // refuses what it will not send, and both are closer to the thing they
+        // are protecting than a merge step is.
+        String unknown = QUOTES.replace("\"stale\":false",
+                "\"stale\":false,\"actions\":[\"mute-everything\"]");
+        assertEquals("mute-everything", new JSONObject(DataPayload.merge(unknown, WEATHER))
+                .getJSONArray("actions").getString(0));
+    }
+
+    @Test
+    public void anAbsentActionsKeyIsNoButtonsAndNotACrash() throws Exception {
+        // An older server on the PC. The page reads a missing `actions` the
+        // same way it reads an empty one -- no buttons -- so this only has to
+        // not throw and not invent a list.
+        assertFalse("no actions key in, no actions key out",
+                new JSONObject(DataPayload.merge(QUOTES, WEATHER)).has("actions"));
+
+        String none = QUOTES.replace("\"stale\":false", "\"stale\":false,\"actions\":[]");
+        assertEquals(0, new JSONObject(DataPayload.merge(none, WEATHER))
+                .getJSONArray("actions").length());
     }
 
     @Test

@@ -357,6 +357,27 @@ const LANGUAGES = {
         // ask the next language for it too.
         titles: { quotes: 'B3', fx: 'CÂMBIO', crypto: 'CRIPTO', weather: 'TEMPO',
                   agenda: 'AGENDA' },
+        // The shortcut buttons (T8.2). Keyed by the server's action id, which
+        // is the same string on both sides of the wire and in both languages —
+        // the id is an identifier, the value is what a person reads.
+        //
+        // These are the button's accessible name and its visible caption both,
+        // so they are the shortest thing that is still unambiguous: two
+        // buttons sit next to each other and a mis-tap mutes the wrong device.
+        // "MIC" over "MICROFONE" for the same reason "DEFASADO" is not
+        // "DESATUALIZADO" — the box is 56px and the word has to fit in it.
+        actions: { 'mute-audio': 'SOM', 'mute-mic': 'MIC' },
+        // Said to a screen reader and used as the title attribute, because
+        // the caption alone does not say the button *toggles*.
+        actionHint: 'Alternar mudo',
+        actionFailed: 'falhou',
+        // Said only to a screen reader, and only after the PC has reported --
+        // the picture carries it for everybody else. "Mudo agora" rather than
+        // "mudo": the panel knows the last state the PC gave it and not a live
+        // one, and the word has to carry that or the sentence is a claim the
+        // page cannot back.
+        actionMuted: 'mudo na última vez',
+        actionUnmuted: 'com som na última vez',
         weather: {
             0: 'Céu limpo',
             1: 'Predominantemente limpo',
@@ -401,6 +422,11 @@ const LANGUAGES = {
         // for one meeting, and what this card will show is the next one.
         titles: { quotes: 'B3', fx: 'FX', crypto: 'CRYPTO', weather: 'WEATHER',
                   agenda: 'SCHEDULE' },
+        actions: { 'mute-audio': 'SOUND', 'mute-mic': 'MIC' },
+        actionHint: 'Toggle mute',
+        actionFailed: 'failed',
+        actionMuted: 'muted when last asked',
+        actionUnmuted: 'not muted when last asked',
         weather: {
             0: 'Clear sky',
             1: 'Mainly clear',
@@ -452,6 +478,41 @@ function strings(language) {
         }
     }
     return LANGUAGES[FALLBACK_LANGUAGE];
+}
+
+/**
+ * The shortcut buttons a theme should draw, in the order the PC sent them.
+ *
+ * Pure, and the rule it encodes is T8.2 step 5's: **a theme renders nothing
+ * for an action it does not recognise**, rather than a button that cannot
+ * work. An id the server enabled but this build has no word for is a button
+ * whose caption would be the raw id -- `mute-everything` under the clock --
+ * and a button nobody can read is worse than a gap where one would be.
+ *
+ * That is also what makes a third action a config change and not a rebuild in
+ * only one direction: the PC can *remove* a button by editing a file, and can
+ * add one only for an id the APK already has words for. The asymmetry is
+ * deliberate and is the same shape as the server's own catalogue (ADR 0015).
+ *
+ * @param actions  the payload's `actions`: ids the server says it will accept
+ * @param language the payload's `language`
+ * @returns [{id, label, hint}], possibly empty, never null
+ */
+function shortcutsFor(actions, language) {
+    if (!Array.isArray(actions)) {
+        return [];
+    }
+    const words = strings(language);
+    const seen = {};
+    const out = [];
+    for (const id of actions) {
+        if (typeof id !== 'string' || seen[id] || !words.actions[id]) {
+            continue;
+        }
+        seen[id] = true;
+        out.push({ id: id, label: words.actions[id], hint: words.actionHint });
+    }
+    return out;
 }
 
 function weatherLabel(code, language) {
@@ -1002,5 +1063,6 @@ if (typeof module !== 'undefined' && module.exports) {
         SCROLL_SECONDS_PER_ROW, SCROLL_MIN_TRAVEL_PX, SCROLL_MIN_HIDDEN_ROWS,
         sparklinePath,
         formatBattery, batteryFields, tempClass, BATTERY_WARN_C, BATTERY_HOT_C,
+        shortcutsFor,
     };
 }
