@@ -597,28 +597,37 @@ class AppPayloadTests(unittest.TestCase):
 
 
 class ActionIdTests(unittest.TestCase):
-    """The v2 placeholder's path matching. Narrow on purpose: when this is
-    implemented it takes a closed allowlist from config, and the first half of
-    that promise is refusing to match anything shaped like a path."""
+    """Path matching for the one route that changes this machine.
+
+    Narrow on purpose and asserted here rather than left to the catalogue:
+    ADR 0015's promise is that nothing from the request is ever interpolated,
+    and an allowlist of characters in front of an allowlist of names is how
+    that promise stops depending on the lookup being written correctly."""
 
     def test_a_single_segment_matches(self):
-        self.assertEqual(action_id("/action/lock"), "lock")
+        self.assertEqual(action_id("/action/mute-audio"), "mute-audio")
 
     def test_nesting_traversal_and_emptiness_do_not_match(self):
         for path in ("/action/", "/action", "/action/a/b", "/action/../etc",
                      "/actions/x", "/Action/x"):
             self.assertIsNone(action_id(path), path)
 
-    def test_post_to_an_action_is_501_not_404(self):
-        # 501 says "this route exists and does nothing yet", which is the
-        # truth. 404 would say it does not exist and 200 would say something
-        # happened.
-        status, _, content_type, _ = route("POST", "/action/lock")
-        self.assertEqual(status, 501)
+    def test_a_shell_metacharacter_is_not_an_id(self):
+        # None of these can reach the catalogue, so none of them can reach a
+        # command even if the catalogue were one day written carelessly.
+        for rest in ("mute;rm", "mute&&rm", "mute rm", "mute\nrm", "mute|rm",
+                     "mute$(rm)", "mute`rm`", "mute%2Frm", "../etc/passwd",
+                     "MUTE-AUDIO", "-mute", "mute_audio", "mute.audio"):
+            self.assertIsNone(action_id("/action/" + rest), rest)
+
+    def test_post_to_an_unknown_action_is_404_without_an_app(self):
+        # No app is 503, like every other route that needs config.
+        status, _, content_type, _ = route("POST", "/action/mute-audio")
+        self.assertEqual(status, 503)
         self.assertEqual(content_type, "application/json")
 
     def test_get_to_an_action_is_404(self):
-        status, _, _, _ = route("GET", "/action/lock")
+        status, _, _, _ = route("GET", "/action/mute-audio")
         self.assertEqual(status, 404)
 
 

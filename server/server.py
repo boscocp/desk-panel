@@ -35,6 +35,7 @@ if __package__ in (None, ""):
 
 from server import (providers_awesomeapi, providers_binance, providers_brapi,  # noqa: E402
                     providers_openmeteo, providers_usno)
+from server import actions as actions_module  # noqa: E402
 from server.config_format import ConfigError, format_for_path, merge, parse  # noqa: E402
 from server.upstream import UpstreamError  # noqa: E402
 
@@ -123,7 +124,10 @@ DEFAULT_CONFIG = {
     # languages the installed APK was built with and guessing would turn a
     # typo into a panel nobody can read.
     "language": "pt-BR",
-    "actions": {},
+    # A list of ids from `actions.CATALOGUE`, never commands. Empty is the
+    # right default and the right setting on a network the owner does not
+    # control -- see ADR 0015.
+    "actions": [],
 }
 
 
@@ -452,6 +456,21 @@ class App:
         # Coordinates never change, so the geocode is cached for the life of
         # the process rather than on a TTL (T3.4 step 1).
         self.coords = None
+        # Validated once, here, rather than per request. A bad name is a
+        # startup failure with a console in front of the owner (ADR 0015);
+        # `main` catches the ValueError and exits. Constructing an App with a
+        # broken `actions` in a test raises for the same reason and that is
+        # the behaviour being asserted.
+        self.enabled_actions = actions_module.enabled_actions(config.get("actions"))
+
+    def run_action(self, action):
+        """Execute an enabled action, or raise. Never called with an unknown id.
+
+        The membership test is the caller's (`route`), and it is deliberately
+        not repeated here: two places deciding what is enabled is two places
+        that can disagree about it.
+        """
+        return actions_module.run_action(action)
 
     def quotes(self):
         """`{quotes, fx, crypto, stale}` -- the three markets in one payload.
@@ -757,21 +776,28 @@ def key_for(market):
     return "pair" if market == "fx" else "symbol"
 
 
+# An id is lowercase letters, digits and hyphens, and starts with one of the
+# first two. Everything else -- a separator, a semicolon, an ampersand, a
+# newline, a space, a percent-escape -- is not an id and never reaches the
+# catalogue. This is an allowlist of *characters* in front of an allowlist of
+# *names*, which is belt and braces on purpose: ADR 0015's promise is that
+# nothing from the request is ever interpolated, and the cheapest way to keep
+# a promise like that is to have nothing interesting survive the front door.
+ACTION_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+
+
 def action_id(path):
     """Pure: the id in `/action/<id>`, or None if `path` is not that shape.
 
-    One segment, non-empty, no nesting. The id is not used for anything yet
-    (T3.7 returns 501), and when it is it will be looked up in a closed
-    allowlist from config -- never turned into a command, a path or an
-    argument. Matching narrowly here is the first half of that promise.
+    One segment, non-empty, no nesting, and nothing outside `[a-z0-9-]`. The
+    id is a key in `actions.CATALOGUE` and is never turned into a command, a
+    path or an argument; matching narrowly here is the first half of that.
     """
     prefix = "/action/"
     if not path.startswith(prefix):
         return None
     rest = path[len(prefix):]
-    if not rest or "/" in rest or "?" in rest:
-        return None
-    return rest
+    return rest if ACTION_ID_RE.match(rest) else None
 
 
 def apk_to_serve(directory):
@@ -945,12 +971,44 @@ def route(method, path, app=None):
         return _json(200, app.weather())
 
     if method == "POST" and action_id(path) is not None:
-        # T3.7: the v2 placeholder. 501 is "not implemented", which is
-        # exactly what this is -- 404 would say the route does not exist and
-        # 200 would say something happened.
-        return _json(501, {"error": "not implemented"})
+        return run_action(action_id(path), app)
 
     return 404, b"", "text/plain", ()
+
+
+def run_action(action, app):
+    """`POST /action/<id>` -- the only route that changes this machine.
+
+    ADR 0015 is the decision and `server/actions.py` is the catalogue. The
+    order of the checks below is the security property, not a style: an id
+    that is not enabled returns **404 having run nothing at all**, which is
+    why membership is tested before anything is looked up, let alone spawned.
+
+    The status codes say different things and a caller depends on it:
+      404  no such action here -- unknown, or known and not enabled
+      501  this platform has no implementation of an action that is enabled
+      500  it ran and failed, or timed out
+      503  the server has no config loaded, like every other data route
+    """
+    if app is None:
+        return _json(503, {"error": "not configured"})
+    if action not in getattr(app, "enabled_actions", ()):
+        # Deliberately the same answer for "no such id" and "not enabled":
+        # the endpoint does not tell an unauthenticated caller which actions
+        # exist but are switched off.
+        return _json(404, {"error": "unknown action"})
+
+    try:
+        state = app.run_action(action)
+    except actions_module.Unsupported as exc:
+        print(f"action {action}: {exc}", file=sys.stderr)
+        return _json(501, {"error": "not implemented on this platform"})
+    except actions_module.ActionError as exc:
+        # The command's own stderr goes to the log, where the owner can read
+        # it, and never into the response (ADR 0015).
+        print(f"action {action}: {exc}", file=sys.stderr)
+        return _json(500, {"error": "action failed"})
+    return _json(200, {"ok": True, "id": action, "state": state})
 
 
 def _json(status, payload):
@@ -1134,6 +1192,21 @@ def main(argv=None):
     notice = legacy_format_notice(config_path, explicit=config_is_explicit)
     if notice:
         print(notice, file=sys.stderr)
+
+    # Before --check-only returns, not after: `--check-only` is what the
+    # launchers and `scripts/after_update.py` run, and a misspelled action is
+    # exactly the kind of thing that must be found there rather than by
+    # somebody at the desk pressing a button that does nothing (ADR 0015).
+    try:
+        enabled = actions_module.enabled_actions(config.get("actions"))
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        sys.exit(1)
+    if enabled:
+        # Said out loud at every start. This endpoint changes the machine and
+        # the server has no authentication; which actions are live is not
+        # something to have to go and read a file for.
+        print(f"notice: actions enabled: {', '.join(enabled)}", file=sys.stderr)
 
     if args.check_only:
         print(f"config OK: {config_path}")

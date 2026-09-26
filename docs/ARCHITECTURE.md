@@ -19,7 +19,7 @@ native app and not a web page.
 │   ├─ PcPoller   ──── http:// ──────┼──────┼─▶ ├─ GET /quotes  → brapi.dev │
 │   └─ DataPoller ──── http:// ──────┼──────┼─▶ ├─ GET /weather → open-meteo│
 │         │                          │      │   ├─ GET /app     (the APK)   │
-│         │ evaluateJavascript       │      │   └─ POST /action/{id} → 501  │
+│         │ evaluateJavascript       │      │   └─ POST /action/{id} (mute) │
 │         ▼                          │      │                               │
 │  WebView                           │      │  Scheduled Task "At log on"   │
 │   https://appassets.android…       │      │  ⇒ answers only while a user  │
@@ -106,10 +106,25 @@ See [ADR 0005](adr/0005-real-screen-sleep.md).
 | Weather | Open-Meteo, no key, CORS `*`, 10k req/day | [terms](https://open-meteo.com/en/terms) |
 | Quotes | brapi.dev, 15k req/month free; token required beyond four sample tickers | [pricing](https://brapi.dev/pricing) |
 
-## v2: shortcut buttons
+## Shortcut buttons
 
-Not built, but the shape is fixed so it can be added without rework. `POST /action/{id}`
-returns 501 today. When implemented, `id` indexes a **closed allowlist in server config** that
-maps to a Steam URI or an executable path. The request carries an id and nothing else — never a
-command, a path or an argument. The web layer renders whatever buttons the config declares, and
-a `@JavascriptInterface` bridge forwards the id to native, which forwards it to the server.
+`POST /action/{id}` is implemented for two actions, `mute-audio` and `mute-mic`
+(T8.1, [ADR 0015](adr/0015-the-panel-can-act-on-the-pc.md)). It is the only route that changes
+the machine the server runs on, and the server has no authentication — so the shape it was
+reserved with is the shape that makes it defensible:
+
+- the request carries **an id and nothing else**, never a command, a path or an argument;
+- the catalogue of what an id runs lives in **code**, in `server/actions.py`; `config.toml` only
+  says which entries are **enabled** and can never add one;
+- every entry is a **toggle that is safe to repeat**, because anyone who can reach the port can
+  repeat it. `shutdown`, `sleep` and `lock` are deliberately absent.
+
+The earlier sketch had `id` map to "a Steam URI or an executable path" from config. That was
+dropped: a config that can name a path is a remote shell with extra steps, and it moves the
+security argument out of the reviewed repository into an untracked file nobody reads.
+
+**The buttons themselves are T8.2**, still to build. `#shortcuts` has been in the sidebar since
+T6.1, empty on purpose. The page cannot make the request (invariant 1), so a tap crosses into
+Java through the app's first *inbound* bridge — a `@JavascriptInterface` that matches the id
+against a set Java already knows and never concatenates it into a URL, which is this rule made
+again on the other side of the wire.
