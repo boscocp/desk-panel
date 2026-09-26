@@ -22,7 +22,6 @@ The two structural facts it also pins:
   the network.
 """
 import fnmatch
-import os
 import unittest
 from pathlib import Path
 

@@ -889,8 +889,14 @@ def self_test_cases():
         ("_pure: a backslash is Windows", lambda: isinstance(_pure("Py\\x"), PureWindowsPath)),
         ("_pure: a POSIX path is POSIX", lambda: isinstance(_pure("/usr/bin/x"), PurePosixPath)),
         ("_pure: a bare name is POSIX", lambda: isinstance(_pure("pythonw.exe"), PurePosixPath)),
-        ("rebuild: a theme change needs an APK", lambda: needs_rebuild(["web/themes/neon/theme.css"]) == ["web/themes/neon/theme.css"]),
-        ("rebuild: an Activity change needs an APK", lambda: len(needs_rebuild(["android/app/src/main/java/X.java"])) == 1),
+        (
+            "rebuild: a theme change needs an APK",
+            lambda: needs_rebuild(["web/themes/neon/theme.css"]) == ["web/themes/neon/theme.css"],
+        ),
+        (
+            "rebuild: an Activity change needs an APK",
+            lambda: len(needs_rebuild(["android/app/src/main/java/X.java"])) == 1,
+        ),
         ("rebuild: the server does not", lambda: needs_rebuild(["server/server.py"]) == []),
         ("rebuild: docs and tasks do not", lambda: needs_rebuild(["docs/UPDATING.md", "tasks/STATUS.md"]) == []),
         (
