@@ -168,7 +168,7 @@ or phase 6.
 | # | Task | State | Notes |
 |---|---|---|---|
 | T8.1 | **`POST /action/{id}` actually acts** | done | 2026-09-26, wave 26. **ADR 0015 first**, before `server/actions.py` existed, as the task file demands — the server has no authentication and every other route only answers a question, so what the endpoint may do was written before there was an implementation to defend. Two toggles, `mute-audio` and `mute-mic`; `shutdown`, `sleep` and `lock` are absent because the honest threat model is that anyone on the LAN can repeat an action as often as they like, and adding one is a change to the ADR rather than to a table. **The catalogue is in code and config can only switch its entries on and off** — a config that could name a command is a remote shell with extra steps, and it moves the security argument out of the reviewed repository into an untracked file nobody reads, which is why the earlier `ARCHITECTURE.md` sketch of "a Steam URI or an executable path from config" was dropped rather than built. **The order of the checks is the security property**: an id that is not enabled returns 404 having run *nothing at all*, and the tests assert that on the fake runner's call count, because a status-only test cannot tell 404-before-spawning from 404-after. `action_id()` widened from "no `/` and no `?`" to `[a-z0-9-]` — an allowlist of characters in front of an allowlist of names, so the promise that nothing is interpolated does not rest on the lookup being written carefully. `actions` went from a reserved table to a list of names and **an empty table still loads**, because `config.example.toml` shipped `[actions]` and an update that refuses to start is worse than a shape change (T3.13 from a direction it cannot see). An unknown name is fatal *before* `--check-only` returns, which is what the launchers and `after_update.py` run. Linux was exercised for real: both toggles moved `wpctl get-volume` and came back |
-| T8.2 | **Two buttons under the clock** | todo | After T8.1. `#shortcuts` has been in the sidebar since T6.1, empty on purpose so this would be a fill and not a re-layout. The hard part is invariant 1: the page cannot make the request, so a tap has to cross into Java through the app's **first inbound bridge** — everything so far runs Java→page. `invoke(id)` matches the id against a set Java already knows and never concatenates it into a URL, which is T8.1's rule made on the other side of the wire. Dead while the PC is away: a queued action that fired on reconnect would mute the PC minutes after somebody pressed a button they could not see. Which buttons exist rides the payload like `theme` does, so a third one is config and not a rebuild; the buttons are markup, so they belong to a theme (T6.7). 56px targets — a phone at arm's length with no pointer, and a mis-tap mutes the wrong device. And the button shows the last *result*, never a state it cannot know: one that lies about whether the mic is live is worse than no button |
+| T8.2 | **Two buttons under the clock** | done | 2026-09-26, wave 27. **Verified on the device**, not only in tests: SOM and MIC render in the `#shortcuts` strip T6.1 reserved six phases ago, `action=mute-audio result=ok` reaches logcat, and the PC's sink and source actually move. The hard part was invariant 1 as the file said: the page cannot make the request, so a tap crosses into Java through the app's **first inbound bridge**, and `Actions.resolve` returns the app's *own constant* rather than the caller's string — asserted with `assertNotSame`, which is why the class exists instead of a `contains` at the call site. `addJavascriptInterface` is safe here only because the WebView loads one URL from the APK's own assets with mixed content refused, and the call site says so. **Dead offline structurally**: the POST rides `DataPoller`'s executor, which exists exactly while the PC is online, so step 3 is a property of where the code lives. **The button shows the last result, never a state** — the panel cannot know whether the PC is muted, and one that says the mic is off while it is live is a privacy failure. `e2e/layout/check_actions.py` is the sixth browser check, mutation-tested three ways. **The bug the device caught**: `DataPayload.merge` rebuilds the payload key by key and nothing named `actions`, so the phone never saw it — with a correct server and a correct page. The file's own comment warned about exactly that, written when T6.4 shipped the identical failure |
 
 ## Phase 9 — Suggested, not scheduled
 
@@ -180,6 +180,75 @@ and the first line of each file says so.
 |---|---|---|---|
 | T9.1 | **The next meeting, under the clock** | todo | Google Calendar and Microsoft Outlook merged, the soonest event under the clock in the `#shortcuts` strip, between T8.2's two buttons. Blocked behind T8.2 for a layout reason and behind **ADR 0016** for a bigger one: this is the first feature that puts *personal data* on a panel whose server has no authentication, and the refresh tokens it needs are credentials sitting on a desktop PC. OAuth stays on the PC and never reaches the APK — two acceptance lines exist for exactly that. The merge is where the design is: the two providers disagree about all-day events, about time zones and about the word for "declined" |
 | T9.2 | **Spike: can the panel talk to an assistant for nothing?** | todo | A button to ask something out loud and hear an answer, with the whole pipeline on the PC — invariant 1 means the page cannot call anything. Time-boxed, produces `docs/spikes/2026-voice-assistant.md` and a throwaway prototype under `spikes/`, and is allowed to conclude *do not build this*. The unknown is whether offline STT, a small local model and offline TTS fit inside a latency a person will stand at a panel for; Claude and DeepSeek are the paid comparison, not the plan. Also has to answer the awkward ones: `RECORD_AUDIO` would be the app's first dangerous permission, and an unauthenticated LAN endpoint that runs a model and speaks in someone's room is not in ADR 0015's family |
+
+## Resuming after 2026-09-26 (wave 27)
+
+Wave 27 is **T8.2**, on `wave/27-two-buttons`. The panel can mute the PC it sits next to, and
+phase 8 is closed.
+
+**Next: T7.4 + T7.5 + T7.6**, the documentation cluster, which is now the only thing left before
+T7.7 and T7.3. None of it needs the phone, Docker or a public repo. It also produces the three
+guard scripts T7.8's `guards` job is missing — and wave 25 already wired the trap: rule 5 of
+`check_ci_hygiene.py` goes red the moment either task lands a `scripts/check_*.py` that `make
+check` reaches and no workflow runs, so they cannot arrive unwired.
+
+Phase 9 (T9.1, T9.2) is unblocked — ADR 0015 exists — and is still "suggested, not scheduled".
+
+### The device caught a bug three green layers did not
+
+T8.2 was written end to end, unit tested, exercised in two themes in a real browser by a new
+harness check written for it, built, installed — and **drew no buttons at all**.
+
+`DataPayload.merge` rebuilds the payload key by key, and nothing named `actions`. The server was
+sending it, the page was ready to draw it, and the phone never saw the key. Every layer was
+correct in isolation.
+
+The file's own comment, written when T6.4 shipped the identical bug two waves earlier:
+
+> **This copy is the whole of the wiring, and forgetting it is silent, and it is true of every
+> line above it as well.**
+
+It was read *after* the failure. A warning in the file a change has to touch is not a gate, and
+this is the second time this exact one has been paid for. Two tests cover the key now and the
+comment names both occurrences, which is the cheapest thing available and is not the same as a
+check.
+
+**The lesson for the next wave is narrower than "write a check":** the browser harness proved the
+page, `./gradlew test` proved the classes, and neither could see the one line between them. The
+five-minute device install is what closed it, and it was only possible because the phone came
+back onto adb this session.
+
+### The phone is on adb again, after five waves without it
+
+`303f1f9c`, over USB, authorised. The record has said "the phone is not on adb" since wave 22 and
+it has been blocking **TT.7, TT.8, T2.4 and T7.2** the whole time. It is worth taking those while
+the cable is in — TT.8 in particular, because `e2e/run_e2e.py` now has an `action=` marker to
+assert and no scenario for it.
+
+Two things were observed on the device that are not tasks and belong somewhere:
+
+- **The Activity had died on its own with the PC plainly online.** `PanelService` kept polling
+  (`ping=ok` every 2s, uninterrupted), the screen was `Dozing`, and `am start` brought the panel
+  straight back. That is the MIUI trap the root `CLAUDE.md` names — `FLAG_KEEP_SCREEN_ON` does not
+  stop the battery manager freezing an Activity — seen with markers for the first time rather than
+  reported from the chair.
+- **`check_pulse.py --theme plain` fails on `main`** and was failing before this wave. `plain` does
+  not pulse, and the check's own message says it should be skipped for such a theme. It is a task
+  file that needs one line, not a bug.
+
+### What is not proven
+
+- **The twenty-taps check was not done.** Each button was pressed four times and the toggles all
+  landed; nobody hammered one to watch `/ping` keep its beat while twenty presses queue on the
+  poller's single thread.
+- **`invoke` has never been called by anything but a finger and the browser stub.** In particular
+  the `rejected` path — an id that reaches Java and is not in `Actions.ALLOWED` — has unit tests
+  and has never run on the device, because no theme can produce it.
+- **macOS and Windows are still unrun**, unchanged from wave 26.
+  `tasks/T8.1-actions-execute.md` carries a seven-step Windows runbook, written this session and
+  ordered so each step fails faster than the one after it.
+- `server/config.json` is mode 0644 and now holds `actions` as well as the brapi token. One
+  `chmod 600`; T7.3 wants it. Carried from wave 19 through 26.
 
 ## Resuming after 2026-09-26 (wave 26)
 
