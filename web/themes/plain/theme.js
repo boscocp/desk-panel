@@ -86,7 +86,17 @@
 
         const battery = el('section', 'battery');
 
-        root.append(header, grid, battery, shortcuts);
+        // The device line and the buttons share one row rather than stacking.
+        // Stacked, the 56px targets cost the columns 66px of height and
+        // check_layout.py reported #quotes hiding 42px of rows without
+        // scrolling -- a card eating a row in silence, which is the one thing
+        // T6.6 forbids. Side by side the row is as tall as the buttons and
+        // nothing else moved. The buttons are the taller of the two, so the
+        // line centres against them.
+        const footer = el('div', null, 'footer');
+        footer.append(battery, shortcuts);
+
+        root.append(header, grid, footer);
         els = {
             root, clock, date, stale, battery,
             quotes, fx, crypto,
@@ -97,7 +107,66 @@
             // other card if a forecast ever outgrows it, exactly as it did
             // before T6.6.
             weather: weather.scroller,
+            shortcuts,
         };
+    }
+
+    // --- The shortcut buttons (T8.2) ---------------------------------------
+    //
+    // The same contract as neon, deliberately drawn differently: a word and
+    // no picture, in a row, with the result said in text rather than in
+    // colour. That is this theme's whole job -- if the buttons work here too
+    // then the action contract really is a contract and not neon's markup
+    // wearing a name (T6.7's manual check).
+    //
+    // What is *not* different is the 56px target. It is a fact about a finger
+    // on a phone at arm's length, not a matter of taste, so both themes carry
+    // it and docs/THEMING.md says so.
+    let drawnActions = null;
+
+    function renderShortcuts(actions) {
+        const wanted = shortcutsFor(actions, words.tag);
+        const signature = wanted.map((s) => s.id + ':' + s.label).join(',');
+        if (signature === drawnActions) {
+            return;
+        }
+        drawnActions = signature;
+        els.shortcuts.textContent = '';
+        for (const shortcut of wanted) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'shortcut';
+            button.id = 'action-' + shortcut.id;
+            button.dataset.action = shortcut.id;
+            button.title = shortcut.hint;
+            button.textContent = shortcut.label;
+            button.addEventListener('click', () => press(button, shortcut));
+            els.shortcuts.appendChild(button);
+        }
+    }
+
+    // The last result, never a state (T8.2 step 7). Here it is a word after
+    // the caption rather than a colour, because this theme has no palette to
+    // say it with -- which makes it the honest test of whether the rule is
+    // about the rule or about neon's CSS.
+    const ACK_MS = 1200;
+
+    function press(button, shortcut) {
+        if (button.dataset.busy) {
+            return;
+        }
+        button.dataset.busy = '1';
+        button.textContent = shortcut.label + ' ...';
+        const settle = (ok) => {
+            delete button.dataset.busy;
+            button.textContent = ok ? shortcut.label + ' ok' : shortcut.label + ' ' + words.actionFailed;
+            window.setTimeout(() => {
+                button.textContent = shortcut.label;
+            }, ACK_MS);
+        };
+        if (!DeskPanel.invoke(shortcut.id, settle)) {
+            settle(false);
+        }
     }
 
     function ensure(root) {
@@ -261,6 +330,7 @@
         fill(els.crypto, payload.crypto || [], 'symbol', 'price', 'USD', formatPrice);
         renderWeather(payload.weather);
         renderBattery(payload.battery);
+        renderShortcuts(payload.actions);
         els.stale.hidden = !payload.stale;
     }
 

@@ -443,6 +443,41 @@ class BrowserOriginTests(unittest.TestCase):
         self.assertEqual(app.ran, [])
 
 
+class PayloadTests(unittest.TestCase):
+    """Which buttons exist is config, not code (T8.2 step 4)."""
+
+    def _payload(self, config):
+        app = App(dict({"quotes": [], "fx": [], "crypto": []}, **config))
+        return app.quotes()
+
+    def test_the_enabled_ids_ride_the_payload(self):
+        self.assertEqual(self._payload({"actions": ["mute-mic"]})["actions"], ["mute-mic"])
+
+    def test_nothing_enabled_is_an_empty_list_and_not_a_missing_key(self):
+        # A missing key and an empty list are different things to the page:
+        # one is "no buttons", the other is "an older server that cannot tell
+        # you". The key is always present.
+        payload = self._payload({})
+        self.assertIn("actions", payload)
+        self.assertEqual(payload["actions"], [])
+
+    def test_the_catalogue_is_not_what_is_sent(self):
+        # The panel must never draw a button for an action the server would
+        # answer 404 to -- a button that does nothing is worse than no button
+        # (T8.2 step 7). So this is the *enabled* set, not actions.CATALOGUE.
+        payload = self._payload({"actions": ["mute-audio"]})
+        self.assertEqual(payload["actions"], ["mute-audio"])
+        self.assertNotIn("mute-mic", payload["actions"])
+
+    def test_the_page_cannot_mutate_the_app_through_the_payload(self):
+        # A copy, not the App's own list: the payload is serialised straight
+        # to JSON today and handing out the live allowlist is the kind of
+        # aliasing that costs nothing until something edits it.
+        app = App({"quotes": [], "fx": [], "crypto": [], "actions": ["mute-mic"]})
+        app.quotes()["actions"].append("shutdown")
+        self.assertEqual(app.enabled_actions, ["mute-mic"])
+
+
 class AppWiringTests(unittest.TestCase):
     def test_an_app_validates_its_actions_when_it_is_built(self):
         with self.assertRaises(ValueError):

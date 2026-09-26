@@ -45,6 +45,19 @@
     // to pt-BR.
     const LANGUAGE = new URLSearchParams(location.search).get('lang') || undefined;
 
+    // Which shortcut buttons exist, as the server's `actions` key would say
+    // (T8.2 step 4). Both, by default, so a theme's buttons are visible in a
+    // browser without a phone -- and `?actions=` renders none, which is the
+    // state a panel whose owner enabled nothing is in and is the easier one to
+    // forget to draw correctly.
+    const ACTIONS = (() => {
+        const asked = new URLSearchParams(location.search).get('actions');
+        if (asked === null) {
+            return ['mute-audio', 'mute-mic'];
+        }
+        return asked ? asked.split(',') : [];
+    })();
+
     const BASE_QUOTES = [
         { symbol: 'PETR4', price: 38.42, changePct: 1.2 },
         { symbol: 'VALE3', price: 61.75, changePct: -0.6 },
@@ -169,8 +182,29 @@
             // shows: an unset `theme` is what a config that never mentions one
             // sends, and the panel falls back to neon.
             theme: THEME,
+            actions: ACTIONS,
         };
     }
+
+    // The bridge MainActivity installs, stubbed so the buttons can be built
+    // and reviewed in a browser. It answers like the real one -- true means
+    // "dispatched", and the outcome arrives separately at onActionResult --
+    // because a stub that reported success synchronously would let a theme be
+    // written against a shape production does not have.
+    //
+    // Every third press fails, deliberately. The failure state is the one a
+    // theme is most likely to draw wrongly and least likely to see by
+    // accident, and a mock that always succeeds ships it untested (the same
+    // argument `stale` above is made with).
+    let presses = 0;
+    window.__actions = {
+        invoke: (id) => {
+            const ok = ++presses % 3 !== 0;
+            console.log('mock: action ' + id + ' -> ' + (ok ? 'ok' : 'err'));
+            setTimeout(() => window.onActionResult(id, ok), 250);
+            return true;
+        },
+    };
 
     window.onData(buildPayload());
     setInterval(() => window.onData(buildPayload()), 3000);

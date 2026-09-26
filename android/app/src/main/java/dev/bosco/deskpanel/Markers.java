@@ -128,4 +128,30 @@ public final class Markers {
     public static String battery(int level) {
         return "battery=" + level;
     }
+
+    /**
+     * One shortcut press and what came back (T8.2).
+     *
+     * <p>The ninth string in a class whose javadoc says to resist adding more,
+     * so here is the argument. This is the first thing the panel does that
+     * changes the machine at the other end, and it is the only one with no
+     * visible evidence of its own: a mute is silence, and silence is also what
+     * a button that did nothing produces. Android exposes no way to read what
+     * is on screen (ADR 0009) and there is nothing on screen to read anyway.
+     * Without this line "I pressed it and nothing happened" cannot be told
+     * apart from "I pressed it and the request never left", which is the
+     * difference between a bug in the page, a bug in the bridge and a PC
+     * whose mixer is missing.
+     *
+     * <p>The id is included because there are two buttons next to each other
+     * and a mis-tap is the failure T8.2's 56px target exists to prevent —
+     * which is only checkable if the log says which one was actually sent.
+     *
+     * @param id      an id already resolved through {@link Actions}, so this
+     *                never logs a string the page made up
+     * @param outcome {@code ok}, {@code err}, or why it was not sent at all
+     */
+    public static String action(String id, String outcome) {
+        return "action=" + id + " result=" + outcome;
+    }
 }

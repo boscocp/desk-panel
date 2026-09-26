@@ -167,8 +167,10 @@ body {
     color: var(--accent-dim);
 }
 
-/* Reserved for the v2 shortcut buttons. Deliberately empty and invisible: it
- * holds the space now so adding the buttons later is a fill, not a re-layout. */
+/* The shortcut buttons (T8.2). The strip was reserved by T6.1 and held this
+ * shape empty for six phases, so filling it is a fill and not a re-layout —
+ * the grid, the 56px floor and the gap are all unchanged from when nothing
+ * was in it. */
 #shortcuts {
     align-self: end;
     min-height: 56px;
@@ -176,6 +178,84 @@ body {
     grid-auto-flow: column;
     grid-auto-columns: 1fr;
     gap: 8px;
+}
+
+/* 56px on **both** axes, and it is not a style number. This is a phone at
+ * arm's length with no pointer, the two buttons touch, and the failure the
+ * size prevents is muting the microphone when you meant the speakers. The
+ * grid above already guarantees the width; min-height guarantees the rest
+ * whatever the caption does. */
+.shortcut {
+    min-height: 56px;
+    min-width: 56px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    padding: 0;
+    border: 1px solid var(--accent-dim);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--accent);
+    font: inherit;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    /* The panel is never scrolled and the buttons are the only thing on it
+     * that is touched, so a tap must not select their caption or raise a
+     * context menu on a long press. */
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    user-select: none;
+    cursor: pointer;
+}
+
+.shortcut .s-icon {
+    width: 22px;
+    height: 22px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+/* The press states, and every one of them is about the **last result** and
+ * not about the PC's mute state — the panel cannot know that, and a button
+ * claiming the microphone is off while it is live is a privacy failure
+ * (T8.2 step 7, ADR 0015). They all fade; nothing here persists. */
+.shortcut.sending {
+    opacity: 0.55;
+}
+
+.shortcut.ok {
+    border-color: var(--up);
+    color: var(--up);
+}
+
+.shortcut.err {
+    border-color: var(--down);
+    color: var(--down);
+}
+
+/* No transition on the way *in*: an acknowledgement that faded up over
+ * 200ms is an acknowledgement that arrives after the finger has gone. It
+ * fades out instead, which is the half a person is still looking at. */
+.shortcut.ok,
+.shortcut.err {
+    transition: none;
+}
+
+.shortcut {
+    transition: border-color 400ms linear, color 400ms linear, opacity 120ms linear;
+}
+
+/* At night the panel is dim and the buttons dim with it — they are the one
+ * thing on the panel a person reaches for in a dark room, so they keep more
+ * of their edge than the cards do. */
+:root[data-night="on"] .shortcut {
+    border-color: var(--accent-dim);
+    opacity: 0.8;
 }
 
 /* --- Right of the clock: the data cards ----------------------------------- */
