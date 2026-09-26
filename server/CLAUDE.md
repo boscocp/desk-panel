@@ -28,8 +28,18 @@ too-old interpreter surfaces as a restart loop in journald rather than as a mess
   as long as `config.json` is read at all (T3.12).
 - **Bind to the LAN, never to the internet.** No port forwarding, no `0.0.0.0` exposure beyond
   the local network, and the firewall rule is scoped to the Private profile.
-- `POST /action/{id}` is a v2 placeholder and returns 501. When it is implemented it takes a
-  **closed allowlist of ids** from config — never a command, path or argument from the request.
+- **`POST /action/{id}` is the one route that changes this machine**, and
+  [ADR 0015](../docs/adr/0015-the-panel-can-act-on-the-pc.md) is what makes it defensible on a
+  server with no authentication. The catalogue lives in `server/actions.py`, in code;
+  `config.toml` only says which of its entries are **enabled**, and can never add one. The
+  request carries an id and nothing else — never a command, path or argument — and the id is a
+  key in a lookup that is never interpolated into anything.
+  - Every catalogue entry must be **safe to repeat**, because anyone who can reach the port can
+    repeat it. `shutdown`, `sleep` and `lock` are deliberately absent and adding one is a change
+    to the ADR, not to a table.
+  - A name in `actions` the catalogue does not know is a **fatal error at startup**, with the
+    name in the message. Not a 404 at request time: a typo has to be found by the person
+    restarting the server, not by someone at the desk pressing a button that does nothing.
 
 ## Run and test
 
