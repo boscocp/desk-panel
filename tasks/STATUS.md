@@ -211,10 +211,17 @@ the response was a sentence in `CLAUDE.md` saying `git fetch` before you branch.
 because a sentence is not a command with an exit code and everything else in this repo is.
 
 So step 0 of *How to resume work* is now `make wave-start BRANCH=wave/NN-slug`: it fetches,
-refuses if `main` is behind or diverged, cuts the branch, and prints the `## Resuming after`
-header you are meant to read. `scripts/check_branch_base.py` is the half with the exit code, and
-it was tested against the exact commit this session started from — it reports the four missing
-commits and names the superseded `Next:` line.
+reports what `main` was missing, fast-forwards, cuts the branch, and prints the `## Resuming
+after` header you are meant to read. `scripts/check_branch_base.py` is the half with the exit
+code, and it was tested against the exact commit this session started from — it reports the four
+missing commits and names the superseded `Next:` line.
+
+**The first wiring of it could never fire**, and the review is what caught that. `wave-start` ran
+the guard *after* `git merge --ff-only`, where `git log origin/main ^HEAD` is empty by
+construction — so the fix for the failure that defined this wave was itself unable to fail. It
+runs twice now: `--report` before the merge, which prints and never fails because being behind at
+the start of a wave is the normal case, and a plain call after it as a post-condition. Writing the
+check was not the hard part; wiring it where it can still be true was.
 
 It is deliberately **not** in `make check`. A PR branch is behind `main` as a matter of course,
 and a guard that goes red on every open pull request the moment `main` moves is the failure this
@@ -234,6 +241,22 @@ put to the chair and both were answered by ratifying what is in the branch:
 
 The irreversible half was **not** taken: the repo is still private, because T7.3 is explicitly the
 last look before it opens and is still `todo`.
+
+### The review found ten, and the two it left were the two that mattered
+
+Eight were applied by the review, two were left as design calls and both are now fixed. Besides
+the `wave-start` ordering above: **rule 4 checked ecosystem names and never each entry's
+`directory:`**, so a `gradle` entry pointing at `/` instead of `/android` would update nothing and
+still print OK — the "looks like coverage and is not" that rule 4 exists to catch, inside rule 4.
+
+Two of the applied eight are the same shape as this wave's own subject — a check reporting
+something true about a tree it had quietly altered. `check_ci_hygiene.py` numbered lines *after*
+stripping comments, so every violation was reported at the wrong line; and rule 5's "named in the
+Makefile" half was a substring search over the whole file, so a guard mentioned only in a `help:`
+echo and run by nothing passed. **Eight of the ten findings are in the two guard scripts this wave
+wrote**, not in the workflows they guard.
+
+The full list is in `docs/harness-notes/2026-09-26-wave-25.md`.
 
 ### Two things found on the way past, not fixed here
 

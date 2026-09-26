@@ -54,19 +54,25 @@ jobs:
         with:
           node-version: "24"
       - name: node --check every file under web/
-        run: find web -name '*.js' -print0 | xargs -0 -n1 node --check
+        run: find web -name '*.js' -print0 | xargs -0 -r -n1 node --check
 
       # pwsh is preinstalled on the GitHub-hosted Ubuntu runner, so this needs
       # no Windows and no container. Errors fail the job; warnings are printed
       # and do not, because the file cannot be exercised anywhere in this
       # project and a style opinion about it is not worth blocking a stranger.
+      #
+      # `ParseError` is listed alongside `Error` deliberately: a file PowerShell
+      # cannot parse reports as `ParseError`, which is a *different* member of
+      # PSScriptAnalyzer's severity enum. Matching only 'Error' would let the
+      # one failure this step exists to catch -- a syntactically broken script
+      # nobody here can run -- through as a green check.
       - name: PSScriptAnalyzer on install_task.ps1
         shell: pwsh
         run: |
           Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction Stop
-          $found = Invoke-ScriptAnalyzer -Path server/install_task.ps1 -Recurse
+          $found = Invoke-ScriptAnalyzer -Path server/install_task.ps1
           $found | Format-Table -AutoSize | Out-String | Write-Host
-          $errors = @($found | Where-Object Severity -eq 'Error')
+          $errors = @($found | Where-Object { $_.Severity -in 'Error', 'ParseError' })
           if ($errors.Count) { throw "$($errors.Count) PSScriptAnalyzer error(s)" }
 
       # shellcheck is preinstalled on the runner. One .sh exists today
