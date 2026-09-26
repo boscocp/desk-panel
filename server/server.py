@@ -1205,8 +1205,13 @@ def main(argv=None):
     if enabled:
         # Said out loud at every start. This endpoint changes the machine and
         # the server has no authentication; which actions are live is not
-        # something to have to go and read a file for.
+        # something to have to go and read a file for. The second half names
+        # the command each one resolved to, because a box with neither wpctl
+        # nor pactl installed otherwise looks exactly like a working one until
+        # somebody presses a button and nothing happens.
         print(f"notice: actions enabled: {', '.join(enabled)}", file=sys.stderr)
+        for line in actions_module.describe(enabled):
+            print(line, file=sys.stderr)
 
     if args.check_only:
         print(f"config OK: {config_path}")

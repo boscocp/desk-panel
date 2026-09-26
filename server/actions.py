@@ -240,6 +240,27 @@ def state_from(action, stdout, returncode):
     return UNKNOWN
 
 
+def describe(enabled, platform=None, which=None):
+    """One line per enabled action: what it will actually run, or that it cannot.
+
+    Printed at startup (T8.1 step 4). Without it, a machine with neither
+    `wpctl` nor `pactl` installed looks identical to a working one until
+    somebody presses a button and nothing happens -- and "nothing happened" is
+    the hardest failure on this whole project to diagnose from the desk.
+    """
+    which = which or shutil.which
+    lines = []
+    for action in enabled:
+        options = candidates(action, platform)
+        found = next((option for option in options if which(option[0])), None)
+        if found is None:
+            wanted = ", ".join(sorted({option[0] for option in options})) or "nothing"
+            lines.append(f"  {action}: no command available (looked for {wanted}) -- will answer 501")
+        else:
+            lines.append(f"  {action}: {found[0]}")
+    return lines
+
+
 def _default_runner(argv, timeout):
     """The only place this module touches the machine.
 
