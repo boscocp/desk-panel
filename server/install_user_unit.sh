@@ -22,6 +22,10 @@ set -eu
 
 UNIT_NAME=desk-panel.service
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+# `CDPATH= cd` is a one-command assignment, not a typo: it clears CDPATH so
+# `cd` cannot land somewhere else and print the path it chose. Emptying CDPATH
+# for the whole script would change the caller's environment instead.
+# shellcheck disable=SC1007
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(dirname -- "$SCRIPT_DIR")
 TEMPLATE="$SCRIPT_DIR/desk-panel.service.in"
