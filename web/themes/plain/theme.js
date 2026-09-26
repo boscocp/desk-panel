@@ -86,7 +86,17 @@
 
         const battery = el('section', 'battery');
 
-        root.append(header, grid, battery, shortcuts);
+        // The device line and the buttons share one row rather than stacking.
+        // Stacked, the 56px targets cost the columns 66px of height and
+        // check_layout.py reported #quotes hiding 42px of rows without
+        // scrolling -- a card eating a row in silence, which is the one thing
+        // T6.6 forbids. Side by side the row is as tall as the buttons and
+        // nothing else moved. The buttons are the taller of the two, so the
+        // line centres against them.
+        const footer = el('div', null, 'footer');
+        footer.append(battery, shortcuts);
+
+        root.append(header, grid, footer);
         els = {
             root, clock, date, stale, battery,
             quotes, fx, crypto,
@@ -97,7 +107,120 @@
             // other card if a forecast ever outgrows it, exactly as it did
             // before T6.6.
             weather: weather.scroller,
+            shortcuts,
         };
+        // The signature renderShortcuts compares against describes markup that
+        // has just been thrown away. mount() runs again whenever host.js empties
+        // the root -- a theme switch away and back is the ordinary case -- and a
+        // stale signature would match the ids that are still enabled and return
+        // early, leaving the strip empty on a panel that had buttons a minute
+        // ago.
+        drawnActions = null;
+    }
+
+    // --- The shortcut buttons (T8.2) ---------------------------------------
+    //
+    // The same contract as neon, deliberately drawn differently: a word and
+    // no picture, in a row, with the result said in text rather than in
+    // colour. That is this theme's whole job -- if the buttons work here too
+    // then the action contract really is a contract and not neon's markup
+    // wearing a name (T6.7's manual check).
+    //
+    // What is *not* different is the 56px target. It is a fact about a finger
+    // on a phone at arm's length, not a matter of taste, so both themes carry
+    // it and docs/THEMING.md says so.
+    let drawnActions = null;
+
+    function renderShortcuts(actions) {
+        const wanted = shortcutsFor(actions, words.tag);
+        const signature = wanted.map((s) => s.id + ':' + s.label).join(',');
+        if (signature === drawnActions) {
+            return;
+        }
+        drawnActions = signature;
+        els.shortcuts.textContent = '';
+        for (const shortcut of wanted) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'shortcut';
+            button.id = 'action-' + shortcut.id;
+            button.dataset.action = shortcut.id;
+            button.title = shortcut.hint;
+            button.textContent = shortcut.label;
+            applyState(button, 'unknown');
+            button.addEventListener('click', () => press(button, shortcut));
+            els.shortcuts.appendChild(button);
+        }
+    }
+
+    // The last result, never a state (T8.2 step 7). Here it is a word after
+    // the caption rather than a colour, because this theme has no palette to
+    // say it with -- which makes it the honest test of whether the rule is
+    // about the rule or about neon's CSS.
+    // The state the PC last reported, said in a word. neon draws a cross; this
+    // theme has no pictures, so it says it -- which is the point of the theme
+    // existing, and the check that the contract is about the contract.
+    //
+    // `unknown` is the resting state and shows nothing: the panel has not
+    // asked, and a theme that printed "com som" before anyone pressed anything
+    // would be making the claim ADR 0015 forbids.
+    function applyState(button, state) {
+        button.dataset.state = state;
+        const suffix = state === 'muted' ? words.actionMuted
+            : state === 'unmuted' ? words.actionUnmuted : '';
+        button.title = suffix ? words.actionHint + ' \u2014 ' + suffix : words.actionHint;
+    }
+
+    const ACK_MS = 1200;
+
+    // The pending fade per button, so a new press can cancel the old one:
+    // otherwise the previous acknowledgement's timer fires part-way through
+    // this press and replaces "SOM ..." with "SOM" on a button that is still
+    // waiting to hear.
+    const fading = new Map();
+
+    function press(button, shortcut) {
+        if (button.dataset.busy) {
+            return;
+        }
+        button.dataset.busy = '1';
+        button.textContent = shortcut.label + ' ...';
+        if (fading.has(button)) {
+            window.clearTimeout(fading.get(button));
+            fading.delete(button);
+        }
+        let settled = false;
+        const settle = (ok, state) => {
+            // Once: core answers a refusal through the callback *and* through
+            // its return value, so both arms below can run for one press.
+            if (settled) {
+                return;
+            }
+            settled = true;
+            delete button.dataset.busy;
+            // Only a press that worked may move the state. A failure says so
+            // and leaves the last thing the PC told us alone -- guessing a
+            // flip after a failure is how a panel ends up claiming a
+            // microphone is off while it is live.
+            if (ok) {
+                applyState(button, state || 'unknown');
+            }
+            button.textContent = ok ? shortcut.label + ' ok' : shortcut.label + ' ' + words.actionFailed;
+            fading.set(button, window.setTimeout(() => {
+                fading.delete(button);
+                // Back to the caption plus whatever the PC last said, which is
+                // this theme's version of neon's cross: it persists, while the
+                // ok/failed acknowledgement above does not.
+                const state = button.dataset.state;
+                const suffix = state === 'muted' ? words.actionMuted
+                    : state === 'unmuted' ? words.actionUnmuted : '';
+                button.textContent = suffix ? shortcut.label + ' \u2014 ' + suffix
+                    : shortcut.label;
+            }, ACK_MS));
+        };
+        if (!DeskPanel.invoke(shortcut.id, settle)) {
+            settle(false);
+        }
     }
 
     function ensure(root) {
@@ -261,6 +384,7 @@
         fill(els.crypto, payload.crypto || [], 'symbol', 'price', 'USD', formatPrice);
         renderWeather(payload.weather);
         renderBattery(payload.battery);
+        renderShortcuts(payload.actions);
         els.stale.hidden = !payload.stale;
     }
 

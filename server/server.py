@@ -575,6 +575,17 @@ class App:
             "start": config.get("night_start", ""),
             "end": config.get("night_end", ""),
         }
+        # Which buttons the panel draws, riding here for the third time and the
+        # same reason as `theme` and `language`: /quotes is the payload's
+        # carrier. Adding a third button later must be a line in config.toml
+        # and not a rebuild of the APK (ADR 0013), which it cannot be if the
+        # page has to be told what exists.
+        #
+        # The **enabled** ids, already validated against the catalogue at
+        # startup -- not the catalogue itself. A panel that drew a button for
+        # an action the server would answer 404 to is a button that does
+        # nothing, which T8.2 step 7 calls worse than no button at all.
+        payload["actions"] = list(self.enabled_actions)
         return payload
 
     def _history(self, now):

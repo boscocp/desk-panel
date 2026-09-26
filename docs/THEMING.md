@@ -109,7 +109,7 @@ the phone's real viewport.
   globals: `formatPrice`, `formatRate`, `formatPair`, `formatChange`,
   `changeClass`, `formatTemp`, `formatRange`, `weatherLabel`, `weatherGlyph`,
   `formatBattery`, `tempClass`, `sparklinePath`, `isNight`, `overflowsBy`,
-  `scrollPlan`, `worthScrolling`. Use them. A theme that reimplemented `formatPrice` would
+  `scrollPlan`, `worthScrolling`, `shortcutsFor`. Use them. A theme that reimplemented `formatPrice` would
   reintroduce the sub-1 rounding bug the yuan found in T6.5, once per theme —
   and one that joined a daily low and high with a hyphen would reintroduce
   `-12-42`, which is what `formatRange` exists to stop (T6.8).
@@ -141,9 +141,10 @@ the phone's real viewport.
   Every other id there is one both themes carry, so a missing one is a
   regression and is reported as such.
 
-  `shortcuts` is **not** in that list, and both themes still use the name: it is
-  the reserved strip in the sidebar that T8.2's buttons will fill, and it holds
-  nothing to measure until they do.
+  `shortcuts` is **not** in that list, and both themes use the name: it is the
+  strip the shortcut buttons live in. It is out of the harness because it holds
+  nothing when the PC has no actions enabled, which is the default — a section
+  that renders empty is a harness failure, and this one is empty legitimately.
 - **A card you are holding empty on purpose says `data-reserved`.** The harness
   fails a section that renders with no text — an empty card always fits, and
   before T6.1 the panel looked acceptable on the device for exactly that reason.
@@ -420,6 +421,133 @@ So do not hang anything on `tick` that has to keep running, and do not treat a
 `render` call as "this is new since the last one" — you may have missed several.
 Nothing in either theme needs to.
 
+## The shortcut buttons are yours to draw and not yours to wire
+
+`POST /action/{id}` mutes the PC's speakers and its microphone
+([ADR 0015](adr/0015-the-panel-can-act-on-the-pc.md), T8.1). The buttons that
+fire it are markup, so they are a theme's — and the wire is not.
+
+### The contract, in full
+
+```js
+const wanted = shortcutsFor(payload.actions, words.tag);
+// -> [{ id: 'mute-audio', label: 'SOUND', hint: 'Toggle mute' }, ...]
+
+button.addEventListener('click', () => {
+    const sent = DeskPanel.invoke(shortcut.id, (ok) => {
+        // The outcome, later. Show it briefly and let it fade.
+    });
+    if (!sent) {
+        // Refused outright: nothing was sent. Settle the button here, and
+        // make settling idempotent -- the callback above has already run.
+    }
+});
+```
+
+That is all of it. A theme never sees a URL, a host, a port or a method.
+
+### Which buttons exist is the PC's decision, not yours
+
+`payload.actions` is the list of ids the server says it will accept — its
+`actions` key in `config.toml`, already validated against the catalogue at
+startup. Draw those, in that order, and draw **nothing** for anything else.
+
+`shortcutsFor` is what enforces it: it drops an id this build has no word for,
+which is the state a PC running ahead of the APK puts the panel in. A button
+captioned `mute-everything` is one nobody can read, and a button nobody can
+read is worse than the gap where one would be.
+
+An empty list is normal and is the default. Render no buttons and leave the
+strip empty; do not draw a placeholder.
+
+### `invoke` returns false more often than you think
+
+Core decides whether a press is possible at all, and a theme needs none of the
+reasons:
+
+| | |
+|---|---|
+| the PC is away | the buttons are dead offline. There is nothing to mute, the panel is black, and a press that was queued and fired on reconnect would mute the PC minutes after somebody pressed a button they could not see |
+| the id is not in `payload.actions` | the server would answer 404 |
+| there is no bridge | every browser. `js/mock.js` stubs one so buttons can be built without a phone |
+
+`false` means **nothing was sent**. Settle the button yourself when you get it,
+or it sits in its pressed state for ever.
+
+**Make settling idempotent.** Core answers a refusal both ways — your callback
+with `false`, and then `false` from `invoke` itself — so a settle written as
+"run once per press" will otherwise run twice and leave two fade timers on one
+button. And the callback can arrive with `false` for a press that *was* sent:
+if the PC goes away before its result comes back, core abandons the press
+rather than letting Java's answer, which is never coming, strand the button.
+Both packaged themes keep a `settled` flag and cancel the previous fade on the
+next press; copy that.
+
+### Two things are drawn, and they have different lifetimes
+
+```js
+DeskPanel.invoke(id, (ok, state) => { ... });
+// ok:    did the request work.  A brief acknowledgement, and it fades.
+// state: 'muted' | 'unmuted' | 'unknown'.  What the PC's mixer now holds.
+```
+
+**The result fades. The state stays.** Getting those the same way round is the
+whole of this section.
+
+`state` is measured by the server, not inferred — a second read-only command
+after the toggle ([ADR 0015](adr/0015-the-panel-can-act-on-the-pc.md)'s second
+amendment) — so a theme may draw it. `neon` puts a cross on the icon; `plain`
+says it in a word, because it has no pictures.
+
+Three rules, and each of them is a way a button ends up lying about a live
+microphone:
+
+- **`unknown` is the resting state and it claims nothing.** A button nobody has
+  pressed has not asked the PC anything. Draw the device and no cross.
+- **Only a press that worked may move it.** A failure says so with the
+  acknowledgement and leaves the state exactly where it was.
+- **It is the last known state, not a live one.** Somebody at the keyboard can
+  mute after the panel last asked. Say so where you can — both packaged themes
+  put "when last asked" in the accessible name rather than letting the picture
+  make a claim it cannot back.
+
+Say the failure in **words as well as in colour**. The panel is read from
+across a desk, and a red tint on its own is not a message — `plain` has no
+palette to say it with at all, which is the honest test of whether a rule is
+about the rule or about `neon`'s CSS.
+
+`settle` has to be **idempotent**: core answers a refusal through the callback
+*and* through `invoke`'s return value, so both arms can run for one press.
+Cancel the previous press's fade timer too, or an acknowledgement that has not
+finished yet fires part-way through the next press.
+
+### A caption is optional; a legible icon is not
+
+Neither packaged theme draws a caption any more. `shortcutsFor` still gives you
+`label`, and both themes spend it on the **accessible name** instead — which is
+what `title` shows and what a screen reader says — so the picture gets the room
+and can be read across a desk. A theme is free to draw the word; it is not free
+to draw a picture too small to identify, because the two buttons touch.
+
+### 56px, on both axes, and it is not a matter of taste
+
+This is a phone at arm's length with no pointer, and the two buttons touch. The
+failure the size prevents is muting the microphone when you meant the speakers.
+A theme may draw a button any way it likes and may not make it smaller than
+this. Both packaged themes carry the rule in their own stylesheet.
+
+Use a real `<button>`. It is focusable, it fires on a tap without waiting, and
+it is announced as a button; a styled `<div>` with a click handler is none of
+those.
+
+### Rebuild them only when the set changes
+
+The payload arrives once a minute and `actions` comes from a file a human
+edits, so the buttons almost never change. Rebuilding them on every render
+throws one away mid-press and loses the acknowledgement it was showing —
+compare the ids you are about to draw against the ones you drew, and return
+early. Both packaged themes do this with a one-line signature.
+
 ## Checking it
 
 ```bash
@@ -428,6 +556,7 @@ python e2e/layout/check_layout.py --theme <name>
 python e2e/layout/check_blackout.py --theme <name>
 python e2e/layout/check_scroll.py --theme <name>
 python e2e/layout/check_pulse.py --theme <name>    # only if your theme pulses
+python e2e/layout/check_actions.py --theme <name>  # the shortcut contract above
 ```
 
 The layout check drives a real browser at 872x392 — the phone's actual
@@ -451,6 +580,15 @@ measurement is a single frame. It also fails a card that declares a scroll and d
 and one that keeps a transform after the rows start fitting again. If your theme answers
 overflow with something other than motion, it will fail the first of those; say so in your
 theme's own notes and skip it.
+
+`check_actions.py` is the one that checks the section above, and it is the only check here that
+presses something: it replaces the native bridge with a recorder, delivers the payloads a PC
+with one action, two actions and none would send, and asserts what your buttons did. The right
+ids in the PC's order, nothing drawn for an id this build has no word for, 56px on both axes, a
+real `<button>`, an id and nothing url-shaped reaching the bridge, a failure said in words as
+well as in colour, and **nothing sent while the PC is away**. It expects the buttons to exist,
+so it is not optional the way `check_scroll` and `check_pulse` are: a theme that draws no
+shortcuts fails it, which is the point.
 
 `check_blackout.py` is the other half, and it is the one your theme can fail without looking
 wrong: it drives the page dark on both causes and asserts that nothing is drawn while it is,

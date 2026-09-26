@@ -26,7 +26,8 @@ import org.json.JSONObject;
  *  stale:  bool,
  *  theme:  string,
  *  language: string,
- *  night:  {start, end}}
+ *  night:  {start, end},
+ *  actions: [id, ...]}
  * </pre>
  *
  * <p>{@code battery} is added afterwards by {@link #withBattery}, because it
@@ -144,12 +145,63 @@ public final class DataPayload {
             // `e2e/check_night_marker.py` is what caught it.
             payload.put("night", quotes.optJSONObject("night"));
 
+            // Which shortcut buttons the panel draws (T8.2), and it is the
+            // fourth key to be passed straight through without being
+            // interpreted -- the catalogue of what an id runs lives on the PC
+            // (ADR 0015) and the words for it live in the APK, so this layer
+            // has no opinion about either.
+            //
+            // **It is also the line the comment above turned out to be about.**
+            // T8.2 was written end to end, tested in two themes in a real
+            // browser, built, installed, and drew no buttons at all -- because
+            // this file rebuilds the payload key by key and `actions` was not
+            // among them. The server was sending it, the page was ready to draw
+            // it, and the phone never saw the key. Exactly the failure the
+            // night profile had, in the wave after the one that wrote that
+            // warning down.
+            //
+            // An absent key is an empty list to the page rather than null: a
+            // panel talking to an older server draws no buttons, which is the
+            // same thing it does for a PC that enabled none.
+            payload.put("actions", quotes.optJSONArray("actions"));
+
             return escapeForScript(payload.toString());
         } catch (JSONException malformed) {
             // A body that is not JSON is a failure like any other: keep what
             // the panel has. It reaches the log through the caller's marker.
             return null;
         }
+    }
+
+    /**
+     * The {@code state} field of an action response, or {@code unknown}.
+     *
+     * <p>Here rather than in {@code DataPoller} for the reason every parser in
+     * this project is here: {@code android/CLAUDE.md} says anything worth
+     * testing lives in a plain class with no Android imports, and what a panel
+     * does with a mixer's answer is worth testing — the value decides whether
+     * a cross is drawn over a microphone icon, and a cross that is wrong about
+     * a live microphone is a privacy failure rather than a cosmetic one.
+     *
+     * <p>Fails closed, always. A body that is not JSON, a JSON object with no
+     * {@code state}, a state that is not one of the three words the server
+     * uses: all of them are {@code unknown}, which the page renders as "no
+     * cross and no claim" rather than as "not muted".
+     */
+    public static String actionState(String body) {
+        if (body == null) {
+            return "unknown";
+        }
+        try {
+            String state = new JSONObject(body).optString("state", "unknown");
+            if ("muted".equals(state) || "unmuted".equals(state)) {
+                return state;
+            }
+        } catch (JSONException malformed) {
+            // Fall through: a response this class cannot read says nothing
+            // about the mixer.
+        }
+        return "unknown";
     }
 
     /**

@@ -1126,4 +1126,29 @@ public final class PanelService extends Service implements PcPoller.Listener {
             service.releaseOfflineWakeLock();
         }
     }
+
+    /**
+     * One shortcut press, from the Activity's JavaScript bridge (T8.2).
+     *
+     * <p>Static for the same reason {@link #panelVisible()} is: the Activity
+     * and the service are separate components with no lifecycle relationship,
+     * and the poller that owns the network lives here.
+     *
+     * <p>Refused with no request when there is no service or the PC is away.
+     * {@link DataPoller#invoke} refuses again on its own side — its executor
+     * only exists while online — and the duplication is deliberate: this one
+     * answers before a thread is touched, that one is the guarantee.
+     *
+     * @return false if nothing was sent, so the page can say so immediately
+     *         rather than waiting for a result that is not coming
+     */
+    public static boolean invokeAction(String id, DataPoller.ResultListener onResult) {
+        PanelService service = instance;
+        if (service == null || !Boolean.TRUE.equals(lastOnline)) {
+            Log.i(Markers.TAG, Markers.action(String.valueOf(id), "offline"));
+            return false;
+        }
+        DataPoller poller = service.dataPoller;
+        return poller != null && poller.invoke(id, onResult);
+    }
 }

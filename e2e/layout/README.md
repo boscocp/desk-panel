@@ -228,10 +228,10 @@ page's `Date`.** Marionette executes in its own sandbox with its own globals, so
 trap that made `instanceof Date` the wrong guard inside `offsetFor` — that one answered the
 origin for every clock the sweep handed it, and seven positions measured as one.
 
-## The other four checks in this directory
+## The other five checks in this directory
 
-`check_layout.py` measures one frame. Four siblings answer what a frame cannot, all of them
-driving the same Marionette plumbing so this is five checks and one harness:
+`check_layout.py` measures one frame. Five siblings answer what a frame cannot, all of them
+driving the same Marionette plumbing so this is six checks and one harness:
 
 | | asks |
 |---|---|
@@ -239,6 +239,7 @@ driving the same Marionette plumbing so this is five checks and one harness:
 | `check_scroll.py` | does an overflowing card keep moving across a refresh (T6.6) |
 | `check_pulse.py` | does a value pulse **only** when it changed (T6.2) |
 | `check_night.py` | does the panel run its night profile inside the configured window (T6.4) |
+| `check_actions.py` | do the shortcut buttons draw what the PC enabled, measure 56px, hand the bridge an id and nothing else, and stay dead while the PC is away (T8.2) |
 
 `check_night.py` is the only one that deliberately does **not** pin or freeze the page's
 clock: what it is testing is that the page compares the payload's window against *now*, so a

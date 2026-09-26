@@ -1,6 +1,7 @@
 # 0015 — The panel can act on the PC, and the id is the whole interface
 
-Status: accepted · 2026-09-26 (T8.1) · amended the same day, see *A `POST`-only rule is not enough*
+Status: accepted · 2026-09-26 (T8.1) · amended twice the same day — see *A `POST`-only rule
+is not enough* and *Toggles, and the state is measured rather than guessed*
 
 ## Context
 
@@ -74,15 +75,36 @@ acceptable by an allowlist; it is the allowlist's job to not contain it.
 Adding an entry to the catalogue is a change to this record. If the new action is not
 repeatable, the answer is no.
 
-### Toggles, because the panel cannot know the state
+### Toggles, and the state is measured rather than guessed
 
-The panel has no reliable way to read whether the PC is muted; the only thing it could show is
-the result of the last press. So the actions toggle, and the response reports the state the
-command itself observed — `muted`, `unmuted`, or `unknown` where the platform cannot say.
+The actions toggle, because the panel has no reliable way to know what the PC is doing and a
+button that only mutes is half a button.
+
+**Amended 2026-09-26, asked for from the chair**, after T8.2 shipped the buttons. The original
+text said the response reports "the state the command itself observed", and on Linux that is
+nothing at all: `wpctl` and `pactl` toggle in silence, so every press answered `unknown` and the
+panel could draw no state. The ask was for the icon to carry a cross when the PC is muted.
+
+A cross drawn on an inference would be exactly what the paragraph below forbids. So the state is
+**measured**: after a toggle that says nothing, the server runs a second, **read-only** command
+— `wpctl get-volume`, `pactl get-sink-mute` — and reports what the mixer actually holds. macOS
+and Windows need none: their toggles already end on a word.
+
+Three limits, and they are in the code rather than only here:
+
+- **It is the last known state, not a live one.** Somebody at the keyboard can mute after the
+  panel last asked and nothing tells the phone. The accessible name says "muted when last asked"
+  rather than "muted", which is the same bargain the stale badge makes for a price.
+- **A failed press does not move it.** The last thing the PC said is still the best thing known,
+  and inventing a flip after a failure is precisely how a panel ends up claiming a microphone is
+  off while it is live.
+- **A read-back that fails is not a failed action.** The toggle already worked and the caller is
+  owed its 200; all the read-back decides is whether a cross is drawn, and `unknown` is an answer
+  the page knows how to render as "no claim".
 
 A button that displays a state it is guessing is worse than a button that displays nothing: one
-that says the microphone is live when it is not is a privacy failure, not a cosmetic one. T8.2
-carries that consequence into the UI.
+that says the microphone is live when it is not is a privacy failure, not a cosmetic one. That
+rule is unchanged. What changed is that the panel stopped having to guess.
 
 ### `POST` only, and no shell
 
@@ -156,6 +178,9 @@ not: it runs nothing either way, and ordering it first would only change what a 
   now. An empty table is still read as "nothing enabled", because that is what shipped in
   `config.example.toml` and in installed configs, and an update that refuses to start is a worse
   failure than a shape change (T3.13).
+- **Every press is two commands on Linux**, a toggle and a read-only question. That is one extra
+  local process per button press, on a machine with a person sitting at it, and it buys the only
+  honest way to draw the cross.
 - **Platform coverage is uneven and says so.** Linux (PipeWire, falling back to PulseAudio),
   macOS (`osascript`) and Windows (PowerShell against Core Audio, no third-party download) are
   implemented; anything else answers **501**, which is "this machine cannot", not "you asked
