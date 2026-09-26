@@ -620,6 +620,11 @@ class ActionIdTests(unittest.TestCase):
                      "MUTE-AUDIO", "-mute", "mute_audio", "mute.audio"):
             self.assertIsNone(action_id("/action/" + rest), rest)
 
+    def test_a_trailing_newline_is_not_part_of_an_id(self):
+        # Python's `$` matches before a trailing newline as well as at the
+        # end, so `^[a-z0-9-]*$` accepts this one. `fullmatch` does not.
+        self.assertIsNone(action_id("/action/mute-audio\n"))
+
     def test_post_to_an_unknown_action_is_404_without_an_app(self):
         # No app is 503, like every other route that needs config.
         status, _, content_type, _ = route("POST", "/action/mute-audio")

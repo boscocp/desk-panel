@@ -783,7 +783,11 @@ def key_for(market):
 # *names*, which is belt and braces on purpose: ADR 0015's promise is that
 # nothing from the request is ever interpolated, and the cheapest way to keep
 # a promise like that is to have nothing interesting survive the front door.
-ACTION_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+#
+# Matched with `fullmatch`, not `match`: Python's `$` also matches *before* a
+# trailing newline, so `^...$` would accept `mute-audio\n` -- an id with a
+# newline in it, which the paragraph above says is not an id.
+ACTION_ID_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
 
 
 def action_id(path):
@@ -797,7 +801,7 @@ def action_id(path):
     if not path.startswith(prefix):
         return None
     rest = path[len(prefix):]
-    return rest if ACTION_ID_RE.match(rest) else None
+    return rest if ACTION_ID_RE.fullmatch(rest) else None
 
 
 def apk_to_serve(directory):
@@ -940,16 +944,23 @@ def index_page(directory):
     return 200, body.encode("utf-8"), "text/html; charset=utf-8", ()
 
 
-def route(method, path, app=None):
+def route(method, path, app=None, request_headers=None):
     """Routing: (method, path) -> (status, body_bytes, content_type, headers).
 
-    `headers` is extra headers only -- Content-Type and Content-Length are the
-    handler's, and every route but `/app` leaves it empty.
+    The returned `headers` is extra response headers only -- Content-Type and
+    Content-Length are the handler's, and every route but `/app` leaves it
+    empty.
 
     `app` supplies the data routes; without one they answer 503 rather than
     pretending, which is what lets the existing two-argument tests keep
     asserting that /ping and 404 need no state at all. `/app` needs no app:
     what it serves is a property of the checkout, not of the panel.
+
+    `request_headers` is the *incoming* headers and exists for exactly one
+    route: `POST /action/<id>` is the only one that changes the machine, and
+    it is the only one that has to know whether a browser sent the request.
+    Every other route reads none of it, which is why it stays optional rather
+    than becoming a parameter the whole file threads around.
     """
     if method == "GET" and path == "/ping":
         return _json(200, {"ok": True})
@@ -970,13 +981,48 @@ def route(method, path, app=None):
             return _json(503, {"error": "not configured"})
         return _json(200, app.weather())
 
-    if method == "POST" and action_id(path) is not None:
-        return run_action(action_id(path), app)
+    if method == "POST":
+        action = action_id(path)
+        if action is not None:
+            return run_action(action, app, request_headers)
 
     return 404, b"", "text/plain", ()
 
 
-def run_action(action, app):
+def sent_by_a_browser(request_headers):
+    """True if this POST came from a page rather than from the panel.
+
+    **The drive-by this closes.** A cross-origin
+    `<form method=post enctype=text/plain action="http://<pc>:8777/action/mute-audio">`
+    is a CORS *simple request*: no preflight, so nothing on this server gets a
+    chance to refuse it, and the response being unreadable does not matter
+    because the side effect has already happened. Any page the owner visits
+    could toggle their microphone. ADR 0015 ruled out `GET` for exactly that
+    reason and then described the endpoint as "as trustworthy as the LAN",
+    which this widens to "as trustworthy as every site the owner opens".
+    Found by review.
+
+    The test is not a token, because a token would have to live in the APK and
+    that is the thing `.env` and config.toml exist to prevent (ADR 0013). It is
+    that **a browser says so about itself**: the Fetch standard requires
+    `Origin` on every non-GET request, and `Sec-Fetch-Site` rides along on the
+    engines that have it. The panel's own client is Java's
+    `HttpURLConnection`, which sends neither, and so do `curl` and `probe.py`
+    -- which is what keeps T8.1's acceptance line meaning what it says.
+
+    A LAN attacker with a socket can of course omit both. That is unchanged
+    and is the threat model the ADR already states; this closes the far wider
+    hole of not needing to be on the LAN at all.
+    """
+    if request_headers is None:
+        return False
+    if request_headers.get("Origin"):
+        return True
+    site = (request_headers.get("Sec-Fetch-Site") or "").strip().lower()
+    return bool(site) and site != "none"
+
+
+def run_action(action, app, request_headers=None):
     """`POST /action/<id>` -- the only route that changes this machine.
 
     ADR 0015 is the decision and `server/actions.py` is the catalogue. The
@@ -984,8 +1030,14 @@ def run_action(action, app):
     that is not enabled returns **404 having run nothing at all**, which is
     why membership is tested before anything is looked up, let alone spawned.
 
+    The browser check sits *after* the allowlist on purpose. An unknown id
+    does nothing either way, so refusing it first would buy nothing and would
+    change what `probe.py --serve --url /action/not-an-action` means, which
+    T8.1's acceptance asserts.
+
     The status codes say different things and a caller depends on it:
       404  no such action here -- unknown, or known and not enabled
+      403  a browser sent it; see sent_by_a_browser
       501  this platform has no implementation of an action that is enabled
       500  it ran and failed, or timed out
       503  the server has no config loaded, like every other data route
@@ -997,6 +1049,13 @@ def run_action(action, app):
         # the endpoint does not tell an unauthenticated caller which actions
         # exist but are switched off.
         return _json(404, {"error": "unknown action"})
+    if sent_by_a_browser(request_headers):
+        print(
+            f"action {action}: refused, the request carries browser headers "
+            f"(Origin={request_headers.get('Origin')!r})",
+            file=sys.stderr,
+        )
+        return _json(403, {"error": "not from a browser"})
 
     try:
         state = app.run_action(action)
@@ -1034,7 +1093,9 @@ class Handler(BaseHTTPRequestHandler):
         # downloading two megabytes.
         routed = "GET" if method == "HEAD" else method
         try:
-            status, body, content_type, headers = route(routed, self.path, getattr(self, "app", None))
+            status, body, content_type, headers = route(
+                routed, self.path, getattr(self, "app", None), self.headers
+            )
         except Exception:  # noqa: BLE001 - deliberately everything
             # route() used to be pure; it does I/O now, and TimedCache
             # re-raises anything that is not an UpstreamError on purpose --

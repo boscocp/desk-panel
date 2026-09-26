@@ -84,6 +84,24 @@ class CatalogueTests(unittest.TestCase):
         got.append(["rm", "-rf", "/"])
         self.assertEqual(len(actions.candidates("mute-audio", "linux")), 2)
 
+    def test_the_copy_reaches_the_argument_lists_and_not_only_the_list_of_them(self):
+        # A shallow copy passes the test above and still hands out `_TABLE`'s
+        # own inner lists: one `.append()` on one of those edits the command
+        # every later press will run, for the life of the process.
+        actions.candidates("mute-audio", "linux")[0].append("--boom")
+        self.assertNotIn("--boom", actions.candidates("mute-audio", "linux")[0])
+
+    def test_windows_declares_every_vtable_slot_before_setmute(self):
+        # COM dispatches by position, so a short interface does not fail --
+        # it calls the wrong method. `SetMute` is the twelfth entry of
+        # IAudioEndpointVolume, so eleven placeholders have to precede it or
+        # muting the speakers sets a channel volume instead.
+        argv, = actions.candidates("mute-audio", "win32")
+        source = argv[-1]
+        declarations = source.split("interface IAudioEndpointVolume {")[1]
+        declarations = declarations.split("int SetMute")[0]
+        self.assertEqual(declarations.count("();"), 11)
+
     def test_an_id_outside_the_catalogue_raises_rather_than_returning_empty(self):
         # Empty would read as "this platform cannot", which is a different
         # answer with a different status code.
@@ -161,6 +179,17 @@ class RunActionTests(unittest.TestCase):
         actions.run_action("mute-mic", platform="linux", runner=runner, which=always_present)
         self.assertEqual(runner.calls[0][1], actions.TIMEOUT_S)
 
+    def test_windows_gets_longer_than_two_seconds_because_it_compiles_first(self):
+        # `Add-Type` runs the C# compiler on every press and powershell has
+        # to start before it. Two seconds means every Windows press is a
+        # timeout, which is a 500 on a machine where nothing is wrong.
+        self.assertGreater(actions.timeout_for("win32"), actions.TIMEOUT_S)
+        self.assertEqual(actions.timeout_for("linux"), actions.TIMEOUT_S)
+        self.assertEqual(actions.timeout_for("darwin"), actions.TIMEOUT_S)
+        runner = FakeRunner()
+        actions.run_action("mute-mic", platform="win32", runner=runner, which=always_present)
+        self.assertEqual(runner.calls[0][1], actions.WINDOWS_TIMEOUT_S)
+
 
 class DescribeTests(unittest.TestCase):
     """The startup line. T8.1 step 4 asks for it by name, and the reason is
@@ -208,6 +237,20 @@ class StateTests(unittest.TestCase):
 
     def test_a_failed_command_reports_no_state_at_all(self):
         self.assertEqual(actions.state_from("mute-audio", "muted", 1), actions.UNKNOWN)
+
+    def test_applescripts_missing_value_is_unknown_and_not_muted(self):
+        # `missing value` is AppleScript for "the audio API would not say".
+        # Reading it as `muted` is the guess ADR 0015 forbids -- and the
+        # direction of the guess is the dangerous one for `mute-mic`.
+        self.assertEqual(actions.state_from("mute-mic", "missing value", 0), actions.UNKNOWN)
+
+    def test_the_macos_toggles_both_end_on_a_word(self):
+        # An osascript ending on `set volume ...` prints nothing, because the
+        # command returns no result -- so the state would always be unknown.
+        for action in actions.CATALOGUE:
+            argv, = actions.candidates(action, "darwin")
+            self.assertIn('return "muted"', argv[-1], action)
+            self.assertIn('return "unmuted"', argv[-1], action)
 
 
 class EnabledActionsTests(unittest.TestCase):
@@ -332,6 +375,70 @@ class RouteTests(unittest.TestCase):
         # muting the PC by accident.
         app = StubApp(["mute-audio"])
         status, _, _, _ = route("GET", "/action/mute-audio", app)
+        self.assertEqual(status, 404)
+        self.assertEqual(app.ran, [])
+
+
+class BrowserOriginTests(unittest.TestCase):
+    """The drive-by a `POST`-only rule does not stop.
+
+    A cross-origin form POST with `enctype=text/plain` is a CORS simple
+    request: no preflight, so nothing here gets asked, and the attacker not
+    being able to read the response does not matter because the mute already
+    happened. Found by review; ADR 0015 was amended rather than left saying
+    "as trustworthy as the LAN"."""
+
+    def _run(self, headers, enabled=("mute-audio",)):
+        app = StubApp(list(enabled))
+        status, body, _, _ = route("POST", "/action/mute-audio", app, headers)
+        return status, app.ran
+
+    def test_a_form_post_from_any_page_is_refused_and_runs_nothing(self):
+        status, ran = self._run({"Origin": "https://example.invalid"})
+        self.assertEqual(status, 403)
+        self.assertEqual(ran, [])
+
+    def test_a_same_origin_post_from_a_page_is_refused_too(self):
+        # There is no page this server serves that should be posting here --
+        # the panel's client is Java. Allowing same-origin would mean trusting
+        # an `Origin` an attacker also controls the spelling of.
+        status, ran = self._run({"Origin": "http://192.168.15.3:8777"})
+        self.assertEqual(status, 403)
+        self.assertEqual(ran, [])
+
+    def test_sec_fetch_site_alone_is_enough_to_refuse(self):
+        status, ran = self._run({"Sec-Fetch-Site": "cross-site"})
+        self.assertEqual(status, 403)
+        self.assertEqual(ran, [])
+
+    def test_the_panels_own_client_sends_neither_and_is_allowed(self):
+        # HttpURLConnection, curl and probe.py all send no Origin and no
+        # Sec-Fetch-Site. This is the case that must keep working.
+        status, ran = self._run({"User-Agent": "Java/21", "Host": "192.168.15.3:8777"})
+        self.assertEqual(status, 200)
+        self.assertEqual(ran, ["mute-audio"])
+
+    def test_sec_fetch_site_none_is_not_a_browser_page(self):
+        # "none" is a user-initiated navigation, not a page making a request.
+        status, _ = self._run({"Sec-Fetch-Site": "none"})
+        self.assertEqual(status, 200)
+
+    def test_an_empty_origin_header_is_not_an_origin(self):
+        status, _ = self._run({"Origin": ""})
+        self.assertEqual(status, 200)
+
+    def test_no_headers_at_all_still_routes(self):
+        # route() is called with three arguments all over the test suite.
+        status, _ = self._run(None)
+        self.assertEqual(status, 200)
+
+    def test_the_allowlist_is_still_checked_first(self):
+        # An unknown id is 404 whether or not a browser sent it: it does
+        # nothing either way, and T8.1's acceptance asserts that status.
+        app = StubApp(["mute-audio"])
+        status, _, _, _ = route(
+            "POST", "/action/not-an-action", app, {"Origin": "https://example.invalid"}
+        )
         self.assertEqual(status, 404)
         self.assertEqual(app.ran, [])
 
