@@ -26,7 +26,8 @@ import org.json.JSONObject;
  *  stale:  bool,
  *  theme:  string,
  *  language: string,
- *  night:  {start, end}}
+ *  night:  {start, end},
+ *  actions: [id, ...]}
  * </pre>
  *
  * <p>{@code battery} is added afterwards by {@link #withBattery}, because it
@@ -143,6 +144,26 @@ public final class DataPayload {
             // That is how T6.4 shipped its first build, and
             // `e2e/check_night_marker.py` is what caught it.
             payload.put("night", quotes.optJSONObject("night"));
+
+            // Which shortcut buttons the panel draws (T8.2), and it is the
+            // fourth key to be passed straight through without being
+            // interpreted -- the catalogue of what an id runs lives on the PC
+            // (ADR 0015) and the words for it live in the APK, so this layer
+            // has no opinion about either.
+            //
+            // **It is also the line the comment above turned out to be about.**
+            // T8.2 was written end to end, tested in two themes in a real
+            // browser, built, installed, and drew no buttons at all -- because
+            // this file rebuilds the payload key by key and `actions` was not
+            // among them. The server was sending it, the page was ready to draw
+            // it, and the phone never saw the key. Exactly the failure the
+            // night profile had, in the wave after the one that wrote that
+            // warning down.
+            //
+            // An absent key is an empty list to the page rather than null: a
+            // panel talking to an older server draws no buttons, which is the
+            // same thing it does for a PC that enabled none.
+            payload.put("actions", quotes.optJSONArray("actions"));
 
             return escapeForScript(payload.toString());
         } catch (JSONException malformed) {
