@@ -36,7 +36,11 @@ wave-start:
 	@test -n "$(BRANCH)" || { echo "usage: make wave-start BRANCH=wave/NN-slug"; exit 2; }
 	git fetch --quiet origin
 	git switch main
+	@# Before the merge, where `main` is still the stale thing this session
+	@# opened on -- this is the call that names what it was about to miss.
+	python scripts/check_branch_base.py --report
 	git merge --ff-only origin/main
+	@# After it, as a post-condition. Only allowed to be green.
 	python scripts/check_branch_base.py
 	git switch -c "$(BRANCH)"
 	@echo

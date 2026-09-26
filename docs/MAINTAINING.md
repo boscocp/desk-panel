@@ -103,13 +103,22 @@ worse than a check that does not exist.
    gh api repos/<owner>/<repo>/code-scanning/default-setup
    ```
 
-   If default setup does not offer all three languages, add a workflow instead,
-   with `security-events: write` **on the job and not on the file**, and pin
-   `github/codeql-action/init` and `.../analyze` to SHAs like everything else.
+   If default setup does not offer all three languages, add a workflow instead.
+   Keep the file's top-level `permissions: contents: read` — `check_ci_hygiene.py`
+   rule 1 requires one on every workflow — and add `security-events: write`
+   **on the job**, where it is the narrower of the two. Pin
+   `github/codeql-action/init` and `.../analyze` to SHAs like everything else;
+   rule 2 grants `github/*` no exemption.
 
-2. Add `dependency-review-action` as a job in `lint.yml`, on pull requests.
-   It is nearly a no-op in a repo with almost no dependencies, which is the
-   point: it is how the repo *notices* the day that changes.
+2. Add `dependency-review-action` in **its own workflow file**, `on:
+   pull_request`, not as a job in `lint.yml`. The action only works in a pull
+   request context, and `lint.yml` also runs `on: push`, so a job there would
+   need an `if:` — which `check_ci_hygiene.py` rule 6 bans outright, for the
+   reason wave 23 found. A separate file needs no condition to express. The new
+   file needs `permissions: contents: read` and a `concurrency:` block like
+   every other, or rules 1 and 3 fail it. It is nearly a no-op in a repo with
+   almost no dependencies, which is the point: it is how the repo *notices* the
+   day that changes.
 
 3. Confirm in *Settings → Billing* that the Actions minutes show as unbilled,
    and delete this section.

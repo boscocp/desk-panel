@@ -13,8 +13,11 @@ fine in a diff and is wrong in a way nothing else notices:
   3. every workflow declares `concurrency:`. Three pushes to a branch should
      leave one run.
   4. `.github/dependabot.yml` names exactly the ecosystems this repo has --
-     it fails on a missing one and on an invented one.
-  5. every `scripts/check_*.py` is named in the Makefile, and every one that
+     it fails on a missing one, on an invented one, and on one whose
+     `directory:` holds none of that ecosystem's files. A `gradle` entry
+     pointing at `/` instead of `/android` updates nothing and reads as
+     coverage, which is the failure the rule is for.
+  5. every `scripts/check_*.py` is run by the Makefile, and every one that
      `make check` reaches is also run by a workflow. A guard nobody runs is a
      rule nobody enforces -- which is what TT.12 found for the self-tests, one
      layer down. The two halves are not the same rule: `check_branch_base.py`
@@ -63,7 +66,10 @@ TOP_LEVEL_RE = re.compile(r"^([a-z-]+):")
 # existing: `pyproject.toml` here configures ruff and declares nothing, and a
 # rule keyed on the filename would demand a `pip` block this repo must not have.
 ECOSYSTEMS = {
-    "github-actions": lambda root: any((root / ".github" / "workflows").glob("*.yml")),
+    # Whatever this script reads as a workflow, `.yaml` included -- otherwise a
+    # repo spelling them `.yaml` is told its dependabot config names an
+    # ecosystem it does not have, about workflows this script is checking.
+    "github-actions": lambda root: bool(workflow_files(root)),
     "gradle": lambda root: any(root.rglob("build.gradle.kts")) or any(root.rglob("build.gradle")),
     "docker": lambda root: any(root.rglob("Dockerfile")),
     "npm": lambda root: any(p for p in root.rglob("package.json") if ".git" not in p.parts),
@@ -102,13 +108,44 @@ def top_level_keys(text):
 
 
 def strip_comments(text):
-    """Drop whole-line comments so a rule never fires on prose explaining it.
+    """Blank out whole-line comments so a rule never fires on prose explaining it.
 
     `check_workflow.py` learned this the hard way: `connectedAndroidTest`
     matched inside the comment saying why it is deliberately absent, and the
     alternatives were deleting the comment or gutting the rule.
+
+    Blanked rather than dropped, so line N of the result is line N of the file.
+    An earlier cut dropped them, and every `{name}:{number}` this script printed
+    pointed at the wrong line -- in `lint.yml`, which is half comment, by 26.
+    A checker that names the wrong line is one a reader stops believing.
     """
-    return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+    return "\n".join("" if line.lstrip().startswith("#") else line for line in text.splitlines())
+
+
+# A Makefile recipe line: tab-indented, not a comment, and not `help:` printing
+# the name of a target. See makefile_commands().
+ECHO_RE = re.compile(r"^\t\s*[@-]*echo\b")
+
+
+def makefile_commands(text):
+    """The lines of a Makefile that actually run something.
+
+    Rule 5 asks whether the Makefile *runs* a guard, and a substring search over
+    the whole file cannot tell that from a guard named in a comment or printed
+    by `help:`. Both read as wired while nothing invokes them, which is exactly
+    the state TT.12 found one layer down.
+    """
+    lines = []
+    for line in text.splitlines():
+        if not line.startswith("\t"):
+            continue
+        stripped = line.lstrip("\t").lstrip("@-").lstrip()
+        if stripped.startswith("#"):
+            continue
+        if ECHO_RE.match(line):
+            continue
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def check_workflow(path, text):
@@ -144,6 +181,52 @@ def check_workflow(path, text):
     return problems
 
 
+# Where each ecosystem's marker has to sit for a `directory:` to be pointing at
+# anything. A name that is right and a directory that is wrong updates nothing
+# and still reads as coverage, which is rule 4's whole subject. Found by review.
+DIRECTORY_MARKERS = {
+    "github-actions": [".github/workflows"],
+    "gradle": ["build.gradle.kts", "build.gradle", "settings.gradle.kts", "settings.gradle"],
+    "docker": ["Dockerfile"],
+    "npm": ["package.json"],
+    "pip": ["requirements.txt", "pyproject.toml", "setup.py", "Pipfile"],
+}
+
+
+def declared_entries(body):
+    """(ecosystem, directory) per `updates:` entry, directory None when absent.
+
+    A flat scan, not a parser: `package-ecosystem:` opens an entry and the next
+    `directory:` before the following one belongs to it.
+    """
+    entries = []
+    for line in body.splitlines():
+        eco = re.match(r"^\s*-?\s*package-ecosystem:\s*[\"']?([a-z-]+)", line)
+        if eco:
+            entries.append([eco.group(1), None])
+            continue
+        directory = re.match(r"^\s*directory:\s*[\"']?([^\"'\s]+)", line)
+        if directory and entries and entries[-1][1] is None:
+            entries[-1][1] = directory.group(1)
+    return [tuple(entry) for entry in entries]
+
+
+def misdirected(entries, root):
+    """Entries whose `directory:` holds none of that ecosystem's markers."""
+    problems = []
+    for ecosystem, directory in entries:
+        markers = DIRECTORY_MARKERS.get(ecosystem)
+        if markers is None or directory is None:
+            continue
+        where = root / directory.lstrip("/")
+        if not any((where / marker).exists() for marker in markers):
+            problems.append(
+                f"dependabot.yml: {ecosystem} points at {directory}, which holds no "
+                f"{' or '.join(markers[:2])} -- it would update nothing"
+            )
+    return problems
+
+
 def check_dependabot(root):
     path = root / ".github" / "dependabot.yml"
     if not path.is_file():
@@ -160,7 +243,7 @@ def check_dependabot(root):
         problems.append(f"dependabot.yml: the repo has {name} and the config does not name it")
     for name in sorted(declared - present):
         problems.append(f"dependabot.yml: names {name}, which this repo does not have")
-    return problems
+    return problems + misdirected(declared_entries(body), root)
 
 
 def check_reachable(makefile_text):
@@ -175,15 +258,17 @@ def check_reachable(makefile_text):
     for name in sorted(targets):
         body = re.search(rf"^{re.escape(name)}:.*\n((?:[\t#].*\n|\n)*)", makefile_text, re.M)
         if body:
-            recipes.append(body.group(1))
+            recipes.append(makefile_commands(body.group(1)))
     return "\n".join(recipes)
 
 
 def check_guards_are_run(root, workflows):
     """Every `scripts/check_*.py` is wired, and the two halves differ.
 
-    Named in the Makefile: always. A guard that only a workflow runs cannot be
-    failed before pushing, which is half the value of having it.
+    Run by the Makefile: always. A guard that only a workflow runs cannot be
+    failed before pushing, which is half the value of having it. "Run by" is a
+    search over recipe lines, not the file -- a guard named in a comment or
+    printed by `help:` is named, not run.
 
     Run by a workflow: only for the guards `make check` reaches. The others are
     reached by a target with a different job -- `make wave-start` runs
@@ -200,10 +285,11 @@ def check_guards_are_run(root, workflows):
     workflow_text = "\n".join(strip_comments(p.read_text(encoding="utf-8")) for p in workflows)
     makefile = root / "Makefile"
     makefile_text = makefile.read_text(encoding="utf-8") if makefile.is_file() else ""
+    commands = makefile_commands(makefile_text)
     reachable = check_reachable(makefile_text)
     problems = []
     for guard in guards:
-        if guard not in makefile_text:
+        if guard not in commands:
             problems.append(f"scripts/{guard}: the Makefile never runs it, so it is CI-only")
         elif guard in reachable and guard not in workflow_text:
             problems.append(f"scripts/{guard}: `make check` runs it and no workflow does")
@@ -223,7 +309,20 @@ def check_pr_template(root, workflows):
         return []
     ran = "\n".join(p.read_text(encoding="utf-8") for p in workflows)
     makefile = root / "Makefile"
-    ran += makefile.read_text(encoding="utf-8") if makefile.is_file() else ""
+    makefile_text = makefile.read_text(encoding="utf-8") if makefile.is_file() else ""
+    ran += makefile_text
+    # A Makefile declares `check:`, never the string `make check`, so a template
+    # asking for this repo's own headline command would otherwise be reported as
+    # asking for something nothing runs. Every declared target counts as its own
+    # invocation; a `make` of a target that does not exist still fails.
+    ran += "\n" + "\n".join(
+        f"make {name}"
+        for line in makefile_text.splitlines()
+        if not line.startswith("\t")
+        for match in [re.match(r"^([A-Za-z0-9_][A-Za-z0-9_. -]*):(?!=)", line)]
+        if match
+        for name in match.group(1).split()
+    )
     problems = []
     for command in re.findall(r"`((?:make|python|node|\./gradlew)\s[^`]+)`", path.read_text(encoding="utf-8")):
         if command.strip() not in ran:
@@ -359,6 +458,40 @@ def self_test_cases():
             lambda: any("CI-only" in p for p in _guard_case("check: lint-y\n\nlint-y:\n\ttrue\n", workflow_runs=True)),
         ),
         (
+            # `help:` prints the name of every target and, in this repo, what
+            # each one runs. Named is not run.
+            "a guard only `help:` prints is not a guard the Makefile runs",
+            lambda: any(
+                "CI-only" in p
+                for p in _guard_case(
+                    'help:\n\t@echo "lint-x  runs scripts/check_x.py"\n\ncheck: lint-y\n\nlint-y:\n\ttrue\n',
+                    workflow_runs=True,
+                )
+            ),
+        ),
+        (
+            "a guard only a comment names is not a guard the Makefile runs",
+            lambda: any(
+                "CI-only" in p
+                for p in _guard_case(
+                    "# one day, scripts/check_x.py\ncheck: lint-y\n\nlint-y:\n\ttrue\n",
+                    workflow_runs=True,
+                )
+            ),
+        ),
+        (
+            "a violation is reported at its line in the file, not in the comment-stripped body",
+            _line_number_case,
+        ),
+        (
+            "a template asking for a Makefile target this repo has is not a problem",
+            lambda: _pr_template_case("Run `make check` before opening this.") == [],
+        ),
+        (
+            "a template asking for a target that does not exist is caught",
+            lambda: any("which nothing runs" in p for p in _pr_template_case("Run `make nonesuch`.")),
+        ),
+        (
             "an ecosystem the repo has and the config omits is caught",
             lambda: any("does not name it" in p for p in _dependabot_case(["github-actions"])),
         ),
@@ -368,6 +501,27 @@ def self_test_cases():
                 "which this repo does not have" in p
                 for p in _dependabot_case(["github-actions", "gradle", "docker", "npm"])
             ),
+        ),
+        (
+            "an entry pointing at a directory with none of its files is caught",
+            lambda: any("would update nothing" in p for p in _dependabot_case(
+                ["github-actions", "gradle", "docker"], gradle_directory="/")),
+        ),
+        (
+            "an entry pointing at the right directory is not",
+            lambda: _dependabot_case(["github-actions", "gradle", "docker"]) == [],
+        ),
+        (
+            "directory and ecosystem are paired by order, not by guessing",
+            lambda: declared_entries(
+                "updates:\n"
+                "  - package-ecosystem: gradle\n    directory: \"/android\"\n"
+                "  - package-ecosystem: docker\n    directory: \"/docker\"\n"
+            ) == [("gradle", "/android"), ("docker", "/docker")],
+        ),
+        (
+            "an entry with no directory is not invented one",
+            lambda: declared_entries("  - package-ecosystem: gradle\n") == [("gradle", None)],
         ),
         (
             "a dependabot.yml this reader cannot parse is a failure, not a pass",
@@ -385,6 +539,13 @@ def self_test_cases():
 def _caught(fragment, text):
     """The mutated fixture produces a problem mentioning `fragment`."""
     return any(fragment in problem for problem in _one(text))
+
+
+def _line_number_case():
+    """A violation under a comment block is reported at its line in the file."""
+    text = "# one\n# two\n# three\n" + CLEAN.replace(PINNED, "actions/checkout@v4")
+    expected = next(n for n, line in enumerate(text.splitlines(), 1) if "checkout@v4" in line)
+    return any(problem.startswith(f"x.yml:{expected}:") for problem in _one(text))
 
 
 def _quiet(call):
@@ -408,10 +569,30 @@ def _guard_case(makefile, workflow_runs):
         return check_guards_are_run(root, [path])
 
 
-def _dependabot_case(ecosystems):
+def _pr_template_case(template):
+    """check_pr_template against a throwaway tree holding one template."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        (root / ".github" / "workflows").mkdir(parents=True)
+        path = root / ".github" / "workflows" / "x.yml"
+        path.write_text(CLEAN, encoding="utf-8")
+        (root / "Makefile").write_text("check: lint-y\n\nlint-y:\n\ttrue\n", encoding="utf-8")
+        (root / ".github" / "PULL_REQUEST_TEMPLATE.md").write_text(template, encoding="utf-8")
+        return check_pr_template(root, [path])
+
+
+DEPENDABOT_DIRECTORIES = {"github-actions": "/", "gradle": "/android", "docker": "/docker"}
+
+
+def _dependabot_case(ecosystems, gradle_directory=None):
     """check_dependabot against a throwaway tree declaring `ecosystems`."""
     import tempfile
 
+    directories = dict(DEPENDABOT_DIRECTORIES)
+    if gradle_directory:
+        directories["gradle"] = gradle_directory
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         (root / ".github" / "workflows").mkdir(parents=True)
@@ -421,7 +602,8 @@ def _dependabot_case(ecosystems):
         (root / "docker").mkdir()
         (root / "docker" / "Dockerfile").write_text("FROM x\n", encoding="utf-8")
         body = "version: 2\nupdates:\n" + "".join(
-            f'  - package-ecosystem: {name}\n    directory: "/"\n' for name in ecosystems
+            f'  - package-ecosystem: {name}\n    directory: "{directories.get(name, "/")}"\n'
+            for name in ecosystems
         )
         (root / ".github" / "dependabot.yml").write_text(body, encoding="utf-8")
         return check_dependabot(root)
