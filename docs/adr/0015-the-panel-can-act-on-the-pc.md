@@ -106,6 +106,14 @@ A button that displays a state it is guessing is worse than a button that displa
 that says the microphone is live when it is not is a privacy failure, not a cosmetic one. That
 rule is unchanged. What changed is that the panel stopped having to guess.
 
+**"The microphone" means every input, not the default one.** Added 2026-09-26, after the first
+press on the Windows box: three live inputs, the button muted the default while the owner was
+talking into a headset, and the panel drew a cross over an open microphone. The state was
+measured, and it was the wrong device's. On Windows the default input decides the direction and
+every active capture endpoint follows it, so one press never leaves some muted and some live.
+The speakers stay default-only, because sound from the wrong one is audible and a microphone
+left open is not. Linux and macOS still toggle the default alone; that is T8.3.
+
 ### `POST` only, and no shell
 
 `GET` is out, because a `GET` that changes the machine is one browser prefetch or one link
