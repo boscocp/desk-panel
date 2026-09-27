@@ -38,7 +38,8 @@ code says that", delete it for real.
 Anything with a decision in it belongs in a plain class that a JVM test can construct —
 `PcState` and `ThermalState` are the pattern. An `Activity` or a `View` with a rule inside it can
 only be tested on a device, and a test that needs a device is a test that does not run.
-See [android/CLAUDE.md](android/CLAUDE.md) for the boundary.
+[ARCHITECTURE.md](docs/ARCHITECTURE.md) draws the boundary: the service owns the loop, `PcState`
+owns the transitions, and `MainActivity` only does what it is told.
 
 ### `web/js/format.js` is pure functions only
 

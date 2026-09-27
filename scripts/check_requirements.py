@@ -66,13 +66,28 @@ FACTS = (
     Fact("ruff", ".github/workflows/lint.yml", r"pip install ruff==([\d.]+)"),
 )
 
-ROW_RE = re.compile(r"^\|([^|]+)\|(.*)$", re.M)
+ROW_RE = re.compile(r"^\|([^|]+)\|(.*)$")
+
+# A fenced block is not a table. `|` opens plenty of shell lines, and the first
+# row wins below -- so a snippet above the real table would shadow the fact it
+# defines and the guard would compare against the wrong text.
+FENCE_RE = re.compile(r"^\s*(```|~~~)")
 
 
 def rows(text):
     """Pure: {first cell: the rest of the row} for every table row."""
     found = {}
-    for cell, rest in ROW_RE.findall(text):
+    fenced = False
+    for line in text.splitlines():
+        if FENCE_RE.match(line):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        row = ROW_RE.match(line)
+        if not row:
+            continue
+        cell, rest = row.group(1), row.group(2)
         name = cell.strip().strip("`*").strip()
         # `|---|---|` is a table's header separator, not a row. Left in, it
         # would be a name a document could accidentally define a fact under.
@@ -118,6 +133,9 @@ def _self_test():
     ok("backticks and emphasis do not hide a name",
        "ruff" in rows("| `**ruff**` | 0.1 |\n"))
     ok("the header separator is not a row", "---" not in rows("| a | b |\n|---|---|\n"))
+    ok("a pipe inside a fence is not a row",
+       rows("```\n| Python | 3.9 |\n```\n| Python | 3.11 |\n")["Python"].strip()
+       .startswith("3.11"))
 
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)

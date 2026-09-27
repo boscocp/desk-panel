@@ -47,6 +47,12 @@ LINK_RE = re.compile(r"\[[^\]]*\]\(\s*(<[^>]+>|[^)\s]+)")
 # a link, and `docs/` is full of shell snippets.
 FENCE_RE = re.compile(r"^\s*(```|~~~)")
 
+# Inline code spans are skipped for the same reason and are easier to miss:
+# these pages quote Markdown at each other, and a sentence explaining that
+# `[text](target)` is the only form this parser reads would otherwise be
+# reported as a dead link to a file called `target`.
+CODE_SPAN_RE = re.compile(r"`[^`]*`")
+
 USER_AGENT = "desk-panel-link-check"
 
 
@@ -60,7 +66,7 @@ def links_in(text):
             continue
         if fenced:
             continue
-        for target in LINK_RE.findall(line):
+        for target in LINK_RE.findall(CODE_SPAN_RE.sub("", line)):
             found.append(target.strip("<>"))
     return found
 
@@ -94,6 +100,12 @@ def check_remote(url, timeout, opener=None):
     HEAD first because it is cheap, then GET: plenty of servers answer 405 or
     403 to a HEAD they would serve happily, and reporting one of those as a
     dead link would be this script crying wolf on its first run.
+
+    A 429 or a 5xx is **not** a dead link either, and getting that wrong costs
+    the same thing: the CI step runs from a shared runner address against a
+    handful of documentation hosts, and the day one of them rate-limits it the
+    build would read "you broke a link" about a page that is perfectly alive.
+    Those go on the unreachable side, where a network failure already lives.
     """
     opener = opener or _urlopen
     reason = None
@@ -104,9 +116,9 @@ def check_remote(url, timeout, opener=None):
             with opener(request, timeout) as answer:
                 if 200 <= answer.status < 300:
                     return None
-                reason = ("dead", f"HTTP {answer.status}")
+                reason = _status_reason(answer.status)
         except urllib.error.HTTPError as exc:
-            reason = ("dead", f"HTTP {exc.code}")
+            reason = _status_reason(exc.code)
         except urllib.error.URLError as exc:
             # No status at all: DNS, a refused connection, a timeout. The
             # server never said anything about the page, so neither do we.
@@ -114,6 +126,18 @@ def check_remote(url, timeout, opener=None):
         except TimeoutError as exc:
             return ("unreachable", f"timed out: {exc}" if str(exc) else "timed out")
     return reason
+
+
+def _status_reason(status):
+    """Pure: which bucket an HTTP status belongs in, and how to say it.
+
+    The line is "did the server tell us this page is gone". 404 and 410 do;
+    429 says come back later and 5xx says the server is having a bad day, and
+    neither is a statement about the page.
+    """
+    if status == 429 or 500 <= status < 600:
+        return ("unreachable", f"HTTP {status}")
+    return ("dead", f"HTTP {status}")
 
 
 def _urlopen(request, timeout):
@@ -204,6 +228,8 @@ def _self_test():
        links_in("[t](<a b.md>)") == ["a b.md"])
     ok("a title after the url is not part of it",
        links_in('[t](docs/x.md "why")') == ["docs/x.md"])
+    ok("a link inside a code span is not a link",
+       links_in("write it as `[text](target)`, then [really](docs/x.md)") == ["docs/x.md"])
     ok("an anchor alone is skipped", classify("#section") == "skip")
     ok("mailto is skipped", classify("mailto:someone@example.com") == "skip")
     ok("http and https are remote",
@@ -271,6 +297,20 @@ def _self_test():
         dead, _ = check([twice], opener=head_refused)
         ok("a HEAD refused is retried as GET", methods == ["HEAD", "GET"] and dead == [])
 
+        # `twice.md` carries the same url on two lines, so each verdict is
+        # reported twice off one request -- which is the dedup test above.
+        dead, unreachable = check([twice], opener=answers(429))
+        ok("a rate limit is not a dead link", dead == [] and len(unreachable) == 2)
+        dead, unreachable = check([twice], opener=answers(503))
+        ok("a server having a bad day is not a dead link",
+           dead == [] and len(unreachable) == 2)
+        dead, unreachable = check([twice], opener=answers(410))
+        ok("a gone page is still a dead link", len(dead) == 2 and unreachable == [])
+
+    with contextlib.redirect_stderr(io.StringIO()):
+        ok("--timeout with a non-number is a usage error, not a traceback",
+           main(["check_links.py", "--timeout", "soon", "README.md"]) == 2)
+
     print(f"\ncheck_links --self-test: {len(failures)} failure(s)")
     return 1 if failures else 0
 
@@ -288,7 +328,16 @@ def main(argv):
             if not args:
                 print("check_links: --timeout needs a value", file=sys.stderr)
                 return 2
-            timeout = float(args.pop(0))
+            given = args.pop(0)
+            try:
+                timeout = float(given)
+            except ValueError:
+                # A usage error prints a usage error. A traceback here would
+                # be this script failing the way it exists to stop others
+                # failing.
+                print(f"check_links: --timeout wants a number, not {given!r}",
+                      file=sys.stderr)
+                return 2
         elif flag.startswith("-"):
             print(f"check_links: unknown option {flag}", file=sys.stderr)
             return 2

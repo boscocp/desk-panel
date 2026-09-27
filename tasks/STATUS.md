@@ -221,6 +221,25 @@ every Markdown file in the repository and CI runs the full half over the documen
 actually follows. When T7.7 makes the repo public that distinction disappears and the CI list
 should widen to `MARKDOWN`.
 
+### The review found the two worst defects in the prose, not the code
+
+Eight findings. The two that would have cost a contributor most were instructions they would
+follow and fail: a Quickstart that only works on macOS, inside the block promising "nothing
+installed", and a troubleshooting row recommending `python -m http.server -d web` for a blank
+panel — which loads the page and silently kills the mock feed, because `mock.js` only runs from
+`file:`. Both were written in a session that had read the relevant guard the same day.
+
+Three more were in the new guards and would have bitten quickly: a 429 from a shared CI runner
+reported as a dead link (the script had already separated `unreachable` from `dead` for exactly
+that reason and then did not use it), `git commit -v` failing on the content of the diff because
+the scissors line is not a comment, and a hook that picked `python3` where everything else here
+says `python` — which on Windows means `make hooks` succeeds and every commit afterwards fails.
+
+**The transferable part: the guards were reviewed as code and the documents were not reviewed at
+all.** A document is an interface, and this wave shipped it with less adversarial reading than a
+function would have got. T7.9 inherits that lesson, and both unrun manual checks below are the
+same gap seen from the other side.
+
 ### What is not proven
 
 - **Neither document has been read by a stranger.** T7.4 and T7.5 both ask for exactly that —

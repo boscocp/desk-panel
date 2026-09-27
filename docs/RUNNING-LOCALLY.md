@@ -144,7 +144,7 @@ repository is free to change without telling you.
 |---|---|
 | `make check` fails on `lint-*` | One of the repository's own guards; each prints what disagreed and with what |
 | `make check` fails on Docker | You are missing Docker. `make test-web` and `make test-server` are the useful subset without it |
-| The panel in the browser is blank | The browser is refusing `file:` — some builds block local scripts. Serve the directory: `python -m http.server -d web` |
+| The panel in the browser is blank | The browser is refusing `file:` — some builds block local scripts. Try another browser first: serving the directory (`python -m http.server -d web`) loads the page but **not the mock data**, because `mock.js` feeds it only from `file:` |
 | Quotes are stale in tier 2 | No token in `server/config.toml`, which is the expected state on a clean clone |
 | The panel says offline with the server running | The APK pins one PC address at build time; see [PHONE-SETUP.md](PHONE-SETUP.md) |
 
