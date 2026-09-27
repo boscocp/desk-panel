@@ -102,6 +102,24 @@ class CatalogueTests(unittest.TestCase):
         declarations = declarations.split("int SetMute")[0]
         self.assertEqual(declarations.count("();"), 11)
 
+    def test_windows_mutes_every_microphone_and_only_the_default_speaker(self):
+        # Measured on the Windows box: three live inputs, and a toggle of the
+        # default alone left the headset the owner was talking into open while
+        # the button showed a cross. Speakers stay default-only on purpose.
+        mic, = actions.candidates("mute-mic", "win32")
+        speakers, = actions.candidates("mute-audio", "win32")
+        self.assertTrue(mic[-1].endswith("[Endpoint]::Toggle(1,$true)"))
+        self.assertTrue(speakers[-1].endswith("[Endpoint]::Toggle(0,$false)"))
+
+    def test_windows_enumerator_declares_its_slots_in_vtable_order(self):
+        # Same rule as IAudioEndpointVolume: EnumAudioEndpoints is slot one,
+        # GetDefaultAudioEndpoint slot two. Swapped, the default lookup would
+        # call the enumeration with the wrong arguments.
+        argv, = actions.candidates("mute-mic", "win32")
+        body = argv[-1].split("interface IMMDeviceEnumerator {")[1].split("}")[0]
+        self.assertLess(body.index("EnumAudioEndpoints"), body.index("GetDefaultAudioEndpoint"))
+        self.assertEqual(body.count("\n  int "), 2)
+
     def test_an_id_outside_the_catalogue_raises_rather_than_returning_empty(self):
         # Empty would read as "this platform cannot", which is a different
         # answer with a different status code.
