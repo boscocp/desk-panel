@@ -1,7 +1,7 @@
 # Entry point for humans, CI and agents alike. Every target exits non-zero on failure.
 DC := docker compose -f docker/compose.yml run --rm build
 
-.PHONY: help wave-start check lint-tasks lint-notes lint-status lint-permissions lint-workflow lint-ci-hygiene lint-selftests test-server test-web test-android connected build apk contract e2e clean
+.PHONY: help wave-start check hooks lint-tasks lint-notes lint-status lint-permissions lint-workflow lint-ci-hygiene lint-selftests lint-links lint-requirements lint-commits test-server test-web test-android connected build apk contract e2e clean
 
 help:
 	@echo "wave-start    fetch, prove main is current, cut BRANCH=wave/NN-slug"
@@ -20,6 +20,10 @@ help:
 	@echo "lint-workflow ci.yml runs the same commands these targets do"
 	@echo "lint-ci-hygiene  permissions, SHA pins, concurrency, dependabot"
 	@echo "lint-selftests  every scripts/*.py that has a --self-test runs it"
+	@echo "lint-links    every Markdown link resolves (local half; CI does the remote one)"
+	@echo "lint-requirements  docs/REQUIREMENTS.md still matches what the build pins"
+	@echo "lint-commits  the last thirty commit subjects fit the convention"
+	@echo "hooks         install .githooks (commit-msg checks the message shape)"
 	@echo "clean         remove build output"
 
 # The first command of a wave, and the only one that talks to the network
@@ -47,7 +51,7 @@ wave-start:
 	@echo "Read this before writing anything -- it is the wave's prompt:"
 	@grep -n -m1 '^## Resuming after' tasks/STATUS.md
 
-check: lint-tasks lint-notes lint-status lint-permissions lint-workflow lint-ci-hygiene lint-selftests test-server test-web test-android
+check: lint-tasks lint-notes lint-status lint-permissions lint-workflow lint-ci-hygiene lint-selftests lint-links lint-requirements lint-commits test-server test-web test-android
 
 lint-tasks:
 	python scripts/check_acceptance.py
@@ -96,6 +100,41 @@ lint-selftests:
 	@# discovery is a glob over scripts/, never a list of names
 	@test -n "$(SELFTESTS)" || { echo "lint-selftests: nothing carries a --self-test"; exit 1; }
 	@for s in $(SELFTESTS); do echo "--> $$s --self-test"; python "$$s" --self-test || exit 1; done
+
+# Every Markdown file in the repository, the historical record included: a
+# link rots the same whether a contributor or a future session follows it.
+MARKDOWN := README.md CONTRIBUTING.md .github/PULL_REQUEST_TEMPLATE.md $(wildcard docs/*.md) $(wildcard docs/adr/*.md) $(wildcard docs/harness-notes/*.md) $(wildcard tasks/*.md) e2e/README.md e2e/layout/README.md
+
+# The subset a reader actually follows. CI checks these *with* the network;
+# `make check` does not, and the difference is deliberate twice over:
+#
+#   - `make check` is the command that has to work on a train. A guard that
+#     fails because the wifi is bad is a guard people learn to skip.
+#   - the harness notes and task files link to pull requests in this
+#     repository, which is still private -- GitHub answers 404 rather than 403
+#     for those, so an anonymous checker cannot tell "deleted" from "not
+#     yours". T7.7 makes the repo public and this distinction goes away.
+MARKDOWN_PUBLIC := README.md CONTRIBUTING.md .github/PULL_REQUEST_TEMPLATE.md $(wildcard docs/*.md) $(wildcard docs/adr/*.md)
+
+lint-links:
+	python scripts/check_links.py --skip-remote $(MARKDOWN)
+
+lint-requirements:
+	python scripts/check_requirements.py
+
+# The convention asserted against the repository's own history, which is what
+# makes it honest: a rule this log breaks is a rule nobody will follow, and it
+# should fail here rather than in a stranger's first pull request. Thirty
+# because that is roughly two waves, and because a shallow CI checkout has no
+# more than that to offer.
+lint-commits:
+	git log --format=%s -30 | python scripts/check_commit_msg.py -
+
+# Git runs no hook a clone brings with it -- that is a security property, not
+# an oversight -- so this is opt-in and one line.
+hooks:
+	git config core.hooksPath .githooks
+	@echo "hooks: commit-msg installed; scripts/check_commit_msg.py decides"
 
 test-server:
 	python -m unittest discover -s server/tests -t .

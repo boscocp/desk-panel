@@ -1,6 +1,16 @@
-# Installing on the phone
+# Installing on the Redmi, under MIUI
 
-Target device: Redmi Note 10, Android 12, MIUI 14.0.9. AMOLED, 2400x1080, used in landscape.
+**This is one vendor's recipe on one phone.** Target device: Redmi Note 10, Android 12,
+MIUI 14.0.9, AMOLED 2400x1080, used in landscape.
+
+The platform half — what the panel asks of Android, why, and how to verify each grant from
+`adb` — is [PHONE-SETUP.md](PHONE-SETUP.md), and it is the one to read first and the one to hand
+to somebody with a different phone. Everything below is either a menu path that exists only in
+this skin, or a number read off this device. Where a step has a platform equivalent, it links to
+it rather than explaining it again.
+
+Read the two together. Roughly: the other document says *what* has to be true, this one says
+where the switch is on a Xiaomi.
 
 ## Installing without a cable
 
@@ -17,74 +27,60 @@ by side, and the one you want is whichever was built last, not whichever sorts f
 nothing has been built the route answers 404 with the build command in it, rather than an empty
 page that reads like the server is broken.
 
-Download, then install. MIUI will ask you to allow installs from the browser once.
+Download, then install. The browser asks for permission to install once.
 
-This deliberately avoids `adb install` over USB, which on MIUI requires enabling "USB debugging
-(Security settings)" — a separate toggle from the standard one that wants a Xiaomi account and
-sometimes imposes a waiting period on new accounts. The browser route sidesteps all of it.
+**Vendor detail:** this deliberately avoids `adb install` over USB, which on this skin requires
+enabling *USB debugging (Security settings)* — a separate toggle from the standard one, which
+wants a Xiaomi account and sometimes imposes a waiting period on new accounts. The browser route
+sidesteps all of it. On a stock Android build neither toggle exists and either route is fine.
 
 ## The APK is built for one PC address
 
-The app is allowed to talk cleartext http to exactly one host, and that permission is baked
-into the APK. It comes from `PC_IP` in the gitignored `.env` at the repository root — the file
-`.env.example` describes, and which also holds the signing keys
-([ADR 0013](adr/0013-local-configuration-boundaries.md)). **Never put an API token there:**
-the phone never reaches a data provider, the PC does, and anything Gradle reads is compiled
-into the APK, which is a zip file. Tokens, tickers, the city and the intervals live in
-`server/config.toml` on the PC instead.
+Unchanged from [PHONE-SETUP.md](PHONE-SETUP.md#the-apk-is-built-for-one-pc-address), and worth
+repeating only for the check: the phone and the PC need not share a subnet — on the development
+network they do not, and routing between them works. `adb shell ping -c 3 <PC_IP>` is the test.
 
-So before building the APK you install here, set `PC_IP` to the PC's LAN address — the one from
-its static DHCP reservation. **If that address ever changes, editing `.env` is not enough: the
-APK has to be rebuilt and reinstalled**, because cleartext permission is a property of the APK,
-not of the server. Nothing else in the project behaves that way.
+## The settings that decide whether this works at all
 
-Every build prints which address it used:
-
-```
-desk-panel: cleartext pinned to 192.168.15.3 (from .env)
-desk-panel: cleartext pinned to 192.168.1.100 (placeholder — no .env, the panel will not reach any PC)
-```
-
-The second line means the APK will report "offline" for ever, whatever the network is doing.
-That looks exactly like a bug in the app, which is why the line exists. See
-[BUILD.md](BUILD.md).
-
-The phone and the PC need not share a subnet — on the development network they do not, and
-routing between them works. `adb shell ping -c 3 <PC_IP>` is the check.
-
-## MIUI settings that decide whether this works at all
-
-These are not optional polish. Without them MIUI will kill the app within hours and it will
-look like a bug in the code.
+These are not optional polish. Without them the system will kill the app within hours and it
+will look like a bug in the code.
 
 1. **Autostart** — Settings → Apps → Manage apps → desk-panel → **Autostart on**.
-   Without it the app does not come back after a reboot.
+   Without it the app does not come back after a reboot. **This list is the vendor's and has no
+   AOSP equivalent**; the app declares no boot receiver of its own, so on a phone without such a
+   list you open the app by hand after a reboot.
+
 2. **Battery saver → No restrictions** — same screen, Battery saver → **No restrictions**.
-   MIUI's battery manager will otherwise freeze the Activity and the panel silently stops
-   updating. **This is MIUI's own list, and it is not Android's** — see step 6, which is a
+   The vendor battery manager will otherwise freeze the Activity and the panel silently stops
+   updating. **This is the vendor's own list and it is not Android's** — see step 6, which is a
    different exemption on a different list and is the one the sparse offline alarm depends on.
-   Doing this one does not do that one.
+   Doing this one does not do that one, and they are confused constantly.
+
 3. **Lock in recents** — open the app switcher, pull the app card down to lock it. Reduces the
-   chance of MIUI reclaiming it under memory pressure.
+   chance of the system reclaiming it under memory pressure. Vendor behaviour.
+
 4. **Show on Lock screen** — same screen, Other permissions → **Show on Lock screen**, and
-   **Display pop-up windows while running in the background** with it.
-   This is what lets the panel come back on its own. When the PC returns, the service raises
-   the Activity so `setTurnScreenOn` can fire (ADR 0014); without this permission MIUI refuses
-   it and says so in logcat —
+   **Display pop-up windows while running in the background** with it. Both are vendor
+   permissions with no AOSP equivalent.
+
+   This is what lets the panel come back on its own. When the PC returns, the service raises the
+   Activity so `setTurnScreenOn` can fire ([ADR 0014](adr/0014-poll-loop-outlives-the-screen.md));
+   without this permission the system refuses it and says so in logcat —
    `MIUILOG- Show when locked PermissionDenied pkg : dev.bosco.deskpanel` — while everything
    else looks perfect: `state=online` and `screen=wake` are both logged, and the screen stays
    dark. Measured on the device, 2026-09-19.
-5. **Stay awake OFF** — Developer options → **Stay awake** must be **off**.
-   It is on by default on a phone that has been used for development, and it holds the screen
-   on for as long as the phone is charging — which, on this desk, is always. With it on the
-   panel logs `screen=sleep` and the display stays lit, so the single largest longevity win in
-   the project silently does not happen (ADR 0005, ADR 0008). Check it from the host with
-   `adb shell settings get global stay_on_while_plugged_in`; the answer must be `0`.
+
+5. **Stay awake OFF** — Developer options → **Stay awake** must be **off**. This one *is*
+   Android's, and [PHONE-SETUP.md](PHONE-SETUP.md#developer-options-and-adb-over-wi-fi) says why
+   it matters. It is on by default on a phone that has been used for development.
+
+   ```bash
+   adb shell settings get global stay_on_while_plugged_in   # must be 0
+   ```
+
    An earlier version of this document recommended turning it **on**. That advice belonged to
    the abandoned design where the screen never slept and offline was faked with
    `screenBrightness = 0f`, and it is wrong now.
-6. **Auto-rotate off**, phone in landscape. The app locks orientation itself, but this avoids
-   fighting the system during setup.
 
 6. **Android's battery optimisation exemption** — Settings → Apps → desk-panel → Battery →
    **Unrestricted**, or from the host:
@@ -102,16 +98,19 @@ look like a bug in the code.
    for its presence passes while recovery is three days away.
 
    The failure this produces is the project's worst shape: offline on battery, the panel goes
-   dormant exactly as designed, and then nothing ever wakes it. Step 2 does not cover it —
-   MIUI's "No restrictions" left the app absent from `deviceidle whitelist` on this phone.
+   dormant exactly as designed, and then nothing ever wakes it. Step 2 does not cover it — the
+   vendor's *No restrictions* left the app absent from `deviceidle whitelist` on this phone.
    Check it the same way after every `adb install -r`, alongside the app-ops in step 4.
+
+7. **Auto-rotate off**, phone in landscape. The app locks orientation itself, but this avoids
+   fighting the system during setup.
 
 Verify with a reboot: the panel should return to the foreground on its own within about two
 minutes, untouched.
 
 ### These settings do not survive a reinstall
 
-The two permissions in step 4 are MIUI app-ops, and `adb install -r` resets them to denied.
+The two permissions in step 4 are vendor app-ops, and `adb install -r` resets them to denied.
 That is worth knowing because nothing announces it: the panel keeps logging `screen=wake`
 perfectly and simply stops turning the screen on. After every install, either set them again in
 the UI or from the host:
@@ -122,21 +121,17 @@ adb shell appops set dev.bosco.deskpanel 10008 allow   # background pop-up
 adb shell appops get dev.bosco.deskpanel | grep MIUIOP
 ```
 
-The numeric ops are MIUI's own and are not documented by Xiaomi; they were read off this
-device. Setting them in the Settings UI is the durable route, and the one to use on the phone
-that is actually going to live on the desk.
+**The numeric ops are the vendor's own and Xiaomi documents none of them; they were read off
+this device.** They are not stable across skins or versions, and on a stock Android build the
+numbers mean something else entirely or nothing at all — which is why they are here and not in
+the platform document. Setting them in the Settings UI is the durable route, and the one to use
+on the phone that is actually going to live on the desk.
 
 ## Wireless debugging (development only)
 
-Android 12 supports it, so no cable is needed for the development loop either.
-
-Developer options → **Wireless debugging** → *Pair device with pairing code*. Then:
-
-```bash
-adb pair <ip>:<pair-port>      # enter the 6-digit code
-adb connect <ip>:<port>
-adb logcat -s DeskPanel
-```
+The pairing flow itself is Android's and is in
+[PHONE-SETUP.md](PHONE-SETUP.md#developer-options-and-adb-over-wi-fi). What belongs here is where
+`adb` should run from:
 
 **Run adb on the host, not inside the build container.** The container does ship `adb` — the
 image installs `platform-tools` — but it should not be the thing that owns the phone, and the
@@ -158,11 +153,6 @@ extracting `platform-tools` into `tools/platform-tools/` in this repo rather tha
 anything — a zip with no installer, `tools/` is gitignored, and deleting the folder removes it
 completely, so the "nothing installed on Windows" promise ([ADR 0003](adr/0003-containerized-toolchain.md))
 holds either way.
-
-Pairing is one-time per host; the connection survives until the phone forgets it or wireless
-debugging is turned off. Some access points block mDNS — if *Pair device with pairing code*
-never finds the host, the explicit `adb pair <ip>:<pair-port>` above does not need discovery at
-all, and a phone hotspot is the quickest way to tell the two apart.
 
 ## Battery
 
