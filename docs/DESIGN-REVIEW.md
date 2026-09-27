@@ -26,7 +26,7 @@ file. The walks are where the findings came from; the reading only explained the
 | `web/` | ~2,100 lines | `format.js` (pure), `host.js` (the theme registry), `app.js` (the native seam), two themes | `node:test` over pure functions; six browser checks under `e2e/layout/` |
 | `server/` | ~5,000 lines | `App` (caches and payload), `Handler` (routing only), five provider modules, `actions.py`, `verify_login_scope.py` | `unittest`, network patched, fixtures committed |
 | `android/` | ~3,800 lines | `MainActivity`, `PanelService`, two pollers, and six plain classes holding the decisions | `./gradlew test` on the JVM; the plain classes are why that is possible |
-| harness | — | seven `scripts/check_*.py`, six browser checks, `run_e2e.py` | each script carries its own `--self-test` |
+| harness | — | ten `scripts/check_*.py`, six browser checks, `run_e2e.py` | six of the ten carry a `--self-test`; `check_acceptance`, `check_harness_notes`, `check_permission_parity` and `check_status` carry none |
 
 ## The three seams this project already gets right
 
@@ -113,20 +113,29 @@ carrying the loader, the history loader, the config key and the row key — and 
 base class or a plugin system. Filed as **T10.2**, with the weather seam as its second step,
 because a second weather provider is the walk with the worst answer today.
 
-## F3 — A 97-case self-test that nothing runs
+## F3 — One `--self-test` entry point that no target invokes
 
 `server/verify_login_scope.py` carries a `--self-test` with **97 cases**, covering the parsers for
 all three operating systems from fixtures — which is the only way macOS is checkable at all from
 this desk. `make lint-selftests` discovers self-tests by `grep -l '"--self-test"' scripts/*.py`,
-and that glob stops at `scripts/`.
+and that glob stops at `scripts/`. So `make check` never runs that command.
 
-So the file exists, the cases pass today (verified while writing this: 97/97), and **nothing
-would say so if they stopped**. This is TT.12's exact subject — a self-test with no runner —
-surviving the wave that was written to end it, because the fix was a glob over one directory and
-the repository has checkable code in two. Wave 25's note recorded the gap and nothing turned it
-into a command with an exit code.
+**The cases themselves are not unrun, and the first draft of this finding said they were.**
+`server/tests/test_login_scope.py` imports `vls.self_test_cases()` and asserts every triple as a
+subTest, and that file is reached by `python -m unittest discover -s server/tests -t .`, which is
+`make check`'s `test-server`. Breaking a fixture turns the suite red today — verified by changing
+`LogonType` in `windows_schtasks_good.xml` and watching three tests fail. TT.10 did that on
+purpose, and said so in the file: *"a self-test nobody invokes is a self-test that goes stale."*
 
-Filed as **T10.3**, and it is the smallest task in the repository: a second glob.
+What is actually unguarded is narrower and still worth closing: the **CLI path** — argument
+parsing, the 97/97 summary line, the exit code — is what `docs/SERVER-SETUP.md` tells a person to
+run on their own machine, and nothing exercises it. A refactor that broke `--self-test` while
+leaving `self_test_cases()` correct would ship green.
+
+Filed as **T10.3**, the smallest task in the repository: a second glob. It is a consistency fix
+with a real but small blast radius, **not** the 97 orphaned cases the first draft claimed — and
+the correction is recorded here rather than quietly edited out, because a review that overstates
+its own findings is the failure it exists to catch.
 
 ## Where tests are hard to write, and what that says
 
@@ -175,9 +184,27 @@ tracked at the repository root** and is a session hand-off note, not documentati
 [T7.3](../tasks/T7.3-pre-public-review.md)'s pre-public pass, not a design finding, and it is
 named here so it is not lost.
 
+## A postscript the review earned
+
+**This document's F3 was wrong when it was first written**, and the review of the pull request
+that carried it proved so by breaking a fixture and watching the server suite go red. The claim
+was "97 self-test cases that nothing runs"; the truth is that `server/tests/test_login_scope.py`
+imports and asserts every one of them, and `make check` has been running them all along. The
+first draft had read the Makefile target and not the test directory — **which is exactly the
+mistake this document accuses the codebase of inviting**, made by the document.
+
+Three of that review's findings were factual errors in these pages, and each would have been
+caught by running a command instead of reading a file. A review that overstates its findings is
+the failure it exists to catch, so the correction stays visible in F3 rather than being edited
+into a version that was never wrong.
+
+The transferable part is the same lesson one layer up: **the wave's output was checked less
+carefully than its subject.** A document arguing that this repository needs cross-layer
+assertions shipped with three unverified claims about the repository.
+
 ## What this review did not do
 
-It changed no code. Three task files were written and three rows added to `tasks/STATUS.md`;
+It changed no code. Four task files were written and four rows added to `tasks/STATUS.md`;
 every recommendation above is a task with an acceptance command, not a diff. A review that also
 rewrites is a review nobody can check.
 
