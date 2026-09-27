@@ -46,13 +46,17 @@ Three decisions carry the design, and each has an ADR:
 
 ```bash
 git clone <this repo> && cd desk-panel
-open web/index.html            # the panel, with mock data, in any browser
-make check                     # everything that needs no phone
+
+# The panel, with mock data, in any browser. Double-click the file, or:
+xdg-open web/index.html        # Linux
+open web/index.html            # macOS
+start web\index.html           # Windows
 ```
 
-The first command needs **nothing installed** — no Python, no Node, no Docker, no phone. That is
+Opening that file needs **nothing installed** — no Python, no Node, no Docker, no phone. That is
 the point, and [docs/RUNNING-LOCALLY.md](docs/RUNNING-LOCALLY.md) takes it from there in three
-tiers by what you own.
+tiers by what you own. `make check`, the repository's headline command, is the next tier up and
+wants Python, Node and Docker.
 
 ## Getting started
 

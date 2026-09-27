@@ -97,9 +97,28 @@ def check_subject(subject):
     return problems
 
 
+# `git commit --verbose` (and `commit.verbose = true`, which plenty of people
+# set) appends the whole diff below a scissors line. Git itself discards
+# everything from that marker down -- and it has to be a marker rather than the
+# comment filter below, because **the diff's own lines are not comments**. Left
+# in, a commit that touches a file containing the words this checker rejects
+# would be rejected for containing them, which is a confusing way to learn that
+# a guard is wrong.
+SCISSORS_RE = re.compile(r"^#\s*-+\s*>8\s*-+\s*$")
+
+
+def _above_the_scissors(lines):
+    """Pure: the message git would keep, dropping a --verbose diff."""
+    for index, line in enumerate(lines):
+        if SCISSORS_RE.match(line):
+            return lines[:index]
+    return lines
+
+
 def check_message(lines):
     """Pure: the problems in a whole message -- subject, blank line, trailers."""
     lines = [line.rstrip("\n") for line in lines]
+    lines = _above_the_scissors(lines)
     body = [line for line in lines if not line.startswith("#")]
     while body and not body[-1].strip():
         body.pop()
@@ -160,6 +179,12 @@ def _self_test():
     ok("comments are not the message",
        check_message(["feat: a thing", "", "# Please enter the commit message"]) == [])
     ok("an empty message is caught", check_message(["", ""]) != [])
+    ok("a --verbose diff is not the message",
+       check_message(["feat: a thing", "", "why",
+                      "# ------------------------ >8 ------------------------",
+                      "# Do not modify or remove the line above.",
+                      "diff --git a/x b/x",
+                      "+Co-Authored-By: Someone <x@y>"]) == [])
     ok("an attribution trailer is caught",
        any("trailer" in p for p in
            check_message(["feat: a thing", "", "Co-Authored-By: Someone <x@y>"])))
