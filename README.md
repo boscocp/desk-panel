@@ -42,23 +42,37 @@ Three decisions carry the design, and each has an ADR:
 - **The screen genuinely sleeps.** Not a black render with the display still lit.
   ([ADR 0005](docs/adr/0005-real-screen-sleep.md))
 
-## Getting started
-
-**Nothing is built yet.** This repository is currently specification: ADRs, a task breakdown in
-`tasks/`, and the index in [tasks/STATUS.md](tasks/STATUS.md). The commands below are what will
-work, not what works today — start from `STATUS.md` instead.
-
-The Android toolchain runs entirely in Docker — no JDK and no Android SDK on the host. See
-[docs/BUILD.md](docs/BUILD.md).
+## Quickstart
 
 ```bash
-make check                                       # the specification gates that do run today
-docker compose -f docker/compose.yml run --rm build ./gradlew assembleDebug
-python server/server.py
+git clone <this repo> && cd desk-panel
+
+# The panel, with mock data, in any browser. Double-click the file, or:
+xdg-open web/index.html        # Linux
+open web/index.html            # macOS
+start web\index.html           # Windows
+```
+
+Opening that file needs **nothing installed** — no Python, no Node, no Docker, no phone. That is
+the point, and [docs/RUNNING-LOCALLY.md](docs/RUNNING-LOCALLY.md) takes it from there in three
+tiers by what you own. `make check`, the repository's headline command, is the next tier up and
+wants Python, Node and Docker.
+
+## Getting started
+
+The Android toolchain runs entirely in Docker — no JDK and no Android SDK on the host
+([ADR 0003](docs/adr/0003-containerized-toolchain.md)). See [docs/BUILD.md](docs/BUILD.md).
+
+```bash
+make check                                       # every suite that needs no phone
+make apk                                         # the debug APK, in the container
+python server/server.py                          # the PC half, in the foreground
 ```
 
 Then install on the phone by browsing to `http://<pc-ip>:8777/app` — no cable, no adb.
-See [docs/INSTALL-PHONE.md](docs/INSTALL-PHONE.md).
+[docs/PHONE-SETUP.md](docs/PHONE-SETUP.md) is what Android has to be told;
+[docs/INSTALL-PHONE.md](docs/INSTALL-PHONE.md) is where those switches are on the one phone this
+was built for.
 
 ## Documentation
 
@@ -66,7 +80,11 @@ See [docs/INSTALL-PHONE.md](docs/INSTALL-PHONE.md).
 |---|---|
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | The full picture and the three invariants |
 | [BUILD.md](docs/BUILD.md) | Containerised toolchain, building, signing |
-| [INSTALL-PHONE.md](docs/INSTALL-PHONE.md) | Installing, and the MIUI toggles that matter |
+| [RUNNING-LOCALLY.md](docs/RUNNING-LOCALLY.md) | From `git clone` to something moving, in three tiers by what you own |
+| [REQUIREMENTS.md](docs/REQUIREMENTS.md) | The floors, where each is enforced, and the nearly-empty dependency list |
+| [PHONE-SETUP.md](docs/PHONE-SETUP.md) | What the panel asks of Android, why, and how to verify each grant |
+| [INSTALL-PHONE.md](docs/INSTALL-PHONE.md) | The same switches on the Redmi, under MIUI — one vendor's recipe |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Why the code is laid out this way, and what will send a PR back |
 | [SERVER-SETUP.md](docs/SERVER-SETUP.md) | Login-scoped autostart on Windows, Linux and macOS; firewall, static IP, BIOS |
 | [UPDATING.md](docs/UPDATING.md) | What to run after a pull, and why a restart is not optional |
 | [DEVICE-CARE.md](docs/DEVICE-CARE.md) | Battery, heat and burn-in — and the honest limits |
@@ -79,7 +97,10 @@ Work is tracked as self-contained task files under [tasks/](tasks/), indexed by
 
 ## Status
 
-Bootstrap. Specs, decision records and task breakdown are written; no product code yet.
+Running on the desk it was built for. The panel, the PC server, the screen-follows-the-PC
+behaviour and the two action buttons all work on the target device; phases 0–6 and 8 are closed
+and the remaining work is documentation and opening the repository. `tasks/STATUS.md` is the
+index, and it is honest about what has only ever run on one phone.
 
 ## License
 

@@ -1,0 +1,47 @@
+name: Bug report
+description: Something on the panel, the server or the build does not work
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The four fields below are the four things every diagnosis in this
+        project has started from. A report with all four is usually solved in
+        one round trip; a report without them is usually three.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected instead
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and Android version
+      description: e.g. Redmi Note 10, Android 12, MIUI 14.0.9 — or "not the phone" for a server or build issue
+      placeholder: Pixel 6a, Android 14
+    validations:
+      required: true
+  - type: dropdown
+    id: server
+    attributes:
+      label: Was the PC server reachable?
+      description: From the phone's browser, `http://<pc-ip>:8777/ping` should answer `{"ok": true}`
+      options:
+        - "Yes — /ping answered"
+        - "No — /ping did not answer"
+        - "Did not check"
+        - "Not applicable"
+    validations:
+      required: true
+  - type: textarea
+    id: logcat
+    attributes:
+      label: The relevant logcat lines
+      description: "`adb logcat -s DeskPanel` — the app's own markers. The `state=`, `screen=` and `action=` lines are the contract the tests read (ADR 0009)."
+      render: text
+  - type: textarea
+    id: anything
+    attributes:
+      label: Anything else
+      description: Config, network shape, what you had just changed.
