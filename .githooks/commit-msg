@@ -1,0 +1,7 @@
+#!/bin/sh
+# Three lines and a delegation, on purpose: the rules live in
+# scripts/check_commit_msg.py so that this hook and CI cannot disagree about
+# them. Installed with `make hooks`, which sets core.hooksPath to this
+# directory -- git does not run hooks from a clone by itself, and that is a
+# security property worth keeping rather than working around.
+exec python3 "$(git rev-parse --show-toplevel)/scripts/check_commit_msg.py" "$1"
