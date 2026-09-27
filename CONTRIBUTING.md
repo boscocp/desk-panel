@@ -12,6 +12,11 @@ has to enforce them by hand. It is an argument about maintenance.
 Start at [docs/RUNNING-LOCALLY.md](docs/RUNNING-LOCALLY.md) if you have not run anything yet. The
 first tier needs no Python, no Node, no Docker and no phone.
 
+For *where a change lands* — which seams are registries, which are four scattered edits, and
+which oddities are load-bearing and should be left alone —
+[docs/DESIGN-REVIEW.md](docs/DESIGN-REVIEW.md) walks four plausible first contributions file by
+file.
+
 ## Keeping the code readable
 
 ### Comments carry the why
