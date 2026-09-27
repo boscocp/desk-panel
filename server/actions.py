@@ -13,6 +13,7 @@ runner injected so a test never executes a mixer command.
 Standard library only, like the rest of `server/`.
 """
 
+import os
 import shutil
 import subprocess
 import sys
@@ -209,17 +210,16 @@ def _windows_toggle(data_flow, every_endpoint=False):
     return ["powershell", "-NoProfile", "-NonInteractive", "-Command", source]
 
 
+# The one binary the Linux microphone press runs, named once. `which` gates
+# the whole press on `_LINUX_SOURCES[0]`, so a second spelling of it further
+# down would be a command nothing ever probed for.
+_PACTL = "pactl"
+
 # The first command of the Linux microphone press, and the binary the 501
 # path probes for. It is a row of `_TABLE` because everything that reads that
 # table -- `candidates`, `describe`, the Unsupported message -- needs to name
 # a command, and this is the one the press begins with.
-_LINUX_SOURCES = ["pactl", "list", "short", "sources"]
-
-# Which way the press goes. The default input decides for all of them, so a
-# press is still a toggle from the desk's point of view and never leaves some
-# inputs muted and some live.
-_LINUX_DEFAULT_MUTE = ["pactl", "get-source-mute", "@DEFAULT_SOURCE@"]
-
+_LINUX_SOURCES = [_PACTL, "list", "short", "sources"]
 
 # id -> platform key -> candidate argument lists, tried in order until one of
 # the executables exists. The fallback is a *second binary*, never a shell `||`.
@@ -509,9 +509,22 @@ def _default_runner(argv, timeout):
     silent press and a console window flashing over whatever the owner is
     doing, every time -- the server is started by a Scheduled Task with no
     console of its own, so `powershell.exe` would allocate one.
+
+    **`LC_ALL=C`, because the mixer's answers are parsed.** `pactl` binds the
+    `pulseaudio` text domain, so `Mute: yes` is a translated string: on a
+    desktop with language packs installed it is `Stumm: ja` or `Mudo: sim`,
+    and `state_from_readback` reads it as `unknown`. The panel would draw no
+    cross, and the Linux microphone press would be **one-directional** -- an
+    unreadable state is not `muted`, so every press mutes and none of them
+    ever unmutes again. The server inherits the environment of the graphical
+    session (invariant 2), which is exactly the environment that has a
+    language set. Forcing the child's locale is the whole fix and it costs
+    nothing anywhere else: every string this module reads back is ASCII, and
+    the words it matches on are the untranslated ones.
     """
     return subprocess.run(
         argv, capture_output=True, text=True, timeout=timeout,
+        env=dict(os.environ, LC_ALL="C"),
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
@@ -582,10 +595,26 @@ def _linux_mic_press(runner, timeout):
 
       1. `list short sources` -- the names, from the mixer. Never from the
          request, and the `.monitor` loopbacks dropped (`capture_sources`).
-      2. `get-source-mute @DEFAULT_SOURCE@` -- the direction, once, for all
-         of them.
+      2. `get-source-mute <name>` -- the direction, read from the inputs this
+         press is about to touch.
       3. `set-source-mute <name> 0|1` -- per input.
       4. the read-back, per input (`_linux_mic_state`).
+
+    **The direction comes from the inputs, not from `@DEFAULT_SOURCE@`**, and
+    the difference is not a detail. Found by review of PR #39, where the
+    first cut asked the default source: a machine whose default is a monitor
+    -- a normal thing to set for screen recording -- has a default that is
+    never in `names`, so its state never moves and the button becomes
+    one-directional for ever. Worse, a machine where the default is muted and
+    another input is live is precisely the mixed state this task exists to
+    end, and asking the default there answers "already muted", so the press
+    would have **opened every microphone in the machine**.
+
+    `state_from_sources` decides instead, which is the same function that
+    draws the cross: the press unmutes exactly when the panel would be
+    showing one, and mutes in every other case -- a mix, or a mixer nobody
+    could parse, included. Muting is the safe direction, and it is the only
+    one that can be taken without knowing anything for certain.
 
     The per-command timeout is kept rather than replaced by a budget for the
     whole press: each request is served on a thread of its own, and the
@@ -600,16 +629,12 @@ def _linux_mic_press(runner, timeout):
         # the privacy lie; that the press failed is simply true.
         raise ActionError("pactl listed no capture source to mute")
 
-    before = state_from_readback(_run_or_raise(_LINUX_DEFAULT_MUTE, runner, timeout).stdout)
-    if before == UNKNOWN:
-        # The direction would have to be guessed, and the guess is a
-        # coin-flip between muting somebody's microphone and opening it.
-        raise ActionError("pactl would not say whether the default input is muted")
+    before = state_from_sources(_linux_source_states(names, runner, timeout))
     flag = "0" if before == MUTED else "1"
 
     for name in names:
         try:
-            _run_or_raise(["pactl", "set-source-mute", name, flag], runner, timeout)
+            _run_or_raise([_PACTL, "set-source-mute", name, flag], runner, timeout)
         except ActionError as exc:
             # Loudly, and with the input named. A press that muted two inputs
             # of three and answered `muted` is the exact lie T8.3 exists to
@@ -617,6 +642,19 @@ def _linux_mic_press(runner, timeout):
             raise ActionError(f"{name} did not take the mute: {exc}") from None
 
     return _linux_mic_state(names, runner, timeout)
+
+
+def _linux_source_states(names, runner, timeout):
+    """What each input holds, before anything is set. Raises, unlike the
+    read-back: a mixer that cannot answer the question is a mixer this press
+    is not going to be able to act on either, and finding that out before
+    changing half of them is the cheaper failure.
+    """
+    return [
+        state_from_readback(
+            _run_or_raise([_PACTL, "get-source-mute", name], runner, timeout).stdout)
+        for name in names
+    ]
 
 
 def _linux_mic_state(names, runner, timeout):
@@ -629,7 +667,7 @@ def _linux_mic_state(names, runner, timeout):
     states = []
     for name in names:
         try:
-            done = runner(["pactl", "get-source-mute", name], timeout)
+            done = runner([_PACTL, "get-source-mute", name], timeout)
         except (subprocess.TimeoutExpired, OSError):
             return UNKNOWN
         if done.returncode != 0:
