@@ -120,6 +120,20 @@ class CatalogueTests(unittest.TestCase):
         self.assertLess(body.index("EnumAudioEndpoints"), body.index("GetDefaultAudioEndpoint"))
         self.assertEqual(body.count("\n  int "), 2)
 
+    def test_windows_checks_every_hresult_it_is_handed(self):
+        # `int`-returning COM methods hand back their HRESULT instead of
+        # throwing it. One unchecked SetMute failing on one of three inputs
+        # would still end on "muted" -- the lie the every-input change exists
+        # to remove. Found by review of PR #37.
+        for action in actions.CATALOGUE:
+            argv, = actions.candidates(action, "win32")
+            body = argv[-1].split("public class Endpoint {")[1]
+            for call in ("SetMute(", "GetMute(", "Activate(", "GetDefaultAudioEndpoint(",
+                         "EnumAudioEndpoints(", "GetCount(", "Item("):
+                for line in body.splitlines():
+                    if call in line:
+                        self.assertIn("Ok(", line.split(call)[0][-12:], line)
+
     def test_an_id_outside_the_catalogue_raises_rather_than_returning_empty(self):
         # Empty would read as "this platform cannot", which is a different
         # answer with a different status code.
