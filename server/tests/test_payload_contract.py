@@ -31,12 +31,14 @@ Regenerate after a deliberate change:
 and commit the result, which is the moment the other two layers go red if they
 have not been taught the new key.
 """
+import datetime
 import json
 import os
 import unittest
 from pathlib import Path
 
 from server import actions
+from server import providers_openmeteo, providers_usno
 from server.server import App
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -54,7 +56,7 @@ CONFIG = {
     "theme": "neon", "language": "pt-BR",
     "night_start": "23:00", "night_end": "06:00",
     "quotes_interval_s": 300, "weather_interval_s": 900, "brapi_token": "",
-    "history_interval_s": 21600, "history_days": 30,
+    "history_interval_s": 21600, "history_days": 30, "moon_interval_s": 21600,
     "actions": ["mute-audio", "mute-mic"],
 }
 
@@ -67,10 +69,42 @@ ROWS = {
 HISTORY = {"PETR4": [47.0, 47.8, 48.5], "USD/BRL": [5.1, 5.12, 5.14],
            "BTC": [80000.0, 80900.0, 81470.0]}
 
-WEATHER = {"tempC": 24, "minC": 18, "maxC": 27, "code": 3, "isDay": True,
-           "city": "São Paulo", "rainChance": 20}
+# The weather half is patched at the **fetch** seam, not at `normalise`.
+#
+# That distinction is the whole point of the file and the first cut got it
+# wrong: `App.weather()` contributes only `stale` and `moon`, so every other
+# key of the weather object is decided by `providers_openmeteo.normalise`.
+# Replacing *that* produced a description carrying `rainChance` and no
+# `precipProb` -- a shape no server has ever sent, in the file whose own
+# header calls itself the one description of the payload. Worse, a key added
+# to `normalise` would have regenerated to exactly the same bytes. So the
+# canned bodies below are raw upstream responses (measured shapes, see that
+# module's docstring) and the real `normalise`/`normalise_geocode` run on
+# them.
+RAW_GEOCODE = {"results": [{"name": "São Paulo", "latitude": -23.5475,
+                            "longitude": -46.63611,
+                            "timezone": "America/Sao_Paulo"}]}
 
-MOON = {"phase": "waxing gibbous", "illumination": 0.71, "source": "usno"}
+# `daily` is a week and `normalise` picks the day matching `current.time`,
+# never index 0 -- so the arrays carry three days and the answer is the
+# middle one. A generator that fed a single day would agree with a broken
+# `_today_index` as readily as with a working one.
+RAW_FORECAST = {
+    "current": {"time": "2026-09-22T00:27", "temperature_2m": 24.0,
+                "weather_code": 3, "is_day": 1},
+    "daily": {"time": ["2026-09-21", "2026-09-22", "2026-09-23"],
+              "temperature_2m_max": [25.0, 27.0, 28.0],
+              "temperature_2m_min": [16.0, 18.0, 19.0],
+              "precipitation_probability_max": [10, 20, 30]},
+}
+
+# The moon, from the project's own arithmetic at a fixed instant rather than
+# from a dict typed here: `synodic_phase` and `moon_phase` return the same
+# five keys (both go through `_describe`), and a hand-written stand-in was
+# already wrong about three of them. Only the provenance is overridden, to
+# the one a reachable USNO reports.
+MOON_WHEN = datetime.datetime(2026, 9, 22, 0, 27, tzinfo=datetime.timezone.utc)
+MOON = dict(providers_usno.synodic_phase(MOON_WHEN), source="usno")
 
 
 class FakeClock:
@@ -104,12 +138,12 @@ def build():
             patch(module, "load_history", lambda *a, _m=market, **k: {
                 row[key_of(_m)]: HISTORY[row[key_of(_m)]] for row in ROWS[_m]})
 
+        # Only the two network calls. `normalise` and `normalise_geocode` are
+        # the code that decides the weather object's shape and they run for
+        # real -- see the comment on RAW_FORECAST above.
         openmeteo = server_module.providers_openmeteo
-        patch(openmeteo, "fetch_geocode", lambda *a, **k: {})
-        patch(openmeteo, "normalise_geocode",
-              lambda *a, **k: {"lat": -23.55, "lon": -46.63, "city": "São Paulo"})
-        patch(openmeteo, "fetch_forecast", lambda *a, **k: {})
-        patch(openmeteo, "normalise", lambda *a, **k: dict(WEATHER))
+        patch(openmeteo, "fetch_geocode", lambda *a, **k: dict(RAW_GEOCODE))
+        patch(openmeteo, "fetch_forecast", lambda *a, **k: dict(RAW_FORECAST))
 
         usno = server_module.providers_usno
         patch(usno, "moon_phase", lambda *a, **k: dict(MOON))
@@ -125,6 +159,16 @@ def build():
         for market in app.history_caches:
             app.history_caches[market].get(
                 app.clock(), CONFIG["history_interval_s"], app._history_producer(market))
+        # And the moon, for the same reason and one more. `App.weather()`
+        # starts a background refresh whenever the moon cache is cold, and
+        # that thread resolves `providers_usno.moon_phase` *itself* -- while
+        # the `finally` below is putting the real one back. Losing that race
+        # costs a live request to the USNO from a test whose whole claim is
+        # that it reaches no network, and `_refresh_moon_async` swallows the
+        # failure, so the only symptom is a slow suite. Priming it here means
+        # the cache is fresh, no thread is started, and the payload's `moon`
+        # comes from the production branch rather than from the fallback.
+        app.moon_cache.get(app.clock(), CONFIG["moon_interval_s"], usno.moon_phase)
         return {"quotes": app.quotes(), "weather": app.weather()}
     finally:
         for module, name, value in reversed(originals):
@@ -169,6 +213,35 @@ class PayloadFixtureTests(unittest.TestCase):
         # assertions pass against a shape the panel never sees.
         rows = build()["quotes"]["quotes"]
         self.assertTrue(rows[0]["history"], "the fixture's rows have no history")
+
+    def test_the_generator_is_deterministic(self):
+        # The file is committed and compared, so a generator that answered
+        # differently on a second run would turn every unrelated wave into a
+        # fixture diff nobody reads. Three runs rather than two, because the
+        # failure this guards against was a background thread that usually
+        # won.
+        first = build()
+        self.assertEqual(first, build())
+        self.assertEqual(first, build())
+
+    def test_the_weather_half_is_the_shape_normalise_produces(self):
+        # The assertion the first cut of this file needed and did not have.
+        # Every key of the weather object except `stale` and `moon` comes from
+        # `providers_openmeteo.normalise`, so the description is held to that
+        # function rather than to a dict typed in this file -- which is how it
+        # came to carry `rainChance`, a key no server sends, instead of
+        # `precipProb`, which every server does.
+        produced = build()["weather"]
+        expected = set(providers_openmeteo.normalise({})) | {"stale", "moon"}
+        self.assertEqual(set(produced), expected)
+
+    def test_the_moon_carries_the_keys_the_provider_returns(self):
+        # Same argument one level down: `moon_phase` and `synodic_phase` both
+        # return `_describe`'s five keys, and a stand-in written by hand was
+        # wrong about three of them (`illumination` for `illum`, a space for
+        # the hyphen in the phase name, and no age at all).
+        self.assertEqual(set(build()["weather"]["moon"]),
+                         set(providers_usno.synodic_phase(MOON_WHEN)))
 
     def test_the_moon_rides_inside_weather(self):
         # `App.weather`'s docstring explains why: the Android side copies the

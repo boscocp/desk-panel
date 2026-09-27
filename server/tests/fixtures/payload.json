@@ -53,15 +53,17 @@
     "city": "São Paulo",
     "code": 3,
     "isDay": true,
-    "maxC": 27,
-    "minC": 18,
+    "maxC": 27.0,
+    "minC": 18.0,
     "moon": {
-      "illumination": 0.71,
-      "phase": "waxing gibbous",
+      "ageDays": 10.16,
+      "illum": 78,
+      "lunationDays": 29.531,
+      "phase": "waxing-gibbous",
       "source": "usno"
     },
-    "rainChance": 20,
+    "precipProb": 20,
     "stale": false,
-    "tempC": 24
+    "tempC": 24.0
   }
 }
