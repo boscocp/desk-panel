@@ -149,11 +149,12 @@ something wider, so its text widths are a conservative estimate rather than the 
 | # | Task | State | Notes |
 |---|---|---|---|
 | T7.2 | Wireless adb from the container | blocked | 2026-09-23, wave 22. **The container half is answered and the answer is "do not"**, which turns the task's step 4 fallback into the recommendation. Three measurements. The image does ship adb (1.0.41 / 37.0.1) via `platform-tools`, so that was never the question. `host.docker.internal` is a **Docker Desktop** invention and does **not resolve on Docker Engine** — it returned nothing here, and `docker/compose.yml` now maps it with `extra_hosts: …:host-gateway`; that line is a prerequisite of TT.7's `make connected`, which was written against a name this machine did not have, and whose only symptom would have been a Gradle task that could not find a device. Then the one that decides it: **adb cannot listen on a single interface** — `adb -a -L tcp:172.17.0.1:5037 nodaemon server` exits with `listening on specified hostname currently unsupported`, so the only server a container can reach is `adb -a` on `0.0.0.0:5037`, which is unauthenticated adb over the whole LAN. With that running the container does attach, so the route works and costs more than it is worth. Recorded in `docs/INSTALL-PHONE.md` and in TT.7's notes, where it changes a design. **Blocked on the phone half**: pairing is *Developer options → Wireless debugging → Pair device with pairing code*, tapped on the device, and the acceptance needs an authorised device — the one here answered `unauthorized` over USB and then dropped off. Neither is doable from a checkout |
-| T7.4 | **Phone setup a stranger can follow, checked against the official docs** | todo | Asked for 2026-09-20, for the end of the project. Splits `INSTALL-PHONE.md` into a device-neutral half citing `developer.android.com` and a MIUI half labelled as one vendor's behaviour. Lands `scripts/check_links.py`, **which T7.3's acceptance already calls and which does not exist** |
-| T7.5 | **Running it locally, for a contributor with no phone and no LLM** | todo | Asked for 2026-09-20. Three tiers by what the reader owns — web only, web plus server, the full rig — plus minimum requirements and the dependency inventory, kept honest against the build files by `scripts/check_requirements.py` |
-| T7.6 | **Contribution guide, commit and PR templates** | todo | Asked for 2026-09-20. The readability argument is the substance: comments carry the why, logic stays out of Android classes, `format.js` stays pure, an invariant change needs an ADR. Conventional commits enforced by a script the hook and CI share |
+| T7.4 | **Phone setup a stranger can follow, checked against the official docs** | done | 2026-09-27, wave 29. `docs/PHONE-SETUP.md` is the device-neutral half and `docs/INSTALL-PHONE.md` kept the vendor recipe; the split is **enforced rather than intended** — the acceptance greps the new file for the vendor's name and fails if it appears, which is the one assertion here that cannot pass by accident. Six `developer.android.com` citations for the four claims that get repeated wrong, and where the platform documents nothing the page says the behaviour was *measured on one device* and gives the command that measures it. The verification commands matter more than the granting: every grant silently resets on `adb install -r`, which is how they were lost twice. Lands **`scripts/check_links.py`**, which T7.3's acceptance has been calling since it was written and which did not exist — a network failure is reported apart from a 404 and gets its own exit code, because a contributor offline must be able to tell "you broke a link" from "you are offline". It found the original document's two step 6s |
+| T7.5 | **Running it locally, for a contributor with no phone and no LLM** | done | 2026-09-27, wave 29. `docs/RUNNING-LOCALLY.md` in three tiers by **what the reader owns**, not by what the project contains: a browser alone reaches a moving panel because `mock.js` decides by `location.protocol` and the file that ships is the file you open; Python adds real data with nothing to install; Docker and a phone are the third tier and the page says plainly that a contributor without either still has a completely green `make check`. `docs/REQUIREMENTS.md` carries twelve versions and the single file that decides each, kept honest by **`scripts/check_requirements.py`** — the build is the truth and the page follows, so a bump in `docker/Dockerfile` turns it red at the moment the page is cheapest to fix. The dependency inventory is written as a constraint contributors must not break rather than as a boast. README gained a Quickstart, and two sentences that had said "nothing is built yet" through twenty-eight waves are gone |
+| T7.6 | **Contribution guide, commit and PR templates** | done | 2026-09-27, wave 29. `CONTRIBUTING.md` argues maintenance rather than braces, and its teaching material is this repository's own comments — `BatteryReading.ABSENT`, `DataPayload.merge`, the eleven vtable placeholders. **`scripts/check_commit_msg.py` is the authority and the hook is three lines that call it**, so CI and the hook cannot disagree; `make hooks` installs it. The interesting part is what the checker refuses to do: Title Case is detected by **density** (half the words capitalised) rather than by counting capitals, because `MIC` and `POST` are acronyms and `Gradle`, `PcPoller` and `Linux, macOS and Windows` are proper nouns — the first two cuts of that rule flagged four legitimate subjects in this repo's own log. The cost is asymmetric: a false positive teaches `--no-verify` and after that the hook checks nothing. The acceptance runs it over the last thirty subjects, which is what makes the convention honest. Attribution trailers are rejected outright. PR template asks the two unusual questions this project has always answered: verified on the device versus reasoned about, and what was deliberately left out |
 | T7.7 | **Opening the repo: contributor strategy and settings** | todo | Asked for 2026-09-20. Scope stated before the repo is public, device reports invited as a first-class contribution, and branch protection, labels, `CODEOWNERS` and `SECURITY.md` applied with `gh` and recorded in `docs/MAINTAINING.md` |
 | T7.8 | **Everything GitHub gives a public repo for nothing** | done | 2026-09-26, wave 25. Not a rewrite of `ci.yml` — TT.9 owns it; it gained `concurrency:` and SHA pins and nothing else. `lint.yml`, two jobs: `lint` (ruff installed in the job and never in `server/`, `node --check` over `web/` instead of ESLint because there is no `package.json` by design, PSScriptAnalyzer on `install_task.ps1`, shellcheck) and `guards` (every guard script that exists, plus `make lint-selftests`). **`scripts/check_ci_hygiene.py` is the deliverable**, six rules, each mutation-tested by its own `--self-test`. Three departures from the task file, each argued in the file that makes it: the SHA rule has **no `actions/*` exemption** — this repo pins those too, and an exemption is a decision the checker has to keep making right; dependabot covers **docker** as well, because `docker/Dockerfile` pins its base by digest and a digest is exactly the pin nobody updates by hand; and **CodeQL and dependency-review are absent rather than broken** — both need a public repo or Advanced Security, `code-scanning/default-setup` answers 403 here, and a check that cannot pass teaches everyone to scroll past it. `docs/MAINTAINING.md` carries the three steps that turn them on at T7.7's flip and says why the whole setup is free only while the repo is public. Rule 5 splits in two on purpose: **named in the Makefile** always, **run by a workflow** only for the guards `make check` reaches, because `check_branch_base.py` is green by construction on a runner and a green tick that means nothing is worse than none |
+| T7.9 | **A design review of the seams, before strangers arrive** | todo | Asked for from the chair on 2026-09-27, in those words: design patterns, dependency inversion, decoupling, *thinking about external contribution*. Scheduled **after T7.6 and before T7.3**, and the order is the whole point — `CONTRIBUTING.md` states the rules the repository claims to follow, and this is the first read of the whole codebase asking whether that is true with a written rule to measure against; run the other way round it would be one person's taste. Explicitly **not** a pattern hunt, not a framework, not a rewrite: a finding that cannot be stated as "a contributor would do X and the code makes X land in the wrong file" is out of scope. The yardstick is three seams this project already has right — the injected `runner`/`which` in `server/actions.py`, pure `format.js`, decisions in `PcState` rather than in an Activity. The payload shape is the named open question: three places must agree, `DataPayload.merge` shipped the same bug twice, and the task has to answer whether a comment is the best available or whether one description could make the class of bug impossible |
 | T7.3 | Pre-public review: secrets, README, screenshots | todo | Before flipping the repo public. Now runs **after** T7.4–T7.7 and carries the README's final pass; its `Prereqs:` line was updated to say so |
 | TT.8 | `e2e/run_e2e.py`, five scenarios | todo | Needs TT.6 |
 | TT.9 | CI workflow | done | 2026-09-24, wave 23. The bootstrap skeleton was `workflow_dispatch` only and had drifted for twenty-two waves — a workflow nobody runs is green forever. Now push and pull_request, three jobs, `permissions: contents: read`. **The task's real subject is `scripts/check_workflow.py`**, which reads ci.yml and the Makefile and fails on any difference: the command CI runs must be the same string the Makefile runs, with exactly one allowed difference — the `$(DC)` container prefix, dropped because a runner is disposable where the Windows host is not (ADR 0003). No PyYAML: this project takes no dependencies, and the reader **fails loudly on a shape it cannot parse** rather than returning an empty result that reads as agreement. Two rules came out of running it rather than writing it. `connectedAndroidTest` matched inside the comment *explaining* its deliberate absence, so the scan is comment-aware — the alternative was deleting the comment or gutting the rule. And a **`working-directory:` is now itself a violation**: `./gradlew test` from android/ and from the root are the same string and not the same command, so the old job's `working-directory: android` made the whole comparison a lie; the run steps sit at the root where the `gradlew` shim lives. setup-gradle gets no `build-root-directory`: the first cut passed one and the run went green while the action printed "Unexpected input(s)" and ignored it — the input belongs to the older gradle-build-action, and v4 caches the Gradle User Home, which is the same directory whichever subproject invoked it. A green check with a silently discarded input is this wave's own subject arriving in its own workflow. **`--self-test` found a bug in the reader on its first run** — `value.strip("'\"")` ate the trailing quote of `node --test "web/test/**/*.test.js"`, leaving an unterminated string — which is the argument for writing it first. 18 rules, and `make lint-workflow` runs both halves, so `make check` is what catches the next drift. CI does **not** run the guard scripts; that gap is T7.8's and is named in the script |
@@ -181,6 +182,81 @@ and the first line of each file says so.
 |---|---|---|---|
 | T9.1 | **The next meeting, under the clock** | todo | Google Calendar and Microsoft Outlook merged, the soonest event under the clock in the `#shortcuts` strip, between T8.2's two buttons. Blocked behind T8.2 for a layout reason and behind **ADR 0016** for a bigger one: this is the first feature that puts *personal data* on a panel whose server has no authentication, and the refresh tokens it needs are credentials sitting on a desktop PC. OAuth stays on the PC and never reaches the APK — two acceptance lines exist for exactly that. The merge is where the design is: the two providers disagree about all-day events, about time zones and about the word for "declined" |
 | T9.2 | **Spike: can the panel talk to an assistant for nothing?** | todo | A button to ask something out loud and hear an answer, with the whole pipeline on the PC — invariant 1 means the page cannot call anything. Time-boxed, produces `docs/spikes/2026-voice-assistant.md` and a throwaway prototype under `spikes/`, and is allowed to conclude *do not build this*. The unknown is whether offline STT, a small local model and offline TTS fit inside a latency a person will stand at a panel for; Claude and DeepSeek are the paid comparison, not the plan. Also has to answer the awkward ones: `RECORD_AUDIO` would be the app's first dangerous permission, and an unauthenticated LAN endpoint that runs a model and speaks in someone's room is not in ADR 0015's family |
+
+## Resuming after 2026-09-27 (wave 29)
+
+Wave 29 is **T7.4 + T7.5 + T7.6**, on `wave/29-docs-cluster`: the documentation cluster, three
+tasks and three guards. A stranger can now clone this repository, reach a moving panel with
+nothing installed, find out which versions matter and why, and read what will send their pull
+request back.
+
+**Next: T7.9**, the design review of the seams — asked for from the chair this session and
+scheduled deliberately after the guide that gives it a yardstick. Then T7.7 (opening the
+repository) and T7.3 (the pre-public pass) close phase 7.
+
+### Three guards arrived already wired, which was the trap working
+
+Wave 25 set it: rule 5 of `check_ci_hygiene.py` goes red the moment `make check` reaches a
+`scripts/check_*.py` that no workflow runs. `check_links.py`, `check_requirements.py` and
+`check_commit_msg.py` all landed in the Makefile and in `lint.yml` in the same commit, because
+the alternative was a red build. That is the second time a guard written two waves earlier has
+paid for itself without anybody remembering it existed.
+
+Each of the three carries a `--self-test`, so `lint-selftests` discovered them by grep with no
+list to update — and each self-test caught a real defect in its own script before any document
+used it: a table separator read as a requirements row, a `report()` that printed a wall of text
+into the test output, and `/dev/stdin` refused because it is a pipe and not a file, which is the
+exact invocation T7.6's own acceptance uses.
+
+### The link checker's first run found the split it was written for
+
+`docs/INSTALL-PHONE.md` had **two step 6s** — the vendor battery list and Android's battery
+exemption, the two the document itself warns are constantly confused, numbered identically since
+the day they were written. Nobody reading it had noticed. It is now one numbered list of seven.
+
+It also found the thing worth knowing before T7.7: **GitHub answers 404, not 403, for a private
+repository's pull requests**, so an anonymous checker cannot tell "deleted" from "not yours". The
+harness notes and task files are full of such links. So `make check` runs the local half over
+every Markdown file in the repository and CI runs the full half over the documentation a reader
+actually follows. When T7.7 makes the repo public that distinction disappears and the CI list
+should widen to `MARKDOWN`.
+
+### The review found the two worst defects in the prose, not the code
+
+Eight findings. The two that would have cost a contributor most were instructions they would
+follow and fail: a Quickstart that only works on macOS, inside the block promising "nothing
+installed", and a troubleshooting row recommending `python -m http.server -d web` for a blank
+panel — which loads the page and silently kills the mock feed, because `mock.js` only runs from
+`file:`. Both were written in a session that had read the relevant guard the same day.
+
+Three more were in the new guards and would have bitten quickly: a 429 from a shared CI runner
+reported as a dead link (the script had already separated `unreachable` from `dead` for exactly
+that reason and then did not use it), `git commit -v` failing on the content of the diff because
+the scissors line is not a comment, and a hook that picked `python3` where everything else here
+says `python` — which on Windows means `make hooks` succeeds and every commit afterwards fails.
+
+**The transferable part: the guards were reviewed as code and the documents were not reviewed at
+all.** A document is an interface, and this wave shipped it with less adversarial reading than a
+function would have got. T7.9 inherits that lesson, and both unrun manual checks below are the
+same gap seen from the other side.
+
+### What is not proven
+
+- **Neither document has been read by a stranger.** T7.4 and T7.5 both ask for exactly that —
+  hand the page to somebody with a different phone, or a machine that has never built this, and
+  watch where they stall. Both manual checks are unrun, and the defect they are meant to find is
+  invisible from here by construction.
+- **The commit hook has never rejected a real commit.** It is installed in this worktree
+  (`make hooks`) and its rules were exercised against the history and the self-test; no
+  contributor has hit it.
+- **The issue forms have never been rendered.** GitHub parses `.github/ISSUE_TEMPLATE/*.yml`
+  server-side, and a schema mistake shows up only in the UI — which needs the repository to be
+  public, or a visit to the Issues tab that nobody has made.
+- **macOS mute is still unrun**, and the default-input limit is in ADR 0015 (wave 28).
+- **The twenty-taps check is still not done**, carried from wave 27.
+- **The phone was not touched**, carried from wave 22: TT.7, TT.8, T2.4 and T7.2 all wait for it.
+- `server/config.json` is still mode 0644 and holds `actions` as well as the brapi token. One
+  `chmod 600`; T7.3 wants it. Carried from wave 19.
 
 ## Resuming after 2026-09-27 (wave 28)
 

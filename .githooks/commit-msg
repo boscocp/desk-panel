@@ -1,0 +1,17 @@
+#!/bin/sh
+# Three lines and a delegation, on purpose: the rules live in
+# scripts/check_commit_msg.py so that this hook and CI cannot disagree about
+# them. Installed with `make hooks`, which sets core.hooksPath to this
+# directory -- git does not run hooks from a clone by itself, and that is a
+# security property worth keeping rather than working around.
+#
+# `python` first, because that is the name the Makefile, CI and every document
+# here use, and a hook that picks a different interpreter is a hook that can
+# fail on a machine where `make check` passes -- on Windows `python3` is
+# usually absent or is the Store alias, which exits without running anything.
+# `python3` is the fallback for the distributions that ship only that name.
+script="$(git rev-parse --show-toplevel)/scripts/check_commit_msg.py"
+if command -v python >/dev/null 2>&1; then
+    exec python "$script" "$1"
+fi
+exec python3 "$script" "$1"
