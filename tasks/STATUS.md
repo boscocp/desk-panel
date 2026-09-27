@@ -169,7 +169,7 @@ or phase 6.
 |---|---|---|---|
 | T8.1 | **`POST /action/{id}` actually acts** | done | 2026-09-26, wave 26. **ADR 0015 first**, before `server/actions.py` existed, as the task file demands — the server has no authentication and every other route only answers a question, so what the endpoint may do was written before there was an implementation to defend. Two toggles, `mute-audio` and `mute-mic`; `shutdown`, `sleep` and `lock` are absent because the honest threat model is that anyone on the LAN can repeat an action as often as they like, and adding one is a change to the ADR rather than to a table. **The catalogue is in code and config can only switch its entries on and off** — a config that could name a command is a remote shell with extra steps, and it moves the security argument out of the reviewed repository into an untracked file nobody reads, which is why the earlier `ARCHITECTURE.md` sketch of "a Steam URI or an executable path from config" was dropped rather than built. **The order of the checks is the security property**: an id that is not enabled returns 404 having run *nothing at all*, and the tests assert that on the fake runner's call count, because a status-only test cannot tell 404-before-spawning from 404-after. `action_id()` widened from "no `/` and no `?`" to `[a-z0-9-]` — an allowlist of characters in front of an allowlist of names, so the promise that nothing is interpolated does not rest on the lookup being written carefully. `actions` went from a reserved table to a list of names and **an empty table still loads**, because `config.example.toml` shipped `[actions]` and an update that refuses to start is worse than a shape change (T3.13 from a direction it cannot see). An unknown name is fatal *before* `--check-only` returns, which is what the launchers and `after_update.py` run. Linux was exercised for real: both toggles moved `wpctl get-volume` and came back |
 | T8.2 | **Two buttons under the clock** | done | 2026-09-26, wave 27. **Verified on the device**, not only in tests: SOM and MIC render in the `#shortcuts` strip T6.1 reserved six phases ago, `action=mute-audio result=ok` reaches logcat, and the PC's sink and source actually move. The hard part was invariant 1 as the file said: the page cannot make the request, so a tap crosses into Java through the app's **first inbound bridge**, and `Actions.resolve` returns the app's *own constant* rather than the caller's string — asserted with `assertNotSame`, which is why the class exists instead of a `contains` at the call site. `addJavascriptInterface` is safe here only because the WebView loads one URL from the APK's own assets with mixed content refused, and the call site says so. **Dead offline structurally**: the POST rides `DataPoller`'s executor, which exists exactly while the PC is online, so step 3 is a property of where the code lives. **The button shows the last result, never a state** — the panel cannot know whether the PC is muted, and one that says the mic is off while it is live is a privacy failure. `e2e/layout/check_actions.py` is the sixth browser check, mutation-tested three ways. **The bug the device caught**: `DataPayload.merge` rebuilds the payload key by key and nothing named `actions`, so the phone never saw it — with a correct server and a correct page. The file's own comment warned about exactly that, written when T6.4 shipped the identical failure |
-| T8.3 | **MIC mutes every input on Linux and macOS** | todo | Found on the Windows box on 2026-09-26: three live inputs, and the button muted the default one while the owner talked into another — a 200, a cross, and an open microphone. Windows was fixed that day (every active capture endpoint follows the default's direction); Linux and macOS still toggle the default alone. Linux has a route through `pactl` that must skip `.monitor` sources; macOS may not have one within the standard-library rule, in which case the limit goes into ADR 0015 |
+| T8.3 | **MIC mutes every input on Linux and macOS** | done | 2026-09-27, wave 28. Linux does every input; **macOS cannot and ADR 0015 says so out loud** — `volume settings` knows one input and enumerating capture devices needs Core Audio through a compiled helper or a third-party binary, both outside the standard-library rule, so step 3's instruction to write the limit down rather than ship a guess is what happened. **A press stopped being one command**: the microphone on Linux is a listing, a direction, a set per input and a read per input, so `_SEQUENCES` sits beside `_TABLE` and holds the ids that are a *press* rather than a command — the row left in `_TABLE` is the press's first command, which is also exactly the binary the 501 path and the startup line probe for, so `candidates`, `describe` and `Unsupported` learned nothing new. **Every name comes from `pactl`'s own listing**, which is ADR 0015's rule surviving the one id whose commands are built at run time, and a test asserts it argument by argument. `.monitor` sources are skipped — muting a loopback silences a screen recording and no person. **`wpctl` lost the microphone**: it has no verb for "every source", so keeping it as a fallback would put a PipeWire box quietly back to muting the default alone, which is the failure this task removes reintroduced by the kindness that was supposed to help; it keeps the speakers, and a box with `wpctl` and no `pactl` answers 501 with the startup line saying so first. **A partial mute is a failure, not a state**: one source refusing fails the whole press with its name in the message, and the read-back says `muted` only when every input is — a mix is `unknown`. Verified on the Linux desk, three real inputs and four monitors, through `POST /action/mute-mic` as well as the direct call |
 
 ## Phase 9 — Suggested, not scheduled
 
@@ -181,6 +181,66 @@ and the first line of each file says so.
 |---|---|---|---|
 | T9.1 | **The next meeting, under the clock** | todo | Google Calendar and Microsoft Outlook merged, the soonest event under the clock in the `#shortcuts` strip, between T8.2's two buttons. Blocked behind T8.2 for a layout reason and behind **ADR 0016** for a bigger one: this is the first feature that puts *personal data* on a panel whose server has no authentication, and the refresh tokens it needs are credentials sitting on a desktop PC. OAuth stays on the PC and never reaches the APK — two acceptance lines exist for exactly that. The merge is where the design is: the two providers disagree about all-day events, about time zones and about the word for "declined" |
 | T9.2 | **Spike: can the panel talk to an assistant for nothing?** | todo | A button to ask something out loud and hear an answer, with the whole pipeline on the PC — invariant 1 means the page cannot call anything. Time-boxed, produces `docs/spikes/2026-voice-assistant.md` and a throwaway prototype under `spikes/`, and is allowed to conclude *do not build this*. The unknown is whether offline STT, a small local model and offline TTS fit inside a latency a person will stand at a panel for; Claude and DeepSeek are the paid comparison, not the plan. Also has to answer the awkward ones: `RECORD_AUDIO` would be the app's first dangerous permission, and an unauthenticated LAN endpoint that runs a model and speaks in someone's room is not in ADR 0015's family |
+
+## Resuming after 2026-09-27 (wave 28)
+
+Wave 28 is **T8.3**, on `wave/28-mute-every-mic-linux`. The MIC button now mutes every input on
+Linux the way it does on Windows, and the macOS limit is written into ADR 0015 instead of being
+left as a comment. Phase 8 is closed again.
+
+**Next: T7.4 + T7.5 + T7.6**, the documentation cluster — unchanged from wave 27's
+recommendation, which this wave interrupted for a reason given below. None of it needs the
+phone, Docker or a public repo, and it produces the three guard scripts T7.8's `guards` job is
+missing; rule 5 of `check_ci_hygiene.py` goes red the moment either task lands a
+`scripts/check_*.py` that `make check` reaches and no workflow runs, so they cannot arrive
+unwired.
+
+Phase 9 (T9.1, T9.2) is unblocked and still "suggested, not scheduled".
+
+### Why a new task jumped the recommendation
+
+Wave 27's `Next:` line pointed at the documentation cluster and was right when it was written.
+It was written before the Windows box was ever used, and the first press of MIC there muted the
+default input while the owner was talking into another one — a 200, a cross on the button, and a
+live microphone. Windows was fixed the same day and **T8.3 was filed for the other two
+platforms**, which is a row the wave-27 section could not have known about.
+
+Two things made taking it first the obvious call rather than a judgement one. It is the failure
+ADR 0015 singles out as worse than having no button at all, and it is a privacy claim the panel
+was making incorrectly on this very desk. And **this session is the Linux desk** — three real
+capture devices and four `.monitor` loopbacks plugged in — so the manual check the task asks for
+could actually be run, which is the thing a Windows session could not do.
+
+### What the fix cost the shape of `actions.py`
+
+`run_action` ran one argument list. The Linux microphone cannot: nothing knows what to mute
+until `pactl list short sources` has answered, so a press is a listing, a direction, a
+`set-source-mute` per input and a `get-source-mute` per input. `_SEQUENCES` now sits beside
+`_TABLE` for the ids that are a press rather than a command, and the row left in `_TABLE` is the
+press's *first* command — which is also exactly the binary the 501 path and the startup line
+probe for, so nothing that reads the table had to learn a new shape.
+
+The rule that survived the change is the one that matters: **every name comes from `pactl`'s own
+output and never from the request**, asserted argument by argument rather than by intent, on the
+one id whose commands are now built at run time.
+
+### What is not proven
+
+- **macOS is still unrun, and now also unimplementable within the rules.** The default-input
+  limit is in ADR 0015; nobody has pressed the button on a Mac at all.
+- **The twenty-taps check is still not done.** Carried from wave 27. It is more interesting than
+  it was: a Linux microphone press is now eight `pactl` invocations, not two, so a finger on the
+  button for twenty presses queues eight times as much work behind the poller's single thread.
+  `/ping` was observed answering between presses this session, which is not the same thing.
+- **`invoke`'s `rejected` path has still never run on the device** — unit tests only, because no
+  theme can produce an id outside `Actions.ALLOWED`.
+- **The phone was not touched this wave.** TT.7, TT.8, T2.4 and T7.2 have been waiting for it
+  since wave 22; wave 27 found it back on adb as `303f1f9c` and the cable was not used here.
+- **`check_pulse.py --theme plain` still fails on `main`**, unchanged from wave 27: `plain` does
+  not pulse and the check says itself that such a theme should be skipped. One line in a task
+  file, not a bug.
+- `server/config.json` is still mode 0644 and holds `actions` as well as the brapi token. One
+  `chmod 600`; T7.3 wants it. Carried from wave 19 through 27.
 
 ## Resuming after 2026-09-26 (wave 27)
 

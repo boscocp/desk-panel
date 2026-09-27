@@ -1,7 +1,8 @@
 # 0015 — The panel can act on the PC, and the id is the whole interface
 
 Status: accepted · 2026-09-26 (T8.1) · amended twice the same day — see *A `POST`-only rule
-is not enough* and *Toggles, and the state is measured rather than guessed*
+is not enough* and *Toggles, and the state is measured rather than guessed* · amended again
+2026-09-27 (T8.3), which extended "every input" to Linux and wrote down the macOS limit
 
 ## Context
 
@@ -112,7 +113,32 @@ talking into a headset, and the panel drew a cross over an open microphone. The 
 measured, and it was the wrong device's. On Windows the default input decides the direction and
 every active capture endpoint follows it, so one press never leaves some muted and some live.
 The speakers stay default-only, because sound from the wrong one is audible and a microphone
-left open is not. Linux and macOS still toggle the default alone; that is T8.3.
+left open is not.
+
+**Linux followed on 2026-09-27 (T8.3); macOS did not, and cannot.** On Linux a press is no
+longer one command. It enumerates the inputs with `pactl list short sources` and **skips every
+`.monitor`** — those are loopbacks of the outputs, and muting one silences a screen recording
+rather than a person — reads the direction once from `pactl get-source-mute @DEFAULT_SOURCE@`,
+and applies it to each remaining source by name. Every name comes from `pactl`'s own listing
+and never from the request, every call is its own argument list, and **a single source that
+refuses the mute fails the whole press**: a partial mute reported as `muted` is the same lie as
+the wrong device's state, arriving by a different road. The read-back follows the same rule and
+answers `muted` only when **every** input is; a mix is `unknown`, which the page draws as no
+claim.
+
+`wpctl` therefore stops being the Linux microphone command and keeps only the speakers. It has
+no verb for "every source" — `wpctl set-mute` takes one node — so the choice was between the
+mixer this project prefers and the property this section exists for. A box with `wpctl` and no
+`pactl` answers 501 for `mute-mic`, and the startup line says so before anyone presses
+anything.
+
+**macOS mutes the default input only.** AppleScript's `volume settings` knows one input, and
+enumerating capture devices means Core Audio through a compiled helper or a third-party binary
+— both outside the standard-library-only rule this server is built on. So on a Mac with a
+headset and a webcam plugged in at once, one press moves one microphone and the cross is a
+claim about that one. This paragraph is the whole mitigation, and it is written here rather
+than left in a comment because it is a limit on a privacy promise, not an implementation
+detail. If a built-in route ever turns up, it is a change to this record.
 
 ### `POST` only, and no shell
 
@@ -186,9 +212,14 @@ not: it runs nothing either way, and ordering it first would only change what a 
   now. An empty table is still read as "nothing enabled", because that is what shipped in
   `config.example.toml` and in installed configs, and an update that refuses to start is a worse
   failure than a shape change (T3.13).
-- **Every press is two commands on Linux**, a toggle and a read-only question. That is one extra
-  local process per button press, on a machine with a person sitting at it, and it buys the only
-  honest way to draw the cross.
+- **Every press is two commands on Linux for the speakers**, a toggle and a read-only question.
+  That is one extra local process per button press, on a machine with a person sitting at it,
+  and it buys the only honest way to draw the cross.
+- **The Linux microphone is more than two**: a listing, a direction, and a set plus a read per
+  input — eight `pactl` invocations on the desk this was written at, which has three. Each one
+  carries the per-command timeout rather than the press carrying a budget, because the request
+  is served on a thread of its own and the count is bounded by the sound cards in the machine.
+  `mute-mic` on Linux **requires `pactl`**; `wpctl` alone is a 501.
 - **Platform coverage is uneven and says so.** Linux (PipeWire, falling back to PulseAudio),
   macOS (`osascript`) and Windows (PowerShell against Core Audio, no third-party download) are
   implemented; anything else answers **501**, which is "this machine cannot", not "you asked
