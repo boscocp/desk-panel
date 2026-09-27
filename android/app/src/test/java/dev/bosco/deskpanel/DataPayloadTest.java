@@ -140,8 +140,9 @@ public class DataPayloadTest {
         // are protecting than a merge step is.
         String unknown = Contract.quotesWith("actions",
                 new JSONArray(new String[] {"mute-everything"}));
-        assertEquals("mute-everything", new JSONObject(DataPayload.merge(unknown, Contract.weather()))
-                .getJSONArray("actions").getString(0));
+        assertEquals("mute-everything",
+                new JSONObject(DataPayload.merge(unknown, Contract.weather()))
+                        .getJSONArray("actions").getString(0));
     }
 
     @Test
@@ -165,8 +166,7 @@ public class DataPayloadTest {
         // nobody names there never reaches the phone. The failure is silent
         // in every layer -- the server sends it, the page asks for one and
         // finds none, and the panel speaks its default for ever.
-        String tagged = Contract.quotesWith("language",
-                                       "en");
+        String tagged = Contract.quotesWith("language", "en");
         assertEquals("en",
                 new JSONObject(DataPayload.merge(tagged, Contract.weather())).getString("language"));
 
@@ -359,7 +359,8 @@ public class DataPayloadTest {
 
     @Test
     public void theFoldedPayloadIsStillSafeToInterpolate() {
-        String merged = DataPayload.merge(Contract.quotes().replace("PETR4", "PET R4"), Contract.weather());
+        String merged = DataPayload.merge(
+                Contract.quotes().replace("PETR4", "PET R4"), Contract.weather());
         String folded = DataPayload.withBattery(merged, BATTERY);
 
         // Re-parsing and re-serialising must not undo the escape merge applied.
