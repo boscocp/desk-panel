@@ -135,14 +135,21 @@ public final class DataPayload {
             // a typo in the bounds takes. put(null) is how JSONObject removes
             // a key, which is exactly what is wanted here.
             //
-            // **This copy is the whole of the wiring, and forgetting it is
-            // silent, and it is true of every line above it as well.** The
-            // payload is rebuilt key by key rather than patched, so a key
-            // nobody names here simply does not reach the phone: the page
-            // stays in its day profile for ever and the backlight never dims,
-            // with a correct server, a correct page and a correct predicate.
-            // That is how T6.4 shipped its first build, and
-            // `e2e/check_night_marker.py` is what caught it.
+            // **This copy is the whole of the wiring, and it is true of every
+            // line above it as well.** The payload is rebuilt key by key
+            // rather than patched, so a key nobody names here simply does not
+            // reach the phone: the page stays in its day profile for ever and
+            // the backlight never dims, with a correct server, a correct page
+            // and a correct predicate. That is how T6.4 shipped its first
+            // build, and `e2e/check_night_marker.py` is what caught it.
+            //
+            // It is **no longer silent**, which this comment used to say it
+            // was — and being read after the failure twice is what finally
+            // bought a check (T10.1). `DataPayloadTest` asserts every
+            // top-level key of `server/tests/fixtures/payload.json`, which the
+            // server generates from its own assembly, so a key added on the PC
+            // turns `./gradlew test` red here rather than vanishing. Adding a
+            // line below and regenerating that file is the whole procedure.
             payload.put("night", quotes.optJSONObject("night"));
 
             // Which shortcut buttons the panel draws (T8.2), and it is the
