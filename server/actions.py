@@ -164,26 +164,40 @@ def _windows_toggle(data_flow, every_endpoint=False):
         "}\n"
         "[ComImport,Guid(\"BCDE0395-E52F-467C-8E3D-C4579291692E\")]\n"
         "class MMDeviceEnumeratorComObject {}\n"
+        # Every call goes through `Ok`. These methods return their HRESULT
+        # rather than throwing it (an `int`-returning COM declaration keeps
+        # PreserveSig), so an unchecked `SetMute` that failed on one input
+        # would still end on "muted" -- a cross over a live microphone. A
+        # thrown exception is the last statement's error, powershell exits 1,
+        # and `run_action` reports the press as failed.
         "public class Endpoint {\n"
+        "  static void Ok(int hr) { Marshal.ThrowExceptionForHR(hr); }\n"
         "  static IAudioEndpointVolume Volume(IMMDevice dev) {\n"
         "    var iid=typeof(IAudioEndpointVolume).GUID;\n"
-        "    IAudioEndpointVolume ep; dev.Activate(ref iid,23,System.IntPtr.Zero,out ep);\n"
+        "    IAudioEndpointVolume ep; Ok(dev.Activate(ref iid,23,System.IntPtr.Zero,out ep));\n"
         "    return ep;\n"
+        "  }\n"
+        # Set, then read back. The word returned is what the mixer holds
+        # afterwards on every endpoint touched, not what was asked of it.
+        "  static void Set(IAudioEndpointVolume ep,bool want) {\n"
+        "    Ok(ep.SetMute(want,System.IntPtr.Zero));\n"
+        "    bool now; Ok(ep.GetMute(out now));\n"
+        "    if (now!=want) throw new System.Exception(\"an endpoint did not take the mute\");\n"
         "  }\n"
         "  public static string Toggle(int flow,bool every) {\n"
         "    var e=(IMMDeviceEnumerator)(new MMDeviceEnumeratorComObject());\n"
-        "    IMMDevice dev; e.GetDefaultAudioEndpoint(flow,1,out dev);\n"
+        "    IMMDevice dev; Ok(e.GetDefaultAudioEndpoint(flow,1,out dev));\n"
         "    var ep=Volume(dev);\n"
-        "    bool muted; ep.GetMute(out muted);\n"
-        "    ep.SetMute(!muted,System.IntPtr.Zero);\n"
+        "    bool muted; Ok(ep.GetMute(out muted));\n"
+        "    Set(ep,!muted);\n"
         "    if (every) {\n"
         # DEVICE_STATE_ACTIVE is 1: unplugged and disabled inputs are skipped,
-        # since activating one throws and cannot capture anything anyway.
-        "      IMMDeviceCollection all; e.EnumAudioEndpoints(flow,1,out all);\n"
-        "      int n; all.GetCount(out n);\n"
+        # since activating one fails and cannot capture anything anyway.
+        "      IMMDeviceCollection all; Ok(e.EnumAudioEndpoints(flow,1,out all));\n"
+        "      int n; Ok(all.GetCount(out n));\n"
         "      for (int i=0;i<n;i++) {\n"
-        "        IMMDevice d; all.Item(i,out d);\n"
-        "        Volume(d).SetMute(!muted,System.IntPtr.Zero);\n"
+        "        IMMDevice d; Ok(all.Item(i,out d));\n"
+        "        Set(Volume(d),!muted);\n"
         "      }\n"
         "    }\n"
         "    return muted ? \"unmuted\" : \"muted\";\n"
