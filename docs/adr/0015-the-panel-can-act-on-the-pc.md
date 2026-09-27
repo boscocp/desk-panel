@@ -118,8 +118,18 @@ left open is not.
 **Linux followed on 2026-09-27 (T8.3); macOS did not, and cannot.** On Linux a press is no
 longer one command. It enumerates the inputs with `pactl list short sources` and **skips every
 `.monitor`** — those are loopbacks of the outputs, and muting one silences a screen recording
-rather than a person — reads the direction once from `pactl get-source-mute @DEFAULT_SOURCE@`,
-and applies it to each remaining source by name. Every name comes from `pactl`'s own listing
+rather than a person — asks each remaining input what it holds, and applies one direction to all
+of them by name.
+
+**The direction comes from those inputs and not from the default source**, which the first cut
+of this got wrong and the review of PR #39 caught. A machine whose default source is a monitor
+has a default this press never touches, so a direction read from it never moves and the button
+mutes for ever and never unmutes. And a machine whose default is muted while another input is
+live — exactly the mixed state this section exists to end — would have answered "already muted"
+and **opened every microphone in the machine**. The rule instead is the one the cross is drawn
+by: a press unmutes only when every input is already muted, and mutes in every other case, a mix
+or an unreadable mixer included. Muting is the safe direction and the only one that can be taken
+without knowing anything for certain. Every name comes from `pactl`'s own listing
 and never from the request, every call is its own argument list, and **a single source that
 refuses the mute fails the whole press**: a partial mute reported as `muted` is the same lie as
 the wrong device's state, arriving by a different road. The read-back follows the same rule and
@@ -220,6 +230,13 @@ not: it runs nothing either way, and ordering it first would only change what a 
   carries the per-command timeout rather than the press carrying a budget, because the request
   is served on a thread of its own and the count is bounded by the sound cards in the machine.
   `mute-mic` on Linux **requires `pactl`**; `wpctl` alone is a 501.
+- **Every command runs in `LC_ALL=C`**, and that is load-bearing rather than tidy. The state is
+  measured by *parsing* the mixer's own words, and `pactl` binds the `pulseaudio` text domain —
+  so `Mute: yes` is `Stumm: ja` on a desktop with language packs installed and reads back as
+  `unknown`. The panel would draw no cross, and the microphone press would be one-directional:
+  an unreadable state is not "already muted", so every press mutes and none of them ever
+  unmutes again. The server inherits the graphical session's environment (invariant 2), which
+  is precisely the environment that has a language set.
 - **Platform coverage is uneven and says so.** Linux (PipeWire, falling back to PulseAudio),
   macOS (`osascript`) and Windows (PowerShell against Core Audio, no third-party download) are
   implemented; anything else answers **501**, which is "this machine cannot", not "you asked

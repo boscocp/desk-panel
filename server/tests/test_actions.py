@@ -8,6 +8,7 @@ that only checks the response cannot tell 404-after-spawning from
 404-before-spawning, and the difference is the whole endpoint.
 """
 import subprocess
+import sys
 import unittest
 
 from server import actions
@@ -404,6 +405,33 @@ class ReadbackTests(unittest.TestCase):
             actions.UNKNOWN)
 
 
+class RunnerEnvironmentTests(unittest.TestCase):
+    """The one test that runs a real subprocess, and it is not a mixer one.
+
+    `_default_runner` is the only place this module touches the machine, and
+    everything it returns is *parsed* -- `Mute: yes`, `Volume: 0.40 [MUTED]`.
+    `pactl` binds the `pulseaudio` text domain, so those words are translated
+    on a desktop with language packs installed, and the server inherits the
+    graphical session's environment (invariant 2) -- which is the one that
+    has a language set. A translated `Mute:` reads as `unknown`, and the
+    Linux microphone press refuses to guess a direction from `unknown`, so
+    the button would answer 500 on every press in Berlin and work in C.
+    """
+
+    def test_the_child_runs_in_the_C_locale(self):
+        done = actions._default_runner(
+            [sys.executable, "-c", "import os;print(os.environ.get('LC_ALL'))"], 30)
+        self.assertEqual(done.stdout.strip(), "C")
+
+    def test_the_rest_of_the_environment_is_still_there(self):
+        # A bare `env={"LC_ALL": "C"}` would strip PATH, HOME and the session
+        # bus address -- and `pactl` finds the server through the last of
+        # those.
+        done = actions._default_runner(
+            [sys.executable, "-c", "import os;print(len(os.environ))"], 30)
+        self.assertGreater(int(done.stdout.strip()), 1)
+
+
 SOURCES = (
     "54\talsa_output.pci-0000_01_00.1.hdmi-stereo.monitor\tPipeWire\ts32le 2ch 48000Hz\tSUSPENDED\n"
     "56\talsa_input.usb-0bda_Fosi_Audio_K5_Pro-00.analog-stereo\tPipeWire\ts16le 2ch 48000Hz\tSUSPENDED\n"
@@ -428,13 +456,13 @@ class PactlFake:
     first one and said so".
     """
 
-    def __init__(self, sources=SOURCES, default="no", refuse=(), answers=None):
+    def __init__(self, sources=SOURCES, muted=(), stuck=(), refuse=(), answers=None):
         self.calls = []
         self.sources = sources
-        self.default = default
-        self.refuse = set(refuse)
-        self.answers = answers or {}   # name -> the word `pactl` will print
-        self.muted = {}
+        self.muted = {name: True for name in muted}   # the state it starts in
+        self.stuck = set(stuck)      # takes the command, does not move
+        self.refuse = set(refuse)    # exits non-zero
+        self.answers = answers or {}  # name -> the word `pactl` prints, always
 
     def __call__(self, argv, timeout):
         self.calls.append((argv, timeout))
@@ -443,8 +471,6 @@ class PactlFake:
             return subprocess.CompletedProcess(argv, 0, self.sources, "")
         if verb == "get-source-mute":
             name = argv[2]
-            if name == "@DEFAULT_SOURCE@":
-                return subprocess.CompletedProcess(argv, 0, f"Mute: {self.default}\n", "")
             word = self.answers.get(name, "yes" if self.muted.get(name) else "no")
             return subprocess.CompletedProcess(argv, 0, f"Mute: {word}\n", "")
         if verb == "set-source-mute":
@@ -452,7 +478,8 @@ class PactlFake:
             if name in self.refuse:
                 return subprocess.CompletedProcess(
                     argv, 1, "", f"Failure: No such entity: {name}\n")
-            self.muted[name] = flag == "1"
+            if name not in self.stuck:
+                self.muted[name] = flag == "1"
             return subprocess.CompletedProcess(argv, 0, "", "")
         raise AssertionError(f"the press ran something it should not: {argv}")
 
@@ -511,28 +538,48 @@ class LinuxMicTests(unittest.TestCase):
         self.assertTrue(all(not name.endswith(".monitor") for name in muted), muted)
         self.assertEqual(state, actions.MUTED)
 
-    def test_the_default_decides_the_direction_for_all_of_them(self):
-        # One press is one direction. A per-source toggle would leave a
-        # machine where two inputs are muted and one is live in exactly that
-        # state, forever, one press after another.
-        runner, state = self.press(default="yes")
+    def test_one_press_is_one_direction_for_all_of_them(self):
+        # A per-source toggle would leave a machine where two inputs are
+        # muted and one is live in exactly that state, for ever, one press
+        # after another.
+        runner, state = self.press(muted=INPUTS)
         flags = {argv[3] for argv, _ in runner.calls if argv[1] == "set-source-mute"}
         self.assertEqual(flags, {"0"})
         self.assertEqual(state, actions.UNMUTED)
+
+    def test_only_a_machine_that_is_entirely_muted_gets_unmuted(self):
+        # Found by review of PR #39. The first cut read the direction from
+        # `@DEFAULT_SOURCE@`, so a muted default beside a live headset --
+        # exactly the mixed state this task exists to end -- answered
+        # "already muted" and the press **opened every microphone**.
+        runner, state = self.press(muted=[INPUTS[0]])
+        flags = {argv[3] for argv, _ in runner.calls if argv[1] == "set-source-mute"}
+        self.assertEqual(flags, {"1"})
+        self.assertEqual(state, actions.MUTED)
+
+    def test_a_default_that_is_a_monitor_does_not_strand_the_button(self):
+        # The other half of the same finding: a machine whose default source
+        # is a monitor -- a normal thing to set for screen recording -- has a
+        # default this press never touches, so a direction read from it never
+        # moves and the button mutes for ever and never unmutes. The
+        # direction comes from the inputs, and there is no reading of
+        # `@DEFAULT_SOURCE@` left to go stale.
+        asked = [argv[2] for argv, _ in self.press()[0].calls if argv[1] == "get-source-mute"]
+        self.assertNotIn("@DEFAULT_SOURCE@", asked)
 
     def test_the_direction_is_read_before_anything_is_set(self):
         runner, _ = self.press()
         verbs = [verb for verb, _ in runner.verbs()]
         self.assertEqual(verbs[0], "list")
-        self.assertEqual(verbs[1], "get-source-mute")
-        self.assertEqual(verbs[2], "set-source-mute")
+        self.assertEqual(verbs[1:1 + len(INPUTS)], ["get-source-mute"] * len(INPUTS))
+        self.assertEqual(verbs[1 + len(INPUTS)], "set-source-mute")
 
     def test_the_names_come_from_pactl_and_never_from_anywhere_else(self):
         # ADR 0015's rule, on the one id whose commands are built at run time
         # rather than written in the table: every argument of every command
         # is either a literal or a name this listing printed.
         runner, _ = self.press()
-        listed = set(actions.capture_sources(SOURCES)) | {"@DEFAULT_SOURCE@"}
+        listed = set(actions.capture_sources(SOURCES))
         for argv, _ in runner.calls:
             self.assertEqual(argv[0], "pactl")
             for word in argv[2:]:
@@ -545,33 +592,57 @@ class LinuxMicTests(unittest.TestCase):
         self.assertIn(INPUTS[1], str(caught.exception))
 
     def test_muted_only_when_every_input_is(self):
-        # One microphone that did not take it, reported by the mixer itself:
-        # the honest answer is `unknown`, which the page draws as no claim.
-        runner, state = self.press(answers={INPUTS[2]: "no"})
+        # One microphone that took the command and did not move, which
+        # `pactl` reports without failing: the honest answer is `unknown`,
+        # which the page draws as no claim at all.
+        runner, state = self.press(stuck=[INPUTS[2]])
         self.assertEqual(state, actions.UNKNOWN)
 
     def test_a_machine_with_no_microphone_is_a_failure_not_a_state(self):
         with self.assertRaises(actions.ActionError):
             self.press(sources="54\talsa_output.x.monitor\tPipeWire\tIDLE\n")
 
-    def test_a_default_that_will_not_say_refuses_to_guess_a_direction(self):
-        # Guessing here is a coin-flip between muting somebody's microphone
-        # and opening it, and nothing runs until it is known.
-        runner = PactlFake(default="perhaps")
+    def test_a_mixer_nobody_can_parse_mutes_rather_than_opens(self):
+        # A translated `pactl` is the real case (`LC_ALL=C` is the fix, and
+        # it is one environment variable away from being undone). An input
+        # whose state cannot be read is not an input known to be muted, so
+        # the press mutes -- the only direction that can be taken without
+        # knowing anything for certain.
+        runner, _ = self.press(answers={name: "perhaps" for name in INPUTS})
+        flags = {argv[3] for argv, _ in runner.calls if argv[1] == "set-source-mute"}
+        self.assertEqual(flags, {"1"})
+
+    def test_a_state_that_cannot_be_read_at_all_fails_before_anything_is_set(self):
+        # Failing is different from answering `unknown`: this is the mixer
+        # refusing the question, and finding that out before changing half
+        # the machine is the cheaper failure.
+        class Silent(PactlFake):
+            def __call__(self, argv, timeout):
+                done = super().__call__(argv, timeout)
+                if argv[1] == "get-source-mute":
+                    return subprocess.CompletedProcess(argv, 1, "", "no such entity")
+                return done
+
+        runner = Silent()
         with self.assertRaises(actions.ActionError):
             actions.run_action("mute-mic", platform="linux",
                                runner=runner, which=always_present)
-        self.assertEqual([verb for verb, _ in runner.verbs()], ["list", "get-source-mute"])
+        self.assertEqual([argv[1] for argv, _ in runner.calls], ["list", "get-source-mute"])
 
     def test_a_read_back_that_fails_does_not_fail_the_press(self):
         # Same bargain as every other read-back: the toggles already
         # happened and the caller is owed its 200.
         class Refusing(PactlFake):
+            """Answers the direction and then loses the devices."""
+
             def __call__(self, argv, timeout):
                 done = super().__call__(argv, timeout)
-                if argv[1] == "get-source-mute" and argv[2] != "@DEFAULT_SOURCE@":
+                if argv[1] == "get-source-mute" and self.sets_done():
                     return subprocess.CompletedProcess(argv, 1, "", "gone")
                 return done
+
+            def sets_done(self):
+                return any(argv[1] == "set-source-mute" for argv, _ in self.calls)
 
         runner = Refusing()
         self.assertEqual(
@@ -584,7 +655,8 @@ class LinuxMicTests(unittest.TestCase):
     def test_a_read_back_that_times_out_does_not_raise(self):
         class Hanging(PactlFake):
             def __call__(self, argv, timeout):
-                if argv[1] == "get-source-mute" and argv[2] != "@DEFAULT_SOURCE@":
+                if (argv[1] == "get-source-mute"
+                        and any(a[1] == "set-source-mute" for a, _ in self.calls)):
                     raise subprocess.TimeoutExpired("pactl", timeout)
                 return super().__call__(argv, timeout)
 
@@ -615,6 +687,22 @@ class LinuxMicTests(unittest.TestCase):
             self.assertIn(argv[1], {"list", "get-source-mute", "set-source-mute"}, argv)
         after = [verb for verb, _ in runner.verbs()][-len(INPUTS):]
         self.assertEqual(after, ["get-source-mute"] * len(INPUTS))
+
+    def test_a_row_that_only_asks_a_question_must_have_a_press_behind_it(self):
+        # Found by review of PR #39. `mute-mic`'s Linux row is a read-only
+        # listing, which is safe only because `_SEQUENCES` takes over before
+        # it is reached. If the two ever key differently, `run_action` runs
+        # the listing **as the action**: exit 0, nothing muted, and a 200 --
+        # the "nothing happened" failure the root CLAUDE.md calls the hardest
+        # on this project to diagnose.
+        for action in actions.CATALOGUE:
+            for platform in ("linux", "darwin", "win32"):
+                for argv in actions.candidates(action, platform):
+                    if argv[0] not in {"pactl", "wpctl"}:
+                        continue
+                    if argv[1] == "list" or argv[1].startswith("get-"):
+                        self.assertIn(platform, actions._SEQUENCES.get(action, {}),
+                                      f"{action}/{platform}: it asks, and nothing acts")
 
     def test_no_pactl_is_unsupported_and_runs_nothing(self):
         # The row in the table is the press's first command, which is also
