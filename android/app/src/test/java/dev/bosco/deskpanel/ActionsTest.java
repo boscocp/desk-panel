@@ -6,6 +6,8 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
+import java.util.List;
+
 import org.junit.Test;
 
 /**
@@ -91,5 +93,23 @@ public class ActionsTest {
         assertEquals("mute-audio", Actions.ALLOWED.get(0));
         assertEquals("mute-mic", Actions.ALLOWED.get(1));
         assertEquals(2, Actions.ALLOWED.size());
+    }
+
+    @Test
+    public void theAllowlistCarriesEveryIdTheServerKnows() {
+        // T10.1. The same list is written in three languages -- this one,
+        // `actions.CATALOGUE` in Python, and `words.actions` in format.js --
+        // and until now nothing compared them. A half-added action draws no
+        // button, or draws one this bridge refuses; both fail safe, and both
+        // look like the panel working.
+        //
+        // **The duplication itself stays.** ADR 0015 wants the phone's
+        // allowlist independent of the server's, so a compromised asset
+        // cannot widen what the bridge will send. What was missing was only a
+        // check that they agree, and this is it -- read from the description
+        // `server/tests/test_payload_contract.py` generates.
+        List<String> known = Contract.actionIds();
+        assertEquals("the server's catalogue and this app's allowlist have drifted; "
+                + "see ADR 0015 and tasks/T10.1", known, Actions.ALLOWED);
     }
 }
