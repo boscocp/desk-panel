@@ -107,9 +107,19 @@ _MACOS_INPUT_TOGGLE = (
 # download the owner has to trust. `eRender` is 0 and `eCapture` is 1 in
 # EDataFlow; `eMultimedia` is 1 in ERole. The C# is a literal in this file and
 # nothing from the request reaches it.
+#
+# The microphone is toggled on **every active capture endpoint**, not on the
+# default one. The first run on the Windows box (2026-09-26) had three live
+# inputs -- the default, a headset and Steam's virtual one -- and the button
+# muted the default while the owner was talking into the headset: a 200, a
+# cross on the button, and a live microphone. That is the one failure ADR 0015
+# calls worse than no button. The default decides the direction and every
+# input follows it, so one press never leaves a mix of muted and live mics.
+# Speakers keep the default-only toggle: sound from the wrong one is audible,
+# a microphone left open is not.
 
 
-def _windows_toggle(data_flow):
+def _windows_toggle(data_flow, every_endpoint=False):
     source = (
         "Add-Type -Language CSharp -TypeDefinition @'\n"
         "using System.Runtime.InteropServices;\n"
@@ -139,25 +149,48 @@ def _windows_toggle(data_flow):
         "}\n"
         "[Guid(\"A95664D2-9614-4F35-A746-DE8DB63617E6\"),"
         "InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]\n"
+        # `EnumAudioEndpoints` is the first slot and `GetDefaultAudioEndpoint`
+        # the second, so both are declared in order -- the same vtable rule as
+        # above. `Item` is the second slot of IMMDeviceCollection.
         "interface IMMDeviceEnumerator {\n"
-        "  int f();\n"
+        "  int EnumAudioEndpoints(int flow,int mask,out IMMDeviceCollection c);\n"
         "  int GetDefaultAudioEndpoint(int flow,int role,out IMMDevice dev);\n"
+        "}\n"
+        "[Guid(\"0BD7A1BE-7A1A-44DB-8397-CC5392387B5E\"),"
+        "InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]\n"
+        "interface IMMDeviceCollection {\n"
+        "  int GetCount(out int n);\n"
+        "  int Item(int i,out IMMDevice dev);\n"
         "}\n"
         "[ComImport,Guid(\"BCDE0395-E52F-467C-8E3D-C4579291692E\")]\n"
         "class MMDeviceEnumeratorComObject {}\n"
         "public class Endpoint {\n"
-        "  public static string Toggle(int flow) {\n"
-        "    var e=(IMMDeviceEnumerator)(new MMDeviceEnumeratorComObject());\n"
-        "    IMMDevice dev; e.GetDefaultAudioEndpoint(flow,1,out dev);\n"
+        "  static IAudioEndpointVolume Volume(IMMDevice dev) {\n"
         "    var iid=typeof(IAudioEndpointVolume).GUID;\n"
         "    IAudioEndpointVolume ep; dev.Activate(ref iid,23,System.IntPtr.Zero,out ep);\n"
+        "    return ep;\n"
+        "  }\n"
+        "  public static string Toggle(int flow,bool every) {\n"
+        "    var e=(IMMDeviceEnumerator)(new MMDeviceEnumeratorComObject());\n"
+        "    IMMDevice dev; e.GetDefaultAudioEndpoint(flow,1,out dev);\n"
+        "    var ep=Volume(dev);\n"
         "    bool muted; ep.GetMute(out muted);\n"
         "    ep.SetMute(!muted,System.IntPtr.Zero);\n"
+        "    if (every) {\n"
+        # DEVICE_STATE_ACTIVE is 1: unplugged and disabled inputs are skipped,
+        # since activating one throws and cannot capture anything anyway.
+        "      IMMDeviceCollection all; e.EnumAudioEndpoints(flow,1,out all);\n"
+        "      int n; all.GetCount(out n);\n"
+        "      for (int i=0;i<n;i++) {\n"
+        "        IMMDevice d; all.Item(i,out d);\n"
+        "        Volume(d).SetMute(!muted,System.IntPtr.Zero);\n"
+        "      }\n"
+        "    }\n"
         "    return muted ? \"unmuted\" : \"muted\";\n"
         "  }\n"
         "}\n"
         "'@\n"
-        f"[Endpoint]::Toggle({data_flow})"
+        f"[Endpoint]::Toggle({data_flow},${'true' if every_endpoint else 'false'})"
     )
     return ["powershell", "-NoProfile", "-NonInteractive", "-Command", source]
 
@@ -179,7 +212,7 @@ _TABLE = {
             ["pactl", "set-source-mute", "@DEFAULT_SOURCE@", "toggle"],
         ],
         "darwin": [["osascript", "-e", _MACOS_INPUT_TOGGLE]],
-        "win32": [_windows_toggle(1)],
+        "win32": [_windows_toggle(1, every_endpoint=True)],
     },
 }
 
