@@ -13,6 +13,7 @@ runner injected so a test never executes a mixer command.
 Standard library only, like the rest of `server/`.
 """
 
+import os
 import shutil
 import subprocess
 import sys
@@ -209,6 +210,17 @@ def _windows_toggle(data_flow, every_endpoint=False):
     return ["powershell", "-NoProfile", "-NonInteractive", "-Command", source]
 
 
+# The one binary the Linux microphone press runs, named once. `which` gates
+# the whole press on `_LINUX_SOURCES[0]`, so a second spelling of it further
+# down would be a command nothing ever probed for.
+_PACTL = "pactl"
+
+# The first command of the Linux microphone press, and the binary the 501
+# path probes for. It is a row of `_TABLE` because everything that reads that
+# table -- `candidates`, `describe`, the Unsupported message -- needs to name
+# a command, and this is the one the press begins with.
+_LINUX_SOURCES = [_PACTL, "list", "short", "sources"]
+
 # id -> platform key -> candidate argument lists, tried in order until one of
 # the executables exists. The fallback is a *second binary*, never a shell `||`.
 _TABLE = {
@@ -221,10 +233,23 @@ _TABLE = {
         "win32": [_windows_toggle(0)],
     },
     "mute-mic": {
-        "linux": [
-            ["wpctl", "set-mute", "@DEFAULT_AUDIO_SOURCE@", "toggle"],
-            ["pactl", "set-source-mute", "@DEFAULT_SOURCE@", "toggle"],
-        ],
+        # **Not one command on Linux**, and this row holds only the first of
+        # them -- see `_linux_mic_press`. A press cannot know what to mute
+        # until it has asked the mixer what inputs exist, so the argument
+        # lists cannot all be written here; what a row can still be is the
+        # command the press starts with, which is also exactly the binary to
+        # probe for.
+        #
+        # `wpctl` is gone from this id, and from this id only. It has no verb
+        # for "every source" -- `wpctl set-mute` takes one node -- so keeping
+        # it as a fallback would mean a PipeWire box quietly back to muting
+        # the default alone, which is the hole T8.3 exists to close. `pactl`
+        # reaches PipeWire through `pipewire-pulse` and is the only
+        # microphone command on Linux now; a machine with `wpctl` and no
+        # `pactl` answers 501, and `describe` says so at startup rather than
+        # at the first press. The speakers keep both, because sound from the
+        # wrong sink is audible and a microphone left open is not.
+        "linux": [_LINUX_SOURCES],
         "darwin": [["osascript", "-e", _MACOS_INPUT_TOGGLE]],
         "win32": [_windows_toggle(1, every_endpoint=True)],
     },
@@ -254,12 +279,11 @@ _READBACK = {
             ["pactl", "get-sink-mute", "@DEFAULT_SINK@"],
         ],
     },
-    "mute-mic": {
-        "linux": [
-            ["wpctl", "get-volume", "@DEFAULT_AUDIO_SOURCE@"],
-            ["pactl", "get-source-mute", "@DEFAULT_SOURCE@"],
-        ],
-    },
+    # `mute-mic` has no Linux entry any more and the absence is the point:
+    # the state of the default source is not the state of the microphone. A
+    # press measures every non-monitor input itself and reports `muted` only
+    # when all of them are -- `_linux_mic_state`.
+    "mute-mic": {},
 }
 
 
@@ -299,6 +323,51 @@ def state_from_readback(stdout):
             return MUTED
         if value in {"no", "false", "0"}:
             return UNMUTED
+    return UNKNOWN
+
+
+def capture_sources(stdout):
+    """Pure: the names of the real inputs in `pactl list short sources`.
+
+    Every output carries a `.monitor` source -- a loopback of what the
+    speakers are playing -- and those are **skipped**. Muting one records
+    silence into a screen capture and silences no person at all, which is a
+    bug in the opposite direction from the one this function exists for.
+
+    The line is `index<TAB>name<TAB>driver<TAB>sample spec<TAB>state`. Only
+    the sample spec has spaces in it and it comes after the name, so taking
+    the second whitespace-separated token is safe: PulseAudio source names
+    have never contained one, and reading them this way survives a build that
+    pads the columns instead of tabbing them.
+    """
+    names = []
+    for line in (stdout or "").splitlines():
+        fields = line.split()
+        if len(fields) < 2:
+            continue
+        name = fields[1]
+        if name.endswith(".monitor") or name in names:
+            continue
+        names.append(name)
+    return names
+
+
+def state_from_sources(states):
+    """Pure: one word for a handful of microphones.
+
+    `muted` only when **every** input is, which is the whole of T8.3 in a
+    line: a mix of muted and live inputs is not a muted microphone, and the
+    cross on the button is a claim about exactly that. A mix answers
+    `unknown` rather than picking a side, and the page renders `unknown` as
+    no claim at all.
+    """
+    states = list(states)
+    if not states:
+        return UNKNOWN
+    if all(state == MUTED for state in states):
+        return MUTED
+    if all(state == UNMUTED for state in states):
+        return UNMUTED
     return UNKNOWN
 
 
@@ -440,9 +509,22 @@ def _default_runner(argv, timeout):
     silent press and a console window flashing over whatever the owner is
     doing, every time -- the server is started by a Scheduled Task with no
     console of its own, so `powershell.exe` would allocate one.
+
+    **`LC_ALL=C`, because the mixer's answers are parsed.** `pactl` binds the
+    `pulseaudio` text domain, so `Mute: yes` is a translated string: on a
+    desktop with language packs installed it is `Stumm: ja` or `Mudo: sim`,
+    and `state_from_readback` reads it as `unknown`. The panel would draw no
+    cross, and the Linux microphone press would be **one-directional** -- an
+    unreadable state is not `muted`, so every press mutes and none of them
+    ever unmutes again. The server inherits the environment of the graphical
+    session (invariant 2), which is exactly the environment that has a
+    language set. Forcing the child's locale is the whole fix and it costs
+    nothing anywhere else: every string this module reads back is ASCII, and
+    the words it matches on are the untranslated ones.
     """
     return subprocess.run(
         argv, capture_output=True, text=True, timeout=timeout,
+        env=dict(os.environ, LC_ALL="C"),
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
@@ -466,6 +548,29 @@ def run_action(action, platform=None, runner=None, which=None, timeout=None):
             f"{action} is not available on this platform ({platform or sys.platform}): {missing}"
         )
 
+    press = _SEQUENCES.get(action, {}).get(platform_key(platform or sys.platform))
+    if press is not None:
+        # This one is several commands, and which ones is not knowable until
+        # the first has run. The `which` gate above still decided whether the
+        # platform can act at all, because the row it read holds the press's
+        # first command.
+        return press(runner, timeout)
+
+    done = _run_or_raise(argv, runner, timeout)
+    state = state_from(action, done.stdout, done.returncode)
+    if state == UNKNOWN:
+        # The toggle worked and said nothing about the result, which is every
+        # Linux mixer. Ask.
+        state = _read_state(action, platform, runner, which, timeout)
+    return state
+
+
+def _run_or_raise(argv, runner, timeout):
+    """One command, with every way it can fail turned into an `ActionError`.
+
+    Shared by the single-command path and by the Linux microphone press, so a
+    failure reads the same in the log wherever it happened.
+    """
     try:
         done = runner(argv, timeout)
     except subprocess.TimeoutExpired:
@@ -480,12 +585,101 @@ def run_action(action, platform=None, runner=None, which=None, timeout=None):
         raise ActionError(
             f"{argv[0]} exited {done.returncode}: {detail[-1][:200] if detail else 'no output'}"
         )
-    state = state_from(action, done.stdout, done.returncode)
-    if state is UNKNOWN or state == UNKNOWN:
-        # The toggle worked and said nothing about the result, which is every
-        # Linux mixer. Ask.
-        state = _read_state(action, platform, runner, which, timeout)
-    return state
+    return done
+
+
+def _linux_mic_press(runner, timeout):
+    """Mute or unmute **every** input on Linux, and measure what they hold.
+
+    Four kinds of command, in this order, all of them `pactl`:
+
+      1. `list short sources` -- the names, from the mixer. Never from the
+         request, and the `.monitor` loopbacks dropped (`capture_sources`).
+      2. `get-source-mute <name>` -- the direction, read from the inputs this
+         press is about to touch.
+      3. `set-source-mute <name> 0|1` -- per input.
+      4. the read-back, per input (`_linux_mic_state`).
+
+    **The direction comes from the inputs, not from `@DEFAULT_SOURCE@`**, and
+    the difference is not a detail. Found by review of PR #39, where the
+    first cut asked the default source: a machine whose default is a monitor
+    -- a normal thing to set for screen recording -- has a default that is
+    never in `names`, so its state never moves and the button becomes
+    one-directional for ever. Worse, a machine where the default is muted and
+    another input is live is precisely the mixed state this task exists to
+    end, and asking the default there answers "already muted", so the press
+    would have **opened every microphone in the machine**.
+
+    `state_from_sources` decides instead, which is the same function that
+    draws the cross: the press unmutes exactly when the panel would be
+    showing one, and mutes in every other case -- a mix, or a mixer nobody
+    could parse, included. Muting is the safe direction, and it is the only
+    one that can be taken without knowing anything for certain.
+
+    The per-command timeout is kept rather than replaced by a budget for the
+    whole press: each request is served on a thread of its own, and the
+    number of commands is the number of sound cards plugged into the machine
+    -- seven on the desk this was written at, of which three are inputs.
+    """
+    listing = _run_or_raise(_LINUX_SOURCES, runner, timeout)
+    names = capture_sources(listing.stdout)
+    if not names:
+        # A machine with no microphone. Answering `unmuted` would be a claim
+        # about hardware that is not there, and answering `muted` would be
+        # the privacy lie; that the press failed is simply true.
+        raise ActionError("pactl listed no capture source to mute")
+
+    before = state_from_sources(_linux_source_states(names, runner, timeout))
+    flag = "0" if before == MUTED else "1"
+
+    for name in names:
+        try:
+            _run_or_raise([_PACTL, "set-source-mute", name, flag], runner, timeout)
+        except ActionError as exc:
+            # Loudly, and with the input named. A press that muted two inputs
+            # of three and answered `muted` is the exact lie T8.3 exists to
+            # remove: a cross drawn over a live microphone.
+            raise ActionError(f"{name} did not take the mute: {exc}") from None
+
+    return _linux_mic_state(names, runner, timeout)
+
+
+def _linux_source_states(names, runner, timeout):
+    """What each input holds, before anything is set. Raises, unlike the
+    read-back: a mixer that cannot answer the question is a mixer this press
+    is not going to be able to act on either, and finding that out before
+    changing half of them is the cheaper failure.
+    """
+    return [
+        state_from_readback(
+            _run_or_raise([_PACTL, "get-source-mute", name], runner, timeout).stdout)
+        for name in names
+    ]
+
+
+def _linux_mic_state(names, runner, timeout):
+    """What the inputs hold now, or `unknown`. Never raises.
+
+    Same bargain as `_read_state`: the toggles already happened and the
+    caller is owed its 200, so a read that fails decides only whether a cross
+    is drawn.
+    """
+    states = []
+    for name in names:
+        try:
+            done = runner([_PACTL, "get-source-mute", name], timeout)
+        except (subprocess.TimeoutExpired, OSError):
+            return UNKNOWN
+        if done.returncode != 0:
+            return UNKNOWN
+        states.append(state_from_readback(done.stdout))
+    return state_from_sources(states)
+
+
+# id -> platform -> the whole press, for the ids that are more than one
+# command. Keyed like `_TABLE` and consulted after it, so a platform with no
+# command at all is still `Unsupported` before anything runs.
+_SEQUENCES = {"mute-mic": {"linux": _linux_mic_press}}
 
 
 def _read_state(action, platform, runner, which, timeout):
