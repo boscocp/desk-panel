@@ -100,17 +100,24 @@ lint-ci-hygiene:
 # is a documented decision; a glob reaching e2e/ would make `make check` need a
 # browser the day somebody adds a --self-test there. Widen again, directory by
 # directory, when a third one grows a self-test that is safe here.
-SELFTESTS := $(shell grep -l '"--self-test"' scripts/*.py server/*.py)
+SELFTESTS := $(shell grep -l '"--self-test"' scripts/*.py server/*.py | sort)
 
 # No backslash continuations in this recipe, deliberately. This worktree is
 # CRLF, and a backslash followed by CR is not a line join, so make would run
 # each line in its own shell and the target would die on its own error message
 # with every script still unrun. The committed blob is LF, so a clone and CI
 # never see it -- which is exactly what makes it worth removing. Found by review.
+#
+# Every script runs even after one fails, and the target fails at the end. Stopping at
+# the first red script hides the rest -- which is the same "a self-test no target runs"
+# failure the comment above is written against, arriving through the back door: a red
+# check_harness_notes.py meant server/verify_login_scope.py never ran at all. Sorted,
+# because grep emits directory order and which self-tests ran should not depend on the
+# filesystem. Found by review.
 lint-selftests:
-	@# discovery is a glob over scripts/, never a list of names
+	@# discovery is a glob per directory, never a list of names
 	@test -n "$(SELFTESTS)" || { echo "lint-selftests: nothing carries a --self-test"; exit 1; }
-	@for s in $(SELFTESTS); do echo "--> $$s --self-test"; python "$$s" --self-test || exit 1; done
+	@failed=""; for s in $(SELFTESTS); do echo "--> $$s --self-test"; python "$$s" --self-test || failed="$$failed $$s"; done; test -z "$$failed" || { echo "lint-selftests: failed:$$failed"; exit 1; }
 
 # Every Markdown file in the repository, the historical record included: a
 # link rots the same whether a contributor or a future session follows it.

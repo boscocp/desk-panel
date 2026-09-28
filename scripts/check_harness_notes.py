@@ -47,30 +47,46 @@ REQUIRED = ("## What ran", "## What the review found", "## What is not proven")
 MIN_WORDS = 12
 
 COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
-FENCE_RE = re.compile(r"^\s*(```|~~~)")
+FENCE_RE = re.compile(r"^\s*(```+|~~~+)")
 HEADING_RE = re.compile(r"^(##\s+.*)$")
 
 
 def sections(text: str) -> dict[str, str]:
     """Map each `## ` heading to the text under it, up to the next one.
 
-    Fenced blocks are tracked so a `## ` inside one is content and not a heading.
-    `###` and deeper stay inside their parent section, which is where they read.
+    Fenced blocks are tracked so a `## ` inside one is content and not a heading. A fence
+    closes only with the delimiter that opened it: a single boolean would let a `~~~` line
+    inside a ``` block close it early, and - the expensive direction - would leave the rest
+    of the file inside a fence, so every later heading vanishes and the guard reports a
+    heading missing that is plainly there. Found by review.
+
+    `###` and deeper stay inside their parent section, which is where they read. A heading
+    that appears twice keeps both bodies, because judging only the last one would fail a
+    note whose second occurrence is a pointer and whose first is fully written.
     """
     found: dict[str, str] = {}
-    heading, body, fenced = None, [], False
+    heading, body, opener = None, [], None
+
+    def close():
+        if heading is not None:
+            text = "\n".join(body)
+            found[heading] = f"{found[heading]}\n{text}" if heading in found else text
+
     for line in text.splitlines():
-        if FENCE_RE.match(line):
-            fenced = not fenced
-        match = None if fenced else HEADING_RE.match(line)
+        fence = FENCE_RE.match(line)
+        if fence:
+            marker = fence.group(1)[:3]
+            if opener is None:
+                opener = marker
+            elif marker == opener:
+                opener = None
+        match = None if opener else HEADING_RE.match(line)
         if match:
-            if heading is not None:
-                found[heading] = "\n".join(body)
+            close()
             heading, body = match.group(1).strip(), []
         elif heading is not None:
             body.append(line)
-    if heading is not None:
-        found[heading] = "\n".join(body)
+    close()
     return found
 
 
@@ -98,9 +114,18 @@ def section_problem(heading: str, note: Path, found: dict[str, str]) -> str | No
     return None
 
 
+def finished_waves(status: Path) -> dict[int, str]:
+    """Wave number -> the date STATUS.md records it landing on.
+
+    A dict, so a wave whose section appears twice - a corrected or re-pasted heading, in a
+    file edited by hand every wave - is one wave and not two. Found by review.
+    """
+    return {int(n): date for date, n in WAVE_RE.findall(status.read_text(encoding="utf-8"))}
+
+
 def run(floor: int, status: Path, notes: Path) -> list[str]:
     problems: list[str] = []
-    waves = {int(n): date for date, n in WAVE_RE.findall(status.read_text(encoding="utf-8"))}
+    waves = finished_waves(status)
 
     for wave in sorted(w for w in waves if w >= floor):
         found = sorted(notes.glob(f"*-wave-{wave}.md"))
@@ -138,8 +163,12 @@ def _self_test() -> int:
 
     ok("a heading inside a fence is not a heading",
        list(sections("## a\n\n```\n## b\n```\n")) == ["## a"])
+    ok("a `~~~` line inside a ``` block does not close it",
+       list(sections("## a\n\n```\n~~~\n## b\n```\n\n## c\n")) == ["## a", "## c"])
     ok("a `###` subheading stays inside its section",
        "### deeper" in sections("## a\n\n### deeper\n\ntext\n")["## a"])
+    ok("a heading written twice keeps both bodies",
+       sections("## a\n\nfirst\n\n## a\n\nsecond\n")["## a"].split() == ["first", "second"])
     ok("a comment is not substance", substance("  <!-- filled in later -->  ") == "")
     ok("a comment spanning lines is not substance",
        substance("<!--\nfilled in\nlater\n-->") == "")
@@ -187,9 +216,18 @@ def _self_test() -> int:
         ok("a wave under the floor is not failed retroactively",
            run(100, status_file, notes) == [])
 
-    repo = Path(__file__).resolve().parent.parent
-    ok("this repository's own notes pass",
-       run(FLOOR, repo / "tasks" / "STATUS.md", repo / "docs" / "harness-notes") == [])
+        status_file.write_text(status + "\n" + status, encoding="utf-8")
+        note.write_text(complete, encoding="utf-8")
+        ok("a wave whose section appears twice is one wave",
+           list(finished_waves(status_file)) == [99])
+
+    # Deliberately no case runs this guard against this repository. The design says the
+    # guard is red from the moment STATUS.md carries a wave's section until that wave's
+    # note is finished, so such a case would be red for the whole of every wave -- and
+    # `lint-selftests` stops at the first red script, which on this branch meant
+    # server/verify_login_scope.py never ran and T10.3's acceptance failed. A self-test
+    # answers whether the code is right; `make lint-notes` answers whether the notes are.
+    # Found by review, in the wave that introduced it.
 
     print(f"\ncheck_harness_notes --self-test: {len(failures)} failure(s)")
     return 1 if failures else 0
@@ -228,8 +266,7 @@ def main(argv: list[str]) -> int:
         print("\n  see docs/harness-notes/README.md for what a wave note carries", file=sys.stderr)
         return 1
 
-    waves = WAVE_RE.findall(status.read_text(encoding="utf-8"))
-    counted = sum(1 for _, n in waves if int(n) >= floor)
+    counted = sum(1 for w in finished_waves(status) if w >= floor)
     print(f"check_harness_notes: {counted} wave(s) from {floor} onward, each with a written note")
     return 0
 
