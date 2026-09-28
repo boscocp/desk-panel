@@ -22,7 +22,8 @@ already demonstrated in the existing four notes and is not repeated here.
 
 ## What a wave note must contain
 
-Three headings, and `make lint-notes` fails without them:
+Three headings **with something written under each**, and `make lint-notes` fails without
+them:
 
 - `## What ran` — the tasks, the branch, the PR, the diff (`gh pr view <n> --json additions,deletions`).
 - `## What the review found` — how many findings, how many applied, how many declined **and
@@ -40,6 +41,19 @@ learning lives:
   them; an empty cell is a finding and a guess is noise.
 
 Keep it short. These notes are read before a wave, not after a release.
+
+### The guard is red while you are still writing
+
+`make lint-notes` used to check only that the three strings were *present*. Wave 30 shipped
+`## What the review found` followed by `<!-- filled in after the review runs -->` and the
+check was green; wave 31 did the same. It now requires a section to be non-empty, to be more
+than an HTML comment, and to reach twelve words — a third of the smallest section anybody has
+written here, low enough that a one-line "nothing outstanding" clears it.
+
+A note is created before the review runs, so **the guard is red from the moment `STATUS.md`
+carries the wave's `## Resuming after` section until the note is finished**. That is the
+reminder working, not a bug: the section that is still a placeholder is named in the failure.
+Waves before 16 are the recorded backlog and are never failed retroactively.
 
 ## The gap, 2026-09-16 → 2026-09-21
 
