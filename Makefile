@@ -89,7 +89,18 @@ lint-ci-hygiene:
 # happens to say, which is not a self-test result. The cost is that an
 # implementation spelling it '--self-test' in single quotes is missed; this
 # repo writes double. Found by review.
-SELFTESTS := $(shell grep -l '"--self-test"' scripts/*.py)
+#
+# Two directories, because the glob used to be one and server/verify_login_scope.py
+# -- 97 autostart-parser cases, the only way macOS is checkable from this desk --
+# was a --self-test no target invoked (T10.3). Still a glob per directory and
+# never a list of names: the next script to grow one is covered by being written.
+#
+# e2e/ is deliberately not here. e2e/layout/'s checks drive Firefox over
+# Marionette and exit 2 without a browser, and keeping them outside `make check`
+# is a documented decision; a glob reaching e2e/ would make `make check` need a
+# browser the day somebody adds a --self-test there. Widen again, directory by
+# directory, when a third one grows a self-test that is safe here.
+SELFTESTS := $(shell grep -l '"--self-test"' scripts/*.py server/*.py)
 
 # No backslash continuations in this recipe, deliberately. This worktree is
 # CRLF, and a backslash followed by CR is not a line join, so make would run
