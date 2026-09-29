@@ -76,6 +76,11 @@ reinstall**: cleartext permission is a property of the APK, not of the server. N
 the project works that way, and that is exactly why the address is here and not in
 `server/config.toml`.
 
+**More than one PC** is a comma-separated list, `PC_IP=192.168.15.3,192.168.15.7`
+([ADR 0016](adr/0016-more-than-one-pc.md)). Each address gets its own `<domain>` in the pin. The
+panel is online while any of them answers, and it takes data from whichever one answered last.
+Every one of them needs its own reservation.
+
 The committed `res/xml/network_security_config.xml` keeps the placeholder `192.168.1.100`.
 Gradle substitutes `PC_IP` into a generated copy of `res/`, so the tracked file is never
 rewritten and a real home network never reaches git. An absent or empty `PC_IP` leaves the

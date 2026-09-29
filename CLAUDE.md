@@ -15,6 +15,8 @@
    session of a human user** — a Scheduled Task with an "At log on" trigger on Windows, a
    systemd user unit bound to `graphical-session.target` on Linux, a LaunchAgent with
    `LimitLoadToSessionType=Aqua` on macOS. So "it answers" means "the user is logged in".
+   With more than one PC in `PC_IP` the panel is online while any of them answers, and that is
+   the same signal: someone is logged in at one of those screens (ADR 0016).
    Never move it to anything of system scope — a Windows Service, a systemd system unit, a
    LaunchDaemon, `@reboot`, **or a Docker container**. Each answers without a login and reports
    the wrong thing. A systemd *user* unit on `default.target` is in that class too, and looks

@@ -59,17 +59,34 @@ fun dotenvValue(key: String): String? = dotenv[key]?.takeIf { it.isNotBlank() }
 // never rewritten.
 // ---------------------------------------------------------------------------
 val cleartextPlaceholder = "192.168.1.100"
-val pcIp = dotenvValue("PC_IP")
+// A comma-separated list since ADR 0016: one panel can follow more than one PC,
+// and each listed address gets its own <domain> in the cleartext pin -- never
+// a wider rule. One address is the old behaviour exactly.
+val pcIps = dotenvValue("PC_IP")
+    ?.split(",")
+    ?.map { it.trim() }
+    ?.filter { it.isNotEmpty() }
+    ?.distinct()
+    ?.takeIf { it.isNotEmpty() }
 // Octets are range-checked, not just counted: \d{1,3} accepts 192.168.1.256,
 // and the build would then bake an unreachable address into both the pin and
 // pc_host while printing the reassuring line below. A panel that cannot reach
 // its PC looks exactly like a panel whose PC is off, which is the ambiguity
 // this whole mechanism exists to remove.
 val ipv4Octet = "(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])"
-if (pcIp != null && !Regex("^" + ipv4Octet + "(\\." + ipv4Octet + "){3}$").matches(pcIp)) {
-    throw GradleException("PC_IP in .env is not an IPv4 address: '$pcIp'")
+pcIps?.forEach { ip ->
+    if (!Regex("^" + ipv4Octet + "(\\." + ipv4Octet + "){3}$").matches(ip)) {
+        throw GradleException("PC_IP in .env is not a list of IPv4 addresses: '$ip'")
+    }
 }
-val cleartextHost = pcIp ?: cleartextPlaceholder
+// Three at most, the same number as PcHosts.MAX_HOSTS: an offline cycle asks
+// every host at up to 3 s each, inside a 10 s wake lock (PanelService).
+if (pcIps != null && pcIps.size > 3) {
+    throw GradleException("PC_IP in .env lists ${pcIps.size} addresses; at most 3 fit the dormant probe's wake lock")
+}
+val pcIp = pcIps?.joinToString(",")
+val cleartextHosts = pcIps ?: listOf(cleartextPlaceholder)
+val cleartextHost = cleartextHosts.joinToString(",")
 
 // Printed at configuration time, so it appears on every build including one
 // where every task is up to date. An APK silently built against the placeholder
@@ -104,7 +121,16 @@ val generateNetsecRes = tasks.register<Sync>("generateNetsecRes") {
     // or font to land here would be packaged corrupted, with no build error and
     // nothing to see until it fails to decode on the device.
     filesMatching("**/*.xml") {
-        filter { line -> line.replace(cleartextPlaceholder, cleartextHost) }
+        // A <domain> line carrying the placeholder becomes one line per host,
+        // so each PC is pinned by name and nothing else is (ADR 0016). Any
+        // other line -- pc_host, a comment -- gets the comma-separated list.
+        filter { line ->
+            if (line.contains(cleartextPlaceholder) && line.trimStart().startsWith("<domain ")) {
+                cleartextHosts.joinToString("\n") { line.replace(cleartextPlaceholder, it) }
+            } else {
+                line.replace(cleartextPlaceholder, cleartextHost)
+            }
+        }
     }
     inputs.property("cleartextHost", cleartextHost)
 }

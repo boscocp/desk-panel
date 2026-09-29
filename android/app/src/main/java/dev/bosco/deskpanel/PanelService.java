@@ -168,7 +168,9 @@ public final class PanelService extends Service implements PcPoller.Listener {
      * exists to save. The platform drops it either way.
      *
      * <p>10s against a probe whose worst case is the connect and read timeouts
-     * back to back, 3s (see {@code PcPoller.TIMEOUT_MS}).
+     * back to back, 3s (see {@code PcPoller.TIMEOUT_MS}), per host -- and an
+     * offline cycle asks every host, so {@link PcHosts#MAX_HOSTS} is 3 to keep
+     * the whole cycle, 9s, inside this window (ADR 0016).
      */
     private static final long PROBE_WINDOW_MS = 10_000L;
 
@@ -450,10 +452,12 @@ public final class PanelService extends Service implements PcPoller.Listener {
                 PowerManager.PARTIAL_WAKE_LOCK, "DeskPanel:probe");
         probeWakeLock.setReferenceCounted(false);
 
-        // R.string.pc_host carries the address the build baked in from .env.
-        String host = getString(R.string.pc_host);
-        poller = new PcPoller(host, this);
-        dataPoller = new DataPoller(host, this::onData);
+        // R.string.pc_host carries the addresses the build baked in from .env,
+        // comma-separated; one PcHosts is shared so the data poller follows
+        // whichever PC the PC poller last heard from (ADR 0016).
+        PcHosts hosts = PcHosts.parse(getString(R.string.pc_host));
+        poller = new PcPoller(hosts, this);
+        dataPoller = new DataPoller(hosts, this::onData);
 
         // RECEIVER_NOT_EXPORTED because nothing outside the system should be
         // able to tell this app what the battery is doing.

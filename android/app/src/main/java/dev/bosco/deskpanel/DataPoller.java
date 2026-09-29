@@ -115,10 +115,12 @@ public final class DataPoller {
         void onActionResult(String id, boolean ok, String state);
     }
 
-    private final String quotesUrl;
-    private final String weatherUrl;
-    /** The PC's address, kept so {@link Actions#urlFor} can build a route per press. */
-    private final String host;
+    /**
+     * Read per request, never cached as a URL: the PC this panel is on can
+     * change while it stays online -- one of two PCs going away while the
+     * other answers -- and data and presses must follow it (ADR 0016).
+     */
+    private final PcHosts hosts;
     private final Listener listener;
 
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -137,11 +139,13 @@ public final class DataPoller {
 
     private volatile ScheduledExecutorService scheduler;
 
-    public DataPoller(String host, Listener listener) {
-        this.host = host;
-        this.quotesUrl = "http://" + host + ":" + PORT + "/quotes";
-        this.weatherUrl = "http://" + host + ":" + PORT + "/weather";
+    public DataPoller(PcHosts hosts, Listener listener) {
+        this.hosts = hosts;
         this.listener = listener;
+    }
+
+    private static String url(String host, String path) {
+        return "http://" + host + ":" + PORT + path;
     }
 
     /** Begins polling, first fetch immediately. Calling it twice is a no-op. */
@@ -209,7 +213,7 @@ public final class DataPoller {
             Log.w(Markers.TAG, Markers.action(String.valueOf(candidate), "rejected"));
             return false;
         }
-        final String url = Actions.urlFor(host, PORT, id);
+        final String url = Actions.urlFor(hosts.active(), PORT, id);
         final ScheduledExecutorService owner = scheduler;
         if (!running || owner == null || url == null) {
             Log.i(Markers.TAG, Markers.action(id, "offline"));
@@ -316,8 +320,11 @@ public final class DataPoller {
             return true;
         }
 
-        String quotes = get(quotesUrl);
-        String weather = get(weatherUrl);
+        // One host for both halves, read once: a payload merged from two
+        // PCs would pair one desk's tickers with the other's city.
+        String host = hosts.active();
+        String quotes = get(url(host, "/quotes"));
+        String weather = get(url(host, "/weather"));
 
         if (isStale(booked)) {
             return true;
