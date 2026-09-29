@@ -582,6 +582,30 @@ class AppPayloadTests(unittest.TestCase):
         self.assertEqual(payload["city"], "São Paulo")
         self.assertFalse(payload["stale"])
 
+    def test_configured_coordinates_are_never_geocoded(self):
+        counts = self._stub_weather()
+        seen = []
+        module = providers_openmeteo
+        stubbed = module.fetch_forecast
+
+        def fetch_forecast(lat, lon, timezone, get=None):
+            seen.append((lat, lon))
+            return stubbed(lat, lon, timezone, get=get)
+
+        self.addCleanup(setattr, module, "fetch_forecast", stubbed)
+        module.fetch_forecast = fetch_forecast
+        app = App(dict(CONFIG, latitude=-23.61, longitude=-46.65), clock=self.clock)
+
+        payload = app.weather()
+
+        self.assertEqual(counts["geocode"], 0)
+        self.assertEqual(seen, [(-23.61, -46.65)])
+        self.assertEqual(payload["city"], CONFIG["city"])
+
+    def test_half_a_coordinate_pair_fails_startup(self):
+        with self.assertRaises(ValueError):
+            App(dict(CONFIG, latitude=-23.61), clock=self.clock)
+
     def test_a_forecast_outage_does_not_throw_away_the_coordinates(self):
         # Geocoding and forecasting used to be one call, so a forecast failure
         # discarded coordinates that had just been resolved -- and every later

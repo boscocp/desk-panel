@@ -17,6 +17,8 @@
   ],
   "city": "Sao Paulo",
   "timezone": "America/Sao_Paulo",
+  "latitude": -23.5475,
+  "longitude": -46.6361,
   "quotes_interval_s": 600,
   "weather_interval_s": 900,
   "moon_interval_s": 21600,

@@ -360,6 +360,37 @@ class OpenMeteoTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertNotIn("geocoding-api", calls[0])
 
+    def test_configured_coordinates_replace_the_geocode_and_keep_the_city_label(self):
+        coords = providers_openmeteo.coords_from_config(
+            {"city": "Sao Paulo", "latitude": -23.61, "longitude": -46.65})
+        self.assertEqual(coords, {"lat": -23.61, "lon": -46.65, "city": "Sao Paulo"})
+
+    def test_no_configured_coordinates_means_geocode_the_city(self):
+        self.assertIsNone(providers_openmeteo.coords_from_config({"city": "Sao Paulo"}))
+        self.assertIsNone(providers_openmeteo.coords_from_config(
+            {"latitude": None, "longitude": None}))
+
+    def test_the_edges_of_the_globe_are_places(self):
+        for lat, lon in ((90, 180), (-90, -180), (0, 0)):
+            with self.subTest(lat=lat, lon=lon):
+                coords = providers_openmeteo.coords_from_config(
+                    {"latitude": lat, "longitude": lon})
+                self.assertEqual((coords["lat"], coords["lon"]), (lat, lon))
+
+    def test_a_broken_coordinate_pair_is_refused_not_ignored(self):
+        for config in ({"latitude": -23.6},
+                       {"longitude": -46.6},
+                       {"latitude": "south", "longitude": -46.6},
+                       {"latitude": "-23.6", "longitude": -46.6},
+                       {"latitude": True, "longitude": -46.6},
+                       {"latitude": float("nan"), "longitude": -46.6},
+                       {"latitude": -23.6, "longitude": float("inf")},
+                       {"latitude": 90.0001, "longitude": -46.6},
+                       {"latitude": -23.6, "longitude": -180.0001}):
+            with self.subTest(config=config):
+                with self.assertRaises(ValueError):
+                    providers_openmeteo.coords_from_config(config)
+
     def test_load_raises_for_a_city_that_does_not_resolve(self):
         def get(url, headers=None, timeout=None):
             return {"results": []}
