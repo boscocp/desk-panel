@@ -155,7 +155,7 @@ something wider, so its text widths are a conservative estimate rather than the 
 | T7.7 | **Opening the repo: contributor strategy and settings** | todo | Asked for 2026-09-20. Scope stated before the repo is public, device reports invited as a first-class contribution, and branch protection, labels, `CODEOWNERS` and `SECURITY.md` applied with `gh` and recorded in `docs/MAINTAINING.md` |
 | T7.8 | **Everything GitHub gives a public repo for nothing** | done | 2026-09-26, wave 25. Not a rewrite of `ci.yml` — TT.9 owns it; it gained `concurrency:` and SHA pins and nothing else. `lint.yml`, two jobs: `lint` (ruff installed in the job and never in `server/`, `node --check` over `web/` instead of ESLint because there is no `package.json` by design, PSScriptAnalyzer on `install_task.ps1`, shellcheck) and `guards` (every guard script that exists, plus `make lint-selftests`). **`scripts/check_ci_hygiene.py` is the deliverable**, six rules, each mutation-tested by its own `--self-test`. Three departures from the task file, each argued in the file that makes it: the SHA rule has **no `actions/*` exemption** — this repo pins those too, and an exemption is a decision the checker has to keep making right; dependabot covers **docker** as well, because `docker/Dockerfile` pins its base by digest and a digest is exactly the pin nobody updates by hand; and **CodeQL and dependency-review are absent rather than broken** — both need a public repo or Advanced Security, `code-scanning/default-setup` answers 403 here, and a check that cannot pass teaches everyone to scroll past it. `docs/MAINTAINING.md` carries the three steps that turn them on at T7.7's flip and says why the whole setup is free only while the repo is public. Rule 5 splits in two on purpose: **named in the Makefile** always, **run by a workflow** only for the guards `make check` reaches, because `check_branch_base.py` is green by construction on a runner and a green tick that means nothing is worse than none |
 | T7.9 | **A design review of the seams, before strangers arrive** | done | 2026-09-27, wave 30. `docs/DESIGN-REVIEW.md`. The method was **four contributor walks** — add a theme, add an action, add a market, add a second weather provider — and every finding came from a walk rather than from reading. Adding a theme is a directory and two lines because `host.js` is a registry; adding a **market** is four places in `server/server.py` that are not near each other, and a contributor who finds three gets a row with no sparkline or a stale badge that never fires; adding a second **weather** provider has no seam at all — it is an `if` inside `App.weather()`, which is the worst answer of the four and the exact question the task's manual check asks a stranger. **The payload question got a definite answer**, which the task demanded: a comment is not the best available, because this one has now failed in the file it is written in; the shape exists in four places and nothing compares them, and one generated fixture with one assertion per layer closes it without a schema library or a build step. Three findings filed as T10.1–T10.3 and **no code changed** — a review that also rewrites is a review nobody can check. The document's other half is the eight things that look wrong and are load-bearing, because half its value for a newcomer is knowing which oddities to leave alone |
-| T7.10 | **The sweep: what is in the tree, and what is in the history** | todo | Asked for from the chair on 2026-09-27, and it runs **before T7.3 and T7.7**. T7.3 step 1 greps `git log -p` for four words, which only finds a secret sitting near a word somebody thought of — not a JWT, an `ssh-rsa` blob or forty characters of hex. **The two halves have different remedies**: a finding in the tree is a deletion, a finding in the history is *rotate the credential*, and the script reports them apart the way `check_links.py` separates a dead link from an unreachable one. Also the loose ends, grounded in what a look on the day found: the pinned LAN address in about eight tracked files including two source files T7.3's own line excludes, the phone's adb serial in `STATUS.md`, home paths in the login-scope fixtures (captured output, realistic on purpose), and `WINDOWS-NEXT-SESSION.md` tracked at the root. Every one is a decision to record, not necessarily to act on. Produces `docs/PRE-PUBLIC-SWEEP.md`, which is what T7.7 needs: *we looked, and here is what we knew we were publishing* |
+| T7.10 | **The sweep: what is in the tree, and what is in the history** | done | 2026-09-28, wave 33. `scripts/check_secrets.py` looks for **shapes**, not words: PEM blocks, ssh keys, JWTs, `AKIA`, `ghp_`, `xox`, `AIza`, bearer headers, an assigned secret-looking name, long hex and high-entropy runs — plus two rules that are not about credentials at all, the non-placeholder LAN address and **anything tracked that `.gitignore` excludes**, which `git add -f` and a rename past a rule both do silently. **Two halves, exiting differently**: the tree exits 1 (delete it) and the history exits 3 (rotate it), and 3 is the *worse* of the two so that `make check`, which runs the tree half only, cannot be made green by a fix that changes nothing in any clone. **Proved before it was trusted** — two fake credentials committed to a throwaway branch and *deleted in a following commit* were found anyway, named by blob, exit 3; branch deleted, sweep green. A scanner that has never found anything is indistinguishable from one that cannot. `scripts/secrets-allowlist.toml` refuses an entry with no reason or one that allows a rule everywhere, and `where` marks a decision that differs between the halves — which the real LAN address needed, being out of source now and still in those two files' history. **Result: no credential in the tree or in any of the 1,935 blobs.** Acted on: the address left source for the placeholder, and seven `.gitkeep` files that had been holding open directories with content for weeks. Kept with a reason each: the address in prose, the adb serial, the home paths in the login-scope fixtures, **the author's email in all 162 commits**, the pinned digests, and `WINDOWS-NEXT-SESSION.md` while T3.8 is blocked. The history sweep is its own CI job for one reason, `fetch-depth: 0`: the guards job fetches thirty commits, and a sweep of *the history* over a shallow clone is a green tick that means "we looked at the last thirty". `docs/PRE-PUBLIC-SWEEP.md` is the record T7.7 needs |
 | T7.3 | Pre-public review: secrets, README, screenshots | todo | Before flipping the repo public. Now runs **after** T7.4–T7.7 and carries the README's final pass; its `Prereqs:` line was updated to say so |
 | TT.8 | `e2e/run_e2e.py`, five scenarios | todo | Needs TT.6 |
 | TT.9 | CI workflow | done | 2026-09-24, wave 23. The bootstrap skeleton was `workflow_dispatch` only and had drifted for twenty-two waves — a workflow nobody runs is green forever. Now push and pull_request, three jobs, `permissions: contents: read`. **The task's real subject is `scripts/check_workflow.py`**, which reads ci.yml and the Makefile and fails on any difference: the command CI runs must be the same string the Makefile runs, with exactly one allowed difference — the `$(DC)` container prefix, dropped because a runner is disposable where the Windows host is not (ADR 0003). No PyYAML: this project takes no dependencies, and the reader **fails loudly on a shape it cannot parse** rather than returning an empty result that reads as agreement. Two rules came out of running it rather than writing it. `connectedAndroidTest` matched inside the comment *explaining* its deliberate absence, so the scan is comment-aware — the alternative was deleting the comment or gutting the rule. And a **`working-directory:` is now itself a violation**: `./gradlew test` from android/ and from the root are the same string and not the same command, so the old job's `working-directory: android` made the whole comparison a lie; the run steps sit at the root where the `gradlew` shim lives. setup-gradle gets no `build-root-directory`: the first cut passed one and the run went green while the action printed "Unexpected input(s)" and ignored it — the input belongs to the older gradle-build-action, and v4 caches the Gradle User Home, which is the same directory whichever subproject invoked it. A green check with a silently discarded input is this wave's own subject arriving in its own workflow. **`--self-test` found a bug in the reader on its first run** — `value.strip("'\"")` ate the trailing quote of `node --test "web/test/**/*.test.js"`, leaving an unterminated string — which is the argument for writing it first. 18 rules, and `make lint-workflow` runs both halves, so `make check` is what catches the next drift. CI does **not** run the guard scripts; that gap is T7.8's and is named in the script |
@@ -197,6 +197,66 @@ and the first line of each file says so.
 |---|---|---|---|
 | T9.1 | **The next meeting, under the clock** | todo | Google Calendar and Microsoft Outlook merged, the soonest event under the clock in the `#shortcuts` strip, between T8.2's two buttons. Blocked behind T8.2 for a layout reason and behind **ADR 0016** for a bigger one: this is the first feature that puts *personal data* on a panel whose server has no authentication, and the refresh tokens it needs are credentials sitting on a desktop PC. OAuth stays on the PC and never reaches the APK — two acceptance lines exist for exactly that. The merge is where the design is: the two providers disagree about all-day events, about time zones and about the word for "declined" |
 | T9.2 | **Spike: can the panel talk to an assistant for nothing?** | todo | A button to ask something out loud and hear an answer, with the whole pipeline on the PC — invariant 1 means the page cannot call anything. Time-boxed, produces `docs/spikes/2026-voice-assistant.md` and a throwaway prototype under `spikes/`, and is allowed to conclude *do not build this*. The unknown is whether offline STT, a small local model and offline TTS fit inside a latency a person will stand at a panel for; Claude and DeepSeek are the paid comparison, not the plan. Also has to answer the awkward ones: `RECORD_AUDIO` would be the app's first dangerous permission, and an unauthenticated LAN endpoint that runs a model and speaks in someone's room is not in ADR 0015's family |
+
+## Resuming after 2026-09-28 (wave 33)
+
+Wave 33 is **T7.10**, on `wave/33-pre-public-sweep`. The repository has been looked at — every
+tracked file and every one of the 1,935 blobs in the pack — and `docs/PRE-PUBLIC-SWEEP.md` is
+the record of what was found, what was changed and what is being published on purpose.
+
+**Next: T7.3**, the pre-public review, which this wave was written to run before. Its acceptance
+now has two lines it did not have (`check_secrets.py`, both halves) and both pass today, so what
+is left of it is the README's final pass, the screenshots, and the reading a person does. Then
+**T7.7** makes the repository public — the irreversible one. **T10.2** (the market table) is the
+only other open task and nothing waits on it.
+
+### No credential, and that is a result rather than a relief
+
+The tree is clean and so is the history. What makes that worth anything is that the scanner was
+made to fail first: two fake credentials went into a throwaway branch, were **deleted in a
+following commit**, and the history half found them anyway, named the blob and exited 3. Then
+the branch was deleted and the sweep went green. `git rm` removes nothing from a clone, which is
+the whole reason the history half exists.
+
+### The two halves exit differently, and the worse one is 3
+
+A finding in the tree is a deletion. A finding in the history is *rotate the credential* — the
+blob is in every clone already and no deletion reaches it. `make check` runs the tree half only,
+so the history half had to exit with something `make check` cannot turn green: it is 3, which is
+the more serious of the two, and the docstring says so because `check_links.py` uses 3 for the
+milder case and a reader will assume the convention holds.
+
+In CI the history sweep is **its own job**, for one reason: `fetch-depth: 0`. The guards job
+fetches thirty commits, and `git rev-list --all` over a shallow clone walks what was fetched and
+reports "nothing found" about everything else. That is this repository's recurring failure shape
+— a green tick whose label claims more than the check did — and it would have shipped here
+unnoticed.
+
+### The allowlist is the deliverable, not the scanner
+
+Eleven entries, each with a reason the loader requires: an entry with no reason, or one that
+allows a rule everywhere, makes the file unusable and the script exits 2 rather than passing.
+The `where` field was added mid-wave when the sweep produced exactly the case it is for — the
+LAN address is out of source now and still in those two files' history, and *accepting it there*
+is a different statement from accepting it in the tree.
+
+The awkward one is recorded rather than solved: **the author's name and email are in all 162
+commits** and going public publishes them. Rewriting that is 162 commits and a force-push;
+changing it going forward is one `git config`. It is the owner's call and it is now a choice
+rather than a discovery.
+
+### What is still only true on this desk
+
+- **`server/config.json` is still mode 0644** and holds the brapi token. One `chmod 600`; T7.3
+  wants it. Carried from wave 19 through 32. The sweep confirms the file has never been
+  committed, which is the part that would have been permanent.
+- **The Windows installer's TOML branch has still never been run.** No PowerShell here; T3.8.
+- **`WINDOWS-NEXT-SESSION.md` ships unless T3.8 clears first.** It is live triage and deleting
+  it would lose the only write-up of that failure. T7.3 looks again.
+- macOS mute (T8.3), the twenty taps, and the phone on adb: carried unchanged.
+- **A scanner reads shapes.** A password that looks like a word goes straight through it, and
+  nothing here changes that; the defence is still that secrets live in gitignored files on the
+  PC.
 
 ## Resuming after 2026-09-28 (wave 32)
 
