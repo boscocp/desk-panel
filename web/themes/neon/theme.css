@@ -342,7 +342,10 @@ body {
     min-height: 0;
     overflow: hidden;
     box-sizing: border-box;
-    padding: 5px 10px 5px 11px;
+    /* A variable for the one reader outside this rule: the CLOSED label is
+     * positioned from the card's left edge, past the title. */
+    --card-pad-left: 11px;
+    padding: 5px 10px 5px var(--card-pad-left);
     border: 1px solid var(--rule);
     border-left: 2px solid var(--accent);
     border-radius: 3px;
@@ -535,22 +538,23 @@ body {
     margin-bottom: 3px;
 }
 
-/* CLOSED, beside the B3 title while the exchange is shut. theme.js writes
- * data-status only then, so the rule has nothing to draw the rest of the time.
- * Absolute rather than a flex item: the card is a column, and a second item
- * would take a row of its own and push the list down. On the title's line,
- * right after it -- the title is "B3" in every language, so 3em clears it.
- * Dim and unboxed, unlike STALE: a shut market is the normal state for most
- * of the week, not something wrong. */
+/* CLOSED, beside the B3 title while the exchange is shut; theme.js hides it
+ * the rest of the time. Absolute rather than a flex item: the card is a
+ * column, and a second item would take a row of its own and push the list
+ * down. On the title's line, just past it: the title is "B3" in both
+ * languages, and 2.2em of the title's 20px clears it. A title that grew
+ * would run under the label, and e2e/layout/check_layout.py is what says so
+ * -- this is a real element, so its ink is measured.
+ * Dim, in a thin rule, unlike STALE's filled red: a shut market is the normal
+ * state for most of the week, not something wrong. */
 #quotes {
     position: relative;
 }
 
-#quotes[data-status]::after {
-    content: attr(data-status);
+#quotes .market-closed {
     position: absolute;
     top: 7px;
-    left: calc(11px + 3em);
+    left: calc(var(--card-pad-left) + 2.2 * 20px);
     font-size: 15px;
     line-height: 1.2;
     letter-spacing: 0.14em;

@@ -1383,6 +1383,16 @@ function burnInSchedule() {
     };
 }
 
+// Whether to draw the CLOSED label beside the B3 title. The server decides
+// whether the exchange is open (server/market_hours.py -- the window follows
+// US daylight saving, which the page has no business knowing); this only
+// reads its answer, and only an explicit `false` counts. An older server
+// sends no `b3Open` at all, and a panel that called that "closed" would say
+// so all day.
+function marketClosed(payload) {
+    return !!payload && payload.b3Open === false;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         formatPrice, formatRate, formatPair, formatTemp, formatChange, changeClass,
@@ -1398,5 +1408,6 @@ if (typeof module !== 'undefined' && module.exports) {
         formatBattery, batteryFields, tempClass, BATTERY_WARN_C, BATTERY_HOT_C,
         shortcutsFor,
         nextEvent, untilText, agendaFields,
+        marketClosed,
     };
 }

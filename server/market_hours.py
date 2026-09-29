@@ -6,7 +6,14 @@ Friday's close, fetched again every `quotes_interval_s` until Monday.
 Outside the window below the server keeps serving the rows it already holds
 and asks for nothing.
 
-The window, checked 2026-09-29 against B3's announcements and brapi's FAQ:
+The window, checked 2026-09-29 against these:
+
+- https://www.b3.com.br/pt_br/solucoes/plataformas/puma-trading-system/para-participantes-e-traders/horario-de-negociacao/acoes/
+- https://borainvestir.b3.com.br/noticias/mercado/b3-a-bolsa-do-brasil-muda-horarios-de-negociacao-a-partir-de-9-de-marco-confira/
+- https://brapi.dev/faq/qual-a-diferenca-real-no-atraso-delay-dos-dados-entre-os-planos
+- https://www.law.cornell.edu/uscode/text/15/260a (the US rule)
+
+What they say:
 
 - B3 opens at 10:00 all year, and moves its close twice a year to follow
   **US** daylight saving, because of the foreign volume. While the US is on
@@ -16,7 +23,9 @@ The window, checked 2026-09-29 against B3's announcements and brapi's FAQ:
   calendar dates in Sao Paulo gives for free.
 - brapi's free plan serves stock quotes about 30 minutes late, so the close
   reaches it around 17:30 or 18:30. `DELAY_MARGIN_MIN` covers that with a
-  quarter of an hour to spare.
+  quarter of an hour to spare -- counted from the fetch, not from the last
+  poll inside the window, because the server refreshes once more after the
+  window ends before it holds anything (`last_close`).
 
 Holidays are not modelled: a holiday costs one ordinary weekday's requests,
 and a holiday calendar that drifted would cost a day of prices.
@@ -71,7 +80,9 @@ def _minutes(text, name):
     if not isinstance(text, str) or len(text) != 5 or text[2] != ":":
         raise ValueError(f"b3_hours: {name} must be \"HH:MM\", not {text!r}")
     hours, minutes = text[:2], text[3:]
-    if not (hours.isdigit() and minutes.isdigit()):
+    # isascii and isdecimal, not isdigit: isdigit takes "²", which int() then
+    # refuses with a message that never names b3_hours.
+    if not (text.isascii() and hours.isdecimal() and minutes.isdecimal()):
         raise ValueError(f"b3_hours: {name} must be \"HH:MM\", not {text!r}")
     value = int(hours) * 60 + int(minutes)
     if int(minutes) > 59 or value > 24 * 60:
@@ -113,9 +124,36 @@ def is_open(when, hours):
     local = when.astimezone(B3_TZ)
     if local.weekday() >= 5:
         return False
-    start, end = auto_window(local.date()) if hours == "auto" else hours
+    start, end = _window_for(local.date(), hours)
     minute = local.hour * 60 + local.minute
     return start <= minute < end
+
+
+def _window_for(day, hours):
+    return auto_window(day) if hours == "auto" else hours
+
+
+def last_close(when, hours):
+    """Pure: the most recent end of the window at or before `when`, or None.
+
+    What makes holding a price safe. A price fetched after this instant is
+    the last one brapi will have until the next open; one fetched before it
+    -- at 16:50 with an hour's `quotes_interval_s`, or at noon by a PC that
+    then slept -- is intraday, and holding it would show it all weekend.
+    None when the gate is off, so nothing is ever held.
+    """
+    if hours is None:
+        return None
+    local = when.astimezone(B3_TZ)
+    for back in range(8):
+        day = local.date() - datetime.timedelta(days=back)
+        if day.weekday() >= 5:
+            continue
+        end = datetime.datetime.combine(day, datetime.time(), B3_TZ) + datetime.timedelta(
+            minutes=_window_for(day, hours)[1])
+        if end <= local:
+            return end
+    return None
 
 
 def exchange_open(when):

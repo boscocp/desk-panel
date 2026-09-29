@@ -589,6 +589,23 @@ const fields = agendaFields(payload.agenda, new Date(), words.tag);
   `e2e/layout/agenda.js` carries a meeting in progress that ends tomorrow,
   which neon draws a size smaller.
 
+## Whether the market is open is the PC's answer
+
+`payload.b3Open` is `false` while B3's session is shut, `true` while it runs,
+and absent from an older server. The window follows US daylight saving, not
+Brazil's clock (`server/market_hours.py`), so it is decided on the PC and never
+from the phone's clock the way the night window is.
+
+```js
+const closed = marketClosed(payload);   // true only on an explicit false
+// words.marketClosed: FECHADO / CLOSED
+```
+
+Draw the word beside the B3 title while `closed` is true, and nothing
+otherwise. **Absent is not closed**: a theme that tested `!payload.b3Open` would
+say CLOSED all day on a PC that has not been updated. `?b3=closed` holds the
+label on in a browser, and `e2e/layout/stress.js` carries it.
+
 ## Checking it
 
 ```bash

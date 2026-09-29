@@ -36,6 +36,10 @@
     // from the PC. e2e/layout/check_layout.py --theme uses it to measure a
     // theme other than the default.
     const THEME = new URLSearchParams(location.search).get('theme') || undefined;
+    // Draw the CLOSED label beside the B3 title: open web/index.html?b3=closed.
+    // Without it the market shuts every fourth tick -- four, not three, so a
+    // closed market is not always drawn beside the flat quote the third tick
+    // makes.
     const B3_CLOSED = new URLSearchParams(location.search).get('b3') === 'closed';
 
     // Develop in the other language: open web/index.html?lang=en. Same path
@@ -219,9 +223,8 @@
             // sends, and the panel falls back to neon.
             theme: THEME,
             actions: ACTIONS,
-            // Every third tick the market is shut, so the CLOSED label beside
-            // the B3 title is drawn in a browser too; `?b3=closed` holds it.
-            b3Open: B3_CLOSED ? false : tick % 3 !== 0,
+            // The market shut, now and then or for good: see B3_CLOSED.
+            b3Open: B3_CLOSED ? false : tick % 4 !== 0,
             // Every seventh tick one account fails, so the failure line is
             // drawn in a browser too -- the same argument `stale` makes above.
             // A failed account contributes no events, exactly as on the PC, so

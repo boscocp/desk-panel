@@ -143,6 +143,13 @@
         const stale = el('div', 'stale-badge');
         stale.textContent = words.stale;
         stale.hidden = true;
+        // A real element rather than a second pseudo-element beside the
+        // title's ::before, so e2e/layout/measure.js sees its ink. Outside
+        // .card-body, which renderList refills; absolute, so it takes no row
+        // of the card's column.
+        const closed = el('div', null, 'market-closed');
+        closed.hidden = true;
+        quotes.appendChild(closed);
 
         // The right-hand track, split down the middle (T6.12). A wrapper
         // rather than two grid areas, because the two cards are meant to be
@@ -158,7 +165,7 @@
         panel.append(quotes, fx, crypto, side, stale);
 
         root.append(sidebar, panel);
-        els = { root, clock, date, lists, weather, agenda, battery, stale, shortcuts };
+        els = { root, clock, date, lists, weather, agenda, battery, stale, shortcuts, closed };
         // The signature renderShortcuts compares against describes markup that
         // has just been thrown away. mount() runs again whenever host.js empties
         // the root -- a theme switch away and back is the ordinary case -- and a
@@ -1163,6 +1170,10 @@
         if (!payload) {
             return;
         }
+        // The CLOSED label beside the B3 title, first so a card that throws
+        // further down cannot leave the previous payload's answer showing.
+        els.closed.textContent = words.marketClosed;
+        els.closed.hidden = !marketClosed(payload);
         renderList(els.lists.quotes, payload.quotes || [], 'symbol', 'price', 'BRL');
         renderList(els.lists.fx, payload.fx || [], 'pair', 'rate', 'BRL',
                    formatRate, formatPair);
@@ -1173,15 +1184,6 @@
         agenda = payload.agenda;
         renderAgenda(new Date());
         els.stale.hidden = !payload.stale;
-        // The CLOSED label beside the B3 title, drawn by #quotes::after from
-        // this attribute for the reason the title is drawn by ::before: the
-        // section's own children are the list, refilled on every payload.
-        // Only an explicit false: an older server sends no key at all.
-        if (payload.b3Open === false) {
-            els.lists.quotes.section.setAttribute('data-status', words.marketClosed);
-        } else {
-            els.lists.quotes.section.removeAttribute('data-status');
-        }
     }
 
     function tick(now, root) {

@@ -684,6 +684,8 @@ class MarketHoursGateTests(unittest.TestCase):
         self.assertEqual(self.calls["quotes"], 2)
 
     def test_after_the_close_the_rows_on_hand_are_served_and_brapi_is_not_asked(self):
+        # One refresh after the close -- the 14:00 price is intraday -- and
+        # then nothing until the open, however long the night.
         app = self._app()
         app.quotes()
         self.when = self.TUESDAY_22H
@@ -692,7 +694,51 @@ class MarketHoursGateTests(unittest.TestCase):
             payload = app.quotes()
             self.assertEqual([r["symbol"] for r in payload["quotes"]], ["PETR4"])
             self.assertFalse(payload["stale"])
-        self.assertEqual(self.calls["quotes"], 1)
+        self.assertEqual(self.calls["quotes"], 2)
+
+    def test_a_price_fetched_before_the_close_is_refreshed_once_after_it(self):
+        # quotes_interval_s = 3600 left the last in-window fetch at 16:50,
+        # which is 16:20's price on the free plan. Holding it would show an
+        # intraday number all weekend with no badge.
+        app = self._app(quotes_interval_s=3600)
+        self.when = datetime.datetime(2026, 10, 2, 16, 50, tzinfo=market_hours.B3_TZ)
+        app.quotes()
+        self.when = datetime.datetime(2026, 10, 2, 17, 50, tzinfo=market_hours.B3_TZ)
+        self.clock.now = 3600
+        app.quotes()
+        self.when = self.SATURDAY_14H
+        self.clock.now = 100000
+        app.quotes()
+        self.assertEqual(self.calls["quotes"], 2)
+
+    def test_a_failed_refresh_is_retried_rather_than_held(self):
+        # A timeout at 17:40 keeps the old rows with `stale` set. Those are
+        # not the close, and brapi coming back must be noticed before Monday.
+        import server.server as server_module
+
+        app = self._app()
+        self.when = datetime.datetime(2026, 9, 29, 17, 30, tzinfo=market_hours.B3_TZ)
+        app.quotes()
+        fails = {"on": True}
+        real = server_module.providers_brapi.load
+
+        def flaky(*a, **k):
+            if fails["on"]:
+                self.calls["quotes"] += 1
+                raise UpstreamError("timeout")
+            return real(*a, **k)
+
+        server_module.providers_brapi.load = flaky
+        self.when = datetime.datetime(2026, 9, 29, 17, 50, tzinfo=market_hours.B3_TZ)
+        self.clock.now = 301
+        self.assertTrue(app.quotes()["stale"])
+        fails["on"] = False
+        self.when = self.TUESDAY_22H
+        self.clock.now = 602
+        self.assertFalse(app.quotes()["stale"])
+        self.clock.now = 10 ** 5
+        app.quotes()
+        self.assertEqual(self.calls["quotes"], 3)
 
     def test_fx_and_crypto_are_not_held(self):
         app = self._app()
@@ -759,6 +805,43 @@ class MarketHoursGateTests(unittest.TestCase):
         self.assertTrue(app.quotes()["b3Open"])
         self.when = self.TUESDAY_22H
         self.assertFalse(app.quotes()["b3Open"])
+
+    def test_the_label_is_the_exchanges_session_not_brapis_window(self):
+        # 17:30 in September: B3 shut at 17:00, brapi is still being asked
+        # for another quarter of an hour, and with the gate off it always is.
+        # The label follows the exchange in every case.
+        self.when = datetime.datetime(2026, 9, 29, 17, 30, tzinfo=market_hours.B3_TZ)
+        self.assertFalse(self._app().quotes()["b3Open"])
+        self.assertFalse(self._app(b3_hours=[]).quotes()["b3Open"])
+
+    def test_a_history_fetched_in_the_session_is_refreshed_after_the_close(self):
+        # Warmed at 11:00, the sparkline lacks the day's close; the six-hour
+        # TTL used to fetch it again in the evening and the gate must not
+        # stop that.
+        import server.server as server_module
+
+        def history(*a, **k):
+            self.calls["history"] += 1
+            return {"PETR4": [1.0, 2.0]}
+
+        server_module.providers_brapi.load_history = history
+        self.when = datetime.datetime(2026, 9, 29, 11, 0, tzinfo=market_hours.B3_TZ)
+        app = self._app()
+        app.warm_history()
+        self._join_history()
+        self.when = self.TUESDAY_22H
+        self.clock.now = 12 * 3600
+        app.quotes()
+        self._join_history()
+        self.clock.now = 30 * 3600
+        app.quotes()
+        self._join_history()
+        self.assertEqual(self.calls["history"], 2)
+
+    def _join_history(self):
+        for thread in threading.enumerate():
+            if thread.name.startswith("history-"):
+                thread.join()
 
     def test_a_malformed_window_fails_startup(self):
         with self.assertRaises(ValueError):

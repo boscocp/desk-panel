@@ -71,8 +71,42 @@ class IsOpenTests(unittest.TestCase):
         self.assertFalse(is_open(at("2026-09-29 18:30"), hours))
         self.assertFalse(is_open(at("2026-10-03 12:00"), hours))
 
+    def test_it_starts_asking_at_the_open(self):
+        self.assertFalse(is_open(at("2026-09-29 09:59"), "auto"))
+        self.assertTrue(is_open(at("2026-09-29 10:00"), "auto"))
+        self.assertTrue(is_open(at("2026-09-29 10:00"), (600, 1110)))
+
     def test_none_is_always_open(self):
         self.assertTrue(is_open(at("2026-10-04 03:00"), None))
+
+
+class LastCloseTests(unittest.TestCase):
+    def test_the_close_itself_counts_as_closed(self):
+        self.assertEqual(market_hours.last_close(at("2026-09-29 17:45"), "auto"),
+                         at("2026-09-29 17:45"))
+
+    def test_the_same_day_once_it_has_closed(self):
+        self.assertEqual(market_hours.last_close(at("2026-09-29 22:00"), "auto"),
+                         at("2026-09-29 17:45"))
+
+    def test_the_previous_weekday_before_it_has(self):
+        self.assertEqual(market_hours.last_close(at("2026-09-29 09:00"), "auto"),
+                         at("2026-09-28 17:45"))
+
+    def test_friday_over_the_weekend_and_on_monday_morning(self):
+        self.assertEqual(market_hours.last_close(at("2026-10-04 14:00"), "auto"),
+                         at("2026-10-02 17:45"))
+        self.assertEqual(market_hours.last_close(at("2026-10-05 09:00"), "auto"),
+                         at("2026-10-02 17:45"))
+
+    def test_the_winter_close_and_a_fixed_window(self):
+        self.assertEqual(market_hours.last_close(at("2026-11-02 20:00"), "auto"),
+                         at("2026-11-02 18:45"))
+        self.assertEqual(market_hours.last_close(at("2026-11-02 20:00"), (600, 1110)),
+                         at("2026-11-02 18:30"))
+
+    def test_no_gate_has_no_close(self):
+        self.assertIsNone(market_hours.last_close(at("2026-11-02 20:00"), None))
 
 
 class HoursFromConfigTests(unittest.TestCase):
@@ -87,6 +121,8 @@ class HoursFromConfigTests(unittest.TestCase):
     def test_everything_else_raises(self):
         for bad in ("always", ["10:00"], ["18:00", "10:00"], ["10:00", "10:00"],
                     ["9:00", "18:00"], ["10:00", "18:60"], ["10:00", "24:01"],
+                    ["10:000", "18:00"], ["10:00", "018:00"], ["１０:００", "18:00"],
+                    ["²0:00", "18:00"],
                     [10, 18], {"open": "10:00"}, None, True):
             with self.subTest(b3_hours=bad):
                 with self.assertRaises(ValueError):
