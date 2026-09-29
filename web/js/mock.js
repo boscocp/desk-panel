@@ -218,10 +218,16 @@
             // sends, and the panel falls back to neon.
             theme: THEME,
             actions: ACTIONS,
-            // Every seventh tick one account fails, so the "reconnect" line is
+            // Every seventh tick one account fails, so the failure line is
             // drawn in a browser too -- the same argument `stale` makes above.
+            // A failed account contributes no events, exactly as on the PC, so
+            // its meeting leaves the card for that tick.
             agenda: tick % 7 === 0 && AGENDA.accounts
-                ? { ...AGENDA, failed: ['microsoft/work'] }
+                ? {
+                    ...AGENDA,
+                    events: AGENDA.events.filter((e) => e.source !== 'microsoft/work'),
+                    failed: [{ source: 'microsoft/work', reason: 'reconnect' }],
+                }
                 : AGENDA,
         };
     }

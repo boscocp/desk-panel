@@ -23,17 +23,22 @@ never leaves the PC, so it is never on the LAN at all. What does leave is
 `{start, end, allDay, source, title?}` and nothing more: no attendees, no
 location, no body, no link, no id.
 
-**Ask for one more than you need.** Both providers are asked for
-`FETCH_PER_ACCOUNT` events. An all-day event and a declined one are filtered
-after the fetch, and a window that returned exactly what was wanted can
-return none that survive.
+**Ask for far more than you need.** The panel is sent at most five events,
+and each provider is asked for `FETCH_PER_ACCOUNT` per page, over up to
+`MAX_PAGES` pages. Declined, cancelled and working-location entries are
+filtered after the fetch, and on a busy morning they can fill a small page
+before the first meeting that survives. A page can also come back short, or
+empty, with more to follow (events.list: "Incomplete pages can be detected by
+a non-empty nextPageToken field"), so the next page is followed rather than
+the answer taken as final.
 """
 import datetime
 import re
 import sys
+import unicodedata
 import urllib.parse
 
-from server.oauth import OAuthError
+from server.oauth import AUTH_ERRORS, OAuthError
 from server.upstream import UpstreamError, get_json
 
 GOOGLE_EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
@@ -46,20 +51,35 @@ PROVIDERS = ("google", "microsoft")
 # without waiting a whole `calendar_interval_s` for the server.
 MAX_TIMED = 3
 MAX_ALL_DAY = 2
-FETCH_PER_ACCOUNT = 5
+FETCH_PER_ACCOUNT = 25
+MAX_PAGES = 3
 
 # A title longer than this is cut on the server. The card is one line, and a
 # pasted meeting description in a title field is data nobody asked to put on
 # the LAN.
 MAX_TITLE = 80
 
-# Google event types that are not meetings. A working-location entry is a
-# note about where the owner is, and shown as "the next event" it would hide
-# the real one behind it every morning.
-SKIPPED_GOOGLE_TYPES = {"workingLocation"}
+# Google event types that are meetings, asked for by name so the others never
+# cross the wire. A working-location entry is a note about where the owner is;
+# focus time and out-of-office are blocks the owner drew around their own day;
+# a birthday is a contact's. Shown as "the next event", each would hide the
+# real one behind it.
+GOOGLE_EVENT_TYPES = ("default", "fromGmail")
+SKIPPED_GOOGLE_TYPES = {"workingLocation", "focusTime", "outOfOffice", "birthday"}
 
-ACCOUNT_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
-_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+# The labels Graph may put on an instant that is UTC. Asked for as "UTC", and
+# the echo is not documented, so the spellings of UTC are all accepted and
+# anything else fails the account out loud rather than dropping its events.
+UTC_LABELS = {"UTC", "ETC/UTC", "ETC/GMT", "GMT", "COORDINATED UNIVERSAL TIME",
+              "TZONE://MICROSOFT/UTC"}
+
+ACCOUNT_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
+
+# Why an account failed, for the card. `reconnect` is the owner's job:
+# `calendar_login.py` fixes it. `unavailable` is the provider's, and the next
+# cycle retries by itself.
+RECONNECT = "reconnect"
+UNAVAILABLE = "unavailable"
 
 
 def accounts_from_config(value):
@@ -86,7 +106,7 @@ def accounts_from_config(value):
             raise ValueError(
                 f"calendar_accounts: unknown provider {provider!r}; "
                 f"expected one of {', '.join(PROVIDERS)}")
-        if not isinstance(name, str) or not ACCOUNT_NAME.match(name):
+        if not isinstance(name, str) or not ACCOUNT_NAME.fullmatch(name):
             raise ValueError(
                 f"calendar_accounts: name {name!r} must be lowercase letters, digits "
                 f"and hyphens, at most 32")
@@ -99,10 +119,44 @@ def accounts_from_config(value):
 
 
 def missing_client_ids(accounts, config):
-    """Pure: which providers in use have no client id configured."""
-    keys = {"google": "google_client_id", "microsoft": "microsoft_client_id"}
-    return sorted({keys[provider] for provider, _ in accounts
-                   if not str(config.get(keys[provider], "")).strip()})
+    """Pure: which of the client keys the accounts in use need are not set.
+
+    Google needs its secret as well as its id, because the refresh sends
+    both, and a config missing it would pass `--check-only` and then fail
+    every cycle with `invalid_client`.
+    """
+    keys = {"google": ("google_client_id", "google_client_secret"),
+            "microsoft": ("microsoft_client_id",)}
+    needed = {key for provider, _ in accounts for key in keys[provider]}
+    return sorted(key for key in needed
+                  if not (isinstance(config.get(key), str) and config[key].strip()))
+
+
+def check_config(config):
+    """Pure: raise ValueError unless the calendar keys have the types they must.
+
+    Checked at startup, beside `calendar_accounts`, because each of these
+    fails badly at run time. `bool("false")` is True, so a quoted `"false"`
+    in `calendar_show_titles` would publish the titles the owner turned off.
+    A string interval raises inside `/quotes` and takes every card with it.
+    And a string `allowed_hosts` is iterated a character at a time.
+    """
+    titles = config.get("calendar_show_titles", True)
+    if not isinstance(titles, bool):
+        raise ValueError(f"calendar_show_titles must be true or false, not {titles!r}")
+    interval = config.get("calendar_interval_s", 300)
+    if isinstance(interval, bool) or not isinstance(interval, int) or interval < 60:
+        raise ValueError(f"calendar_interval_s must be a whole number of seconds, at least 60, "
+                         f"not {interval!r}")
+    lookahead = config.get("calendar_lookahead_h", 24)
+    if isinstance(lookahead, bool) or not isinstance(lookahead, (int, float)) \
+            or not 0 < lookahead <= 24 * 14:
+        raise ValueError(f"calendar_lookahead_h must be a number of hours from 1 to 336, "
+                         f"not {lookahead!r}")
+    hosts = config.get("allowed_hosts", [])
+    if not isinstance(hosts, list) or not all(isinstance(h, str) and h.strip() for h in hosts):
+        raise ValueError(f"allowed_hosts must be a list of names, e.g. [\"mypc.local\"], "
+                         f"not {hosts!r}")
 
 
 def _rfc3339(instant):
@@ -110,31 +164,47 @@ def _rfc3339(instant):
 
 
 def fetch_google(access_token, time_min, time_max, get=get_json):
-    """events.list on the primary calendar. The seam the tests patch.
+    """events.list on the primary calendar, every page up to MAX_PAGES. The seam
+    the tests patch.
 
     `timeMin` bounds the event's *end*, so an event already in progress is
     included, which is what the panel wants. `fields` asks for exactly what
-    `normalise_google` reads, so nothing else crosses the wire either.
+    `normalise_google` reads, plus `nextPageToken`, so nothing else crosses
+    the wire either.
     """
-    query = urllib.parse.urlencode({
-        "timeMin": _rfc3339(time_min),
-        "timeMax": _rfc3339(time_max),
-        "singleEvents": "true",
-        "orderBy": "startTime",
-        "maxResults": str(FETCH_PER_ACCOUNT),
-        "fields": "items(status,summary,eventType,start,end,attendees(self,responseStatus))",
-    })
-    return get(f"{GOOGLE_EVENTS_URL}?{query}",
-               headers={"Authorization": f"Bearer {access_token}"})
+    params = [
+        ("timeMin", _rfc3339(time_min)),
+        ("timeMax", _rfc3339(time_max)),
+        ("singleEvents", "true"),
+        ("orderBy", "startTime"),
+        ("maxResults", str(FETCH_PER_ACCOUNT)),
+        ("fields", "items(status,summary,eventType,start,end,attendees(self,responseStatus)),"
+                   "nextPageToken"),
+    ] + [("eventTypes", kind) for kind in GOOGLE_EVENT_TYPES]
+    headers = {"Authorization": f"Bearer {access_token}"}
+    items, token = [], None
+    for _ in range(MAX_PAGES):
+        page = params + ([("pageToken", token)] if token else [])
+        raw = get(f"{GOOGLE_EVENTS_URL}?{urllib.parse.urlencode(page)}", headers=headers)
+        if not isinstance(raw, dict):
+            break
+        items.extend(raw.get("items") if isinstance(raw.get("items"), list) else [])
+        token = raw.get("nextPageToken")
+        if not isinstance(token, str) or not token:
+            break
+    return {"items": items}
 
 
 def fetch_graph(access_token, start, end, get=get_json):
-    """calendarView on the default calendar. The seam the tests patch.
+    """calendarView on the default calendar, following `@odata.nextLink` up to
+    MAX_PAGES. The seam the tests patch.
 
-    `Prefer: outlook.timezone="UTC"` because otherwise the zone comes back
-    as a Windows name ("E. South America Standard Time") that the standard
-    library cannot resolve. In UTC every instant is exact, and the all-day
-    case is handled in `normalise_graph`.
+    UTC is Graph's documented default ("If not specified, those time values
+    are returned in UTC"). `Prefer: outlook.timezone="UTC"` says so anyway,
+    because a mailbox setting must not be able to change what this parser
+    receives. In UTC every instant is exact, and the all-day case is handled
+    in `normalise_graph`. The next page is fetched by its whole URL, as
+    Graph asks, never by a `$skiptoken` taken out of it.
     """
     query = urllib.parse.urlencode({
         "startDateTime": _rfc3339(start),
@@ -143,15 +213,30 @@ def fetch_graph(access_token, start, end, get=get_json):
         "$orderby": "start/dateTime",
         "$top": str(FETCH_PER_ACCOUNT),
     })
-    return get(f"{GRAPH_CALENDAR_VIEW_URL}?{query}",
-               headers={"Authorization": f"Bearer {access_token}",
-                        "Prefer": 'outlook.timezone="UTC"'})
+    headers = {"Authorization": f"Bearer {access_token}", "Prefer": 'outlook.timezone="UTC"'}
+    url, value = f"{GRAPH_CALENDAR_VIEW_URL}?{query}", []
+    for _ in range(MAX_PAGES):
+        raw = get(url, headers=headers)
+        if not isinstance(raw, dict):
+            break
+        value.extend(raw.get("value") if isinstance(raw.get("value"), list) else [])
+        url = raw.get("@odata.nextLink")
+        if not isinstance(url, str) or not url.startswith("https://graph.microsoft.com/"):
+            break
+    return {"value": value}
 
 
 def _title(text):
+    """A title is text from strangers: anyone can send the owner an invitation.
+
+    Every control and format character goes: C0 and C1 controls, and the
+    bidi overrides and zero-width characters that can make a line read as
+    something other than what it says (ADR 0017).
+    """
     if not isinstance(text, str):
         return None
-    text = " ".join(_CONTROL.sub(" ", text).split())
+    text = "".join(" " if unicodedata.category(c) in ("Cc", "Cf") else c for c in text)
+    text = " ".join(text.split())
     if not text:
         return None
     return text if len(text) <= MAX_TITLE else text[:MAX_TITLE - 1].rstrip() + "…"
@@ -205,14 +290,17 @@ def normalise_google(raw, source):
 def _graph_instant(value):
     """Graph's `{dateTime, timeZone}` in UTC -> an aware datetime, or None.
 
-    The fraction is seven digits, `2026-09-29T17:00:00.0000000`, and
-    `fromisoformat` accepts at most six, so it is dropped: no calendar is
-    precise to the microsecond.
+    The fraction is seven digits, `2026-09-29T17:00:00.0000000`. It is
+    dropped rather than parsed: no calendar is precise to the microsecond,
+    and the second is all the panel shows. Raises UpstreamError for an
+    instant labelled with any zone but UTC, because guessing it would put
+    a meeting at the wrong hour and dropping it would hide it.
     """
     if not isinstance(value, dict) or not isinstance(value.get("dateTime"), str):
         return None
-    if str(value.get("timeZone", "UTC")).upper() not in ("UTC", "ETC/UTC"):
-        return None
+    zone = str(value.get("timeZone", "UTC")).strip().upper()
+    if zone not in UTC_LABELS:
+        raise UpstreamError(f"graph returned times in {zone!r}, not UTC")
     try:
         parsed = datetime.datetime.fromisoformat(value["dateTime"].split(".", 1)[0])
     except ValueError:
@@ -226,9 +314,10 @@ def _nearest_date(instant):
     An all-day event in Graph is midnight to midnight *in the event's own
     zone*, and asking for UTC moves that midnight: 00:00 in São Paulo is
     03:00Z, 00:00 in Tokyo is 15:00Z the day before. Midnight anywhere
-    between UTC-12 and UTC+12 lies within twelve hours of the UTC midnight of
-    the same date, so rounding to the nearest one recovers the date. Only
-    UTC+13 and +14, a few Pacific islands, are outside that.
+    between UTC-11 and UTC+12 lies within twelve hours of the UTC midnight of
+    the same date, so rounding to the nearest one recovers the date. UTC+13
+    and +14 are outside that, and so is **New Zealand in summer** (NZDT is
+    UTC+13): an all-day event there comes back a day early.
     """
     return (instant + datetime.timedelta(hours=12)).date()
 
@@ -315,8 +404,14 @@ def load(accounts, credentials, now, lookahead_h, show_titles,
          google=None, graph=None, log=None):
     """`{accounts, events, failed}` for every configured account.
 
+    `failed` is `[{source, reason}]`, and `reason` is RECONNECT when the grant
+    is over and UNAVAILABLE when the provider or the network is.
+
     **Never raises, and never serves a stale value.** An account that fails
     costs its own events and is named in `failed`; the others still answer.
+    "Never raises" covers any exception at all, not only the two expected
+    ones: an account that raised something else used to escape into the
+    cache, which kept the previous agenda and retried on every poll.
     That is the opposite of what the market caches do, on purpose: an old
     price is still useful, and an old meeting may be one already missed
     (T9.1 notes). The log line names the account and the reason, never a
@@ -337,9 +432,22 @@ def load(accounts, credentials, now, lookahead_h, show_titles,
                 rows = normalise_google(google(token, now, until), source)
             else:
                 rows = normalise_graph(graph(token, now, until), source)
-        except (OAuthError, UpstreamError) as exc:
-            failed.append(source)
+        except OAuthError as exc:
+            reason = RECONNECT if exc.code in AUTH_ERRORS else UNAVAILABLE
+            failed.append({"source": source, "reason": reason})
             log(f"calendar {source}: {exc}")
+            continue
+        except UpstreamError as exc:
+            # A 401 from the API itself means the token is no good any more.
+            reason = RECONNECT if " 401 " in f" {exc} " else UNAVAILABLE
+            failed.append({"source": source, "reason": reason})
+            log(f"calendar {source}: {exc}")
+            continue
+        except Exception as exc:  # noqa: BLE001 - one account must not take the rest
+            failed.append({"source": source, "reason": UNAVAILABLE})
+            # The type only: an unexpected exception's message is not known
+            # to be free of a token or a title.
+            log(f"calendar {source}: unexpected {type(exc).__name__}")
             continue
         events.extend(rows)
     return {"accounts": len(accounts),

@@ -526,7 +526,7 @@ def main():
     if query:
         url += "?" + urllib.parse.urlencode(query)
 
-    # Five passes, and only the first is the ordinary case. A typical tick
+    # Six passes, and only the first is the ordinary case. A typical tick
     # never breaks a layout; the widest case does. mock.js already ships the
     # long symbol, the six-figure price, the sub-1 price and the zero change
     # (that is what those fixtures are for -- see web/js/mock.js). stress.js
@@ -541,18 +541,24 @@ def main():
     # Cheap to keep and impossible to notice by eye -- 66 is freezing rain, on
     # a panel in Sao Paulo.
     #
-    # night.js is the fourth. A clear sky after dark draws stars rather than a
+    # agenda.js measures one card too (T9.1): a meeting in progress that ends
+    # tomorrow, "até amanhã 10:00", longer than neon's 32px countdown holds,
+    # so the line steps down a size. stress.js carries the other widest case,
+    # "amanhã 09:00" at full size, and the card shows one event at a time.
+    #
+    # night.js is the next. A clear sky after dark draws stars rather than a
     # sun -- which is the bug T6.13 came from -- and it draws the moon at
     # first quarter, the one phase whose terminator is a straight line and so
     # the arc this geometry is most likely to get wrong.
     #
-    # overflow.js is the fifth, and it is the one pass that asserts something
+    # overflow.js is the last, and it is the one pass that asserts something
     # must happen rather than that nothing must: more rows than any card can
     # show, and the cards have to say they are scrolling through them (T6.6).
     # The flag is what turns the pass from "nothing escaped" -- which a card
     # that silently eats rows passes trivially -- into a check of the feature.
     passes = [("served", None, False), ("stress", "stress.js", False),
               ("unknown", "unknown.js", False),
+              ("agenda", "agenda.js", False),
               ("night", "night.js", False),
               ("overflow", "overflow.js", True)]
 

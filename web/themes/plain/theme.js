@@ -388,7 +388,9 @@
             return;
         }
         els.agenda.removeAttribute('data-reserved');
-        const parts = [fields.when];
+        // `when` is empty when every account failed and there is no event:
+        // the failure is then the whole line, not "nada à vista — ...".
+        const parts = fields.when ? [fields.when] : [];
         if (fields.title) {
             parts.push(fields.title);
         }

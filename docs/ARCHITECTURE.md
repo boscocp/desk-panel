@@ -26,8 +26,9 @@ native app and not a web page.
 │   assets from the APK              │      │     is logged in              │
 │   no network of its own            │      │                               │
 └────────────────────────────────────┘      └───────────────────────────────┘
-                                              brapi token lives here, and
-                                              only here
+                                              brapi token and calendar
+                                              refresh tokens live here,
+                                              and only here
 ```
 
 ## The three invariants
@@ -105,6 +106,29 @@ See [ADR 0005](adr/0005-real-screen-sleep.md).
 | Cleartext | `network_security_config.xml`, `domain-config` scoped to the PC IP | [Network Security Config](https://developer.android.com/privacy-and-security/security-config) |
 | Weather | Open-Meteo, no key, CORS `*`, 10k req/day | [terms](https://open-meteo.com/en/terms) |
 | Quotes | brapi.dev, 15k req/month free; token required beyond four sample tickers | [pricing](https://brapi.dev/pricing) |
+| Google Calendar | events.list on `primary`, scope `calendar.events.owned.readonly`; 600 req/min per user | [quota](https://developers.google.com/workspace/calendar/api/guides/quota) |
+| Microsoft Graph | calendarView on the default calendar, `Calendars.ReadBasic`; 429 with `Retry-After` when throttled | [throttling](https://learn.microsoft.com/en-us/graph/throttling) |
+
+## Calendars
+
+The AGENDA card shows the owner's next meeting from Google Calendar and Microsoft Outlook
+(T9.1, [ADR 0017](adr/0017-calendars-are-personal-data.md)). It is the first data on the panel
+that is personal, so it has rules the market cards do not:
+
+- **Read-only, primary calendar only.** Google `calendar.events.owned.readonly`, Microsoft
+  `Calendars.ReadBasic`. `oauth.check_scope` refuses any broader grant, and a guard test fails
+  the build if `server/` names a scope outside that allowlist.
+- **OAuth runs on the PC.** Google uses a loopback redirect with PKCE, and Microsoft uses the
+  device code flow; `server/calendar_login.py` runs both. Refresh tokens live in
+  `server/calendar-tokens.json` (0600, gitignored, written atomically), never in `config.toml`
+  and never in the APK.
+- **The server filters before it sends.** Declined and cancelled events never leave the PC,
+  and the payload carries at most five `{start, end, allDay, source, title?}` entries.
+- **Every route checks `Host` first** and answers 421 unless it is an IP literal, `localhost`
+  or a name in `allowed_hosts`. This closes DNS rebinding, which would otherwise let any web
+  page the owner visits read `/quotes`.
+- **Failure is per account and never stale.** `failed` names the account and says whether it
+  needs `reconnect` or is `unavailable`.
 
 ## Shortcut buttons
 

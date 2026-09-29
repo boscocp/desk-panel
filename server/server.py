@@ -504,6 +504,7 @@ class App:
         # way: a misspelled provider is found by whoever restarts the server.
         self.calendar_accounts = providers_calendar.accounts_from_config(
             config.get("calendar_accounts"))
+        providers_calendar.check_config(config)
         self.wall_clock = wall_clock or (lambda: datetime.datetime.now(datetime.timezone.utc))
         self.tokens = oauth.TokenStore(tokens_path or SCRIPT_DIR / TOKENS_FILENAME)
         self.credentials = {
@@ -671,7 +672,7 @@ class App:
         return providers_calendar.load(
             self.calendar_accounts, self.credentials, self.wall_clock(),
             lookahead_h=self.config.get("calendar_lookahead_h", 24),
-            show_titles=bool(self.config.get("calendar_show_titles", True)))
+            show_titles=self.config.get("calendar_show_titles", True) is True)
 
     def _refresh_agenda_async(self, ttl):
         """One background refresh of the agenda, or leave the running one alone."""
@@ -1443,6 +1444,7 @@ def main(argv=None):
     try:
         calendar_accounts = providers_calendar.accounts_from_config(
             config.get("calendar_accounts"))
+        providers_calendar.check_config(config)
     except ValueError as exc:
         print(exc, file=sys.stderr)
         sys.exit(1)

@@ -25,6 +25,7 @@ that stays is `TokenStore`, whose whole job is one file.
 """
 import base64
 import hashlib
+import http.client
 import json
 import os
 import secrets
@@ -143,8 +144,14 @@ def post_form(url, fields, timeout=TIMEOUT_S):
             raw = b""
         if not raw:
             raise OAuthError("http", f"HTTP {exc.code} from {url}") from None
-    except (urllib.error.URLError, OSError) as exc:
-        raise OAuthError("network", f"cannot reach {url}: {exc}") from None
+    except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:
+        # HTTPException too: a truncated body (IncompleteRead) is not an
+        # OSError, and anything that escapes this module as another type
+        # escapes `providers_calendar.load` as well.
+        raise OAuthError("network", f"cannot reach {url}: {type(exc).__name__}") from None
+    if not raw:
+        # Google's revocation endpoint documents a 200 and no body.
+        return {}
     try:
         body = json.loads(raw)
     except (json.JSONDecodeError, UnicodeDecodeError):
@@ -166,7 +173,7 @@ def _granted(provider, scope_text):
     return scopes
 
 
-def check_scope(provider, scope_text):
+def check_scope(provider, scope_text, requested=None):
     """Pure: raise ScopeError unless `scope_text` is a read-only calendar grant.
 
     Two ways to fail, and both mean nothing is stored. The grant may be
@@ -174,6 +181,14 @@ def check_scope(provider, scope_text):
     the consent screen. Or it may carry a scope outside `ALLOWED_SCOPES`, a
     broader one or a write one, which is the case ADR 0017 exists for.
     """
+    if scope_text is None:
+        # RFC 6749 section 5.1: `scope` is OPTIONAL when it is identical to
+        # the scope requested, and Microsoft documents the same. So an absent
+        # field means "what you asked for", which is read-only by
+        # construction. It is never read as "nothing", which would refuse
+        # every refresh that leaves the field out.
+        scope_text = requested
+    scope_text = urllib.parse.unquote(str(scope_text or ""))
     granted = _granted(provider, scope_text)
     missing = REQUIRED_SCOPES[provider] - granted
     if missing:
@@ -187,13 +202,22 @@ def check_scope(provider, scope_text):
             f"({', '.join(sorted(extra))}); refusing to keep the token")
 
 
+REQUESTED_SCOPES = {"google": GOOGLE_SCOPE, "microsoft": MICROSOFT_SCOPE}
+
+# The token endpoint's errors that mean "this grant is over, sign in again", as
+# opposed to a provider that is down. The panel says `reconnect` only for these.
+AUTH_ERRORS = {"invalid_grant", "interaction_required", "invalid_client",
+               "unauthorized_client", "consent_required", "not_connected", "scope",
+               "store"}
+
+
 def _token_or_raise(provider, body, endpoint):
     """Pure: a token response -> the response, after its error and scope checks."""
     if "error" in body:
         raise OAuthError(str(body.get("error")), f"{provider} {endpoint}: {body.get('error')}")
     if not isinstance(body.get("access_token"), str) or not body["access_token"]:
         raise OAuthError("format", f"{provider} {endpoint}: no access_token in the response")
-    check_scope(provider, body.get("scope"))
+    check_scope(provider, body.get("scope"), REQUESTED_SCOPES[provider])
     return body
 
 
@@ -248,7 +272,18 @@ def google_exchange_code(client_id, client_secret, code, verifier, redirect_uri,
         "grant_type": "authorization_code",
         "redirect_uri": redirect_uri,
     })
-    body = _token_or_raise("google", body, "code exchange")
+    try:
+        body = _token_or_raise("google", body, "code exchange")
+    except ScopeError:
+        # Refusing to keep the token is not enough on its own: the broad grant
+        # would still be live on the owner's account. Revoke it, best effort,
+        # and refuse either way.
+        if isinstance(body.get("refresh_token"), str):
+            try:
+                google_revoke(body["refresh_token"], post=post)
+            except OAuthError:
+                pass
+        raise
     if not isinstance(body.get("refresh_token"), str) or not body["refresh_token"]:
         raise OAuthError("format", "google code exchange: no refresh_token in the response")
     return body
@@ -272,10 +307,15 @@ def google_refresh(client_id, client_secret, refresh_token, post=post_form):
 def google_revoke(token, post=post_form):
     """Ask Google to drop every scope the token's project was granted.
 
-    Best effort, and the caller deletes the local copy either way: a token
-    Google no longer knows is already the result wanted.
+    Raises OAuthError when Google says no. `post_form` hands a 400 back as
+    a body rather than raising, so the `error` in it is checked here: read
+    as success, it made `--disconnect` report a revocation Google had
+    refused. A 200 has no documented body, and an empty one is `{}`.
     """
-    return post(GOOGLE_REVOKE_URL, {"token": token})
+    body = post(GOOGLE_REVOKE_URL, {"token": token})
+    if "error" in body:
+        raise OAuthError(str(body.get("error")), f"google revoke: {body.get('error')}")
+    return body
 
 
 # --- Microsoft: device code flow ----------------------------------------------
@@ -308,11 +348,19 @@ def microsoft_poll(client_id, device, post=post_form, sleep=time.sleep, clock=ti
         sleep(interval)
         if clock() > deadline:
             raise OAuthError("expired_token", "microsoft sign-in: the code expired")
-        body = post(MICROSOFT_TOKEN_URL, {
-            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-            "client_id": client_id,
-            "device_code": device["device_code"],
-        })
+        try:
+            body = post(MICROSOFT_TOKEN_URL, {
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                "client_id": client_id,
+                "device_code": device["device_code"],
+            })
+        except OAuthError as exc:
+            if exc.code != "network":
+                raise
+            # RFC 8628 section 3.5: on a connection timeout, poll less often
+            # and try again. The code is still good until `expires_in`.
+            interval *= 2
+            continue
         error = body.get("error")
         if error == "authorization_pending":
             continue
@@ -365,8 +413,10 @@ class TokenStore:
     byte goes in, and then `os.replace` swaps it into place. A crash
     mid-write leaves the old file whole, and at no moment is there a copy
     anyone else can read. On Windows the mode bits mean nothing and the
-    protection is the ACL of the user's own profile, as it is for
-    `config.toml`.
+    protection is the ACL of the folder the repository was cloned into,
+    exactly as it is for `config.toml`. Inside the user's profile that is
+    the user alone. A clone at `C:\\desk-panel`, or in a folder OneDrive
+    syncs, is not, and docs/SERVER-SETUP.md says so.
     """
 
     def __init__(self, path):
@@ -378,6 +428,8 @@ class TokenStore:
             raw = self.path.read_text(encoding="utf-8")
         except FileNotFoundError:
             return {}
+        except (OSError, UnicodeDecodeError) as exc:
+            raise OAuthError("store", f"cannot read {self.path}: {type(exc).__name__}") from None
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
@@ -396,6 +448,19 @@ class TokenStore:
         data[account] = {"refresh_token": refresh_token}
         self._write(data)
 
+    def replace(self, account, old, new):
+        """Store `new` only if the account still holds `old`: a compare-and-swap.
+
+        The rotation path. A refresh takes up to ten seconds, and a
+        `--disconnect` or a fresh login in that window must win. A plain
+        `put` here would bring back the token the owner had just removed.
+        """
+        data = self.load()
+        entry = data.get(account)
+        if isinstance(entry, dict) and entry.get("refresh_token") == old:
+            data[account] = {"refresh_token": new}
+            self._write(data)
+
     def delete(self, account):
         data = self.load()
         if data.pop(account, None) is not None:
@@ -413,12 +478,23 @@ class TokenStore:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 json.dump(data, handle, indent=2, sort_keys=True)
                 handle.write("\n")
+                # On the disk before the rename, or a power cut can leave the
+                # new name pointing at an empty file: the PC this runs on is
+                # switched off as a matter of routine.
+                handle.flush()
+                os.fsync(handle.fileno())
             os.replace(tmp, self.path)
-        except BaseException:
+        except BaseException as exc:
             try:
                 os.unlink(tmp)
             except OSError:
                 pass
+            if isinstance(exc, OSError):
+                # A full disk, or on Windows a destination another process
+                # holds open. One exception type out of this module, so the
+                # caller counts it against this account and nothing else.
+                raise OAuthError("store", f"cannot write {self.path}: "
+                                          f"{type(exc).__name__}") from None
             raise
 
 
@@ -442,7 +518,15 @@ class Credentials:
     """An access token for one account, refreshed when it is about to expire.
 
     The refresh token comes from the store and, for Microsoft, goes back to it
-    after every refresh, since the old one is not guaranteed to work again.
+    after every refresh: Microsoft issues a new one each time and asks for the
+    old one to be deleted, and it is the new one whose 90 days are running.
+
+    **A refused token is not sent again.** Once a refresh comes back with an
+    auth error, that token is remembered as dead, and every later cycle fails
+    at once, without a request, until the store holds a different token,
+    which is what `calendar_login.py` writes. A grant broader than read-only
+    is worse than dead, and it is deleted from the store on the spot
+    (ADR 0017).
     `clock` is wall-clock seconds and is passed in, so the tests move time
     rather than wait for it.
     """
@@ -456,6 +540,7 @@ class Credentials:
         self.clock = clock
         self._access_token = None
         self._expires_at = 0.0
+        self._dead_token = None
 
     def access_token(self):
         now = self.clock()
@@ -468,17 +553,25 @@ class Credentials:
                 f"calendar {self.account}: not connected; run "
                 f"python server/calendar_login.py {self.provider} --account "
                 f"{self.account.split('/', 1)[-1]}")
+        if refresh_token == self._dead_token:
+            raise OAuthError("invalid_grant",
+                             f"calendar {self.account}: the provider refused this token; run "
+                             f"python server/calendar_login.py {self.provider} --account "
+                             f"{self.account.split('/', 1)[-1]}")
         try:
             body = self._refresh(refresh_token)
-        except OAuthError:
-            # A refused refresh is not retried with the same token on every
-            # cycle; the cache already limits attempts to one per interval,
-            # and the message tells the owner what to run.
+        except ScopeError:
             self._access_token = None
+            self.store.delete(self.account)
+            raise
+        except OAuthError as exc:
+            self._access_token = None
+            if exc.code in AUTH_ERRORS:
+                self._dead_token = refresh_token
             raise
         rotated = body.get("refresh_token")
         if isinstance(rotated, str) and rotated and rotated != refresh_token:
-            self.store.put(self.account, rotated)
+            self.store.replace(self.account, refresh_token, rotated)
         self._access_token = body["access_token"]
         self._expires_at = now + _positive_int(body.get("expires_in"), 3600)
         return self._access_token

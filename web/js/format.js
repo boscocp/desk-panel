@@ -393,6 +393,7 @@ const LANGUAGES = {
             untitled: 'Compromisso',
             none: 'nada à vista',
             reconnect: 'reconectar',
+            unavailable: 'indisponível',
             weekdays: ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'],
         },
         weather: {
@@ -454,6 +455,7 @@ const LANGUAGES = {
             untitled: 'Meeting',
             none: 'nothing ahead',
             reconnect: 'reconnect',
+            unavailable: 'unavailable',
             weekdays: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
         },
         weather: {
@@ -546,7 +548,8 @@ function shortcutsFor(actions, language) {
 
 // --- The next meeting (T9.1, ADR 0017) --------------------------------------
 //
-// The PC sends up to three events as absolute instants and nothing else: it
+// The PC sends up to five events -- three timed, two all-day -- as absolute
+// instants and nothing else: it
 // has already dropped the declined and the cancelled, and it never sends a
 // countdown. Which event is next, and how long until it starts, is decided
 // here against **the phone's clock**, exactly as isNight is -- the panel is
@@ -590,6 +593,12 @@ function localDay(date) {
     return Math.round(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86400000);
 }
 
+// "Within the hour": the window in which a meeting tomorrow counts as today's
+// for nextEvent -- the same hour in which untilText says minutes rather than
+// a day, so the card cannot put an all-day event above a meeting it would
+// have called "in 20 min".
+const SOON_MS = 60 * 60000;
+
 function hhmm(date) {
     return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
@@ -631,14 +640,21 @@ function normaliseEvent(raw) {
  * The order is what a person at the desk wants to know first:
  *
  *   1. a timed event **in progress** -- the meeting you are late for is more
- *      urgent than the one after it, and skipping to the next would hide it;
- *   2. a timed event still to start **today**;
+ *      urgent than the one after it, and skipping to the next would hide it.
+ *      Of several in progress, the one that started **last** wins: a 09-18
+ *      focus block must not hide the 14:00 meeting that has just begun inside
+ *      it, which is exactly the meeting you are late for;
+ *   2. a timed event still to start **today**, or starting within the hour
+ *      whatever day that is -- at 23:50 a meeting at 00:10 is "in 20 min" and
+ *      it outranks the all-day event that ends at midnight, which is what
+ *      untilText promises about the same case;
  *   3. an all-day event covering today -- it has no time, so it is not a
  *      countdown, and a real meeting at 15:00 is the more useful line;
  *   4. anything later, by day, with a timed event before an all-day one on
  *      the same day.
  *
- * Inside a tier, earliest start wins and ties break on (source, title), so two
+ * Inside a tier after the first, earliest start wins; ties break on (source,
+ * title) everywhere, so two
  * meetings in the same minute always come out in the same order. Without it
  * the card would flip between them on every payload, for ever.
  *
@@ -668,7 +684,7 @@ function nextEvent(events, now) {
             }
             tier = localDay(item.start) <= today ? 3 : 4;
         } else if (item.start > now) {
-            tier = localDay(item.start) === today ? 2 : 4;
+            tier = localDay(item.start) === today || item.start - now < SOON_MS ? 2 : 4;
         } else if (now < item.end) {
             tier = 1;
             inProgress = true;
@@ -681,6 +697,7 @@ function nextEvent(events, now) {
     }
     ranked.sort((a, b) => (
         a.tier - b.tier
+        || (a.tier === 1 ? b.start - a.start : 0)
         || localDay(a.start) - localDay(b.start)
         || (a.allDay === b.allDay ? 0 : (a.allDay ? 1 : -1))
         || a.start - b.start
@@ -744,6 +761,34 @@ function dayWord(date, days, w) {
     return days < 7 ? weekday : `${weekday} ${String(date.getDate()).padStart(2, '0')}`;
 }
 
+// The failed accounts as one line, grouped by what the owner has to do:
+// "google/personal: reconectar · microsoft/work: indisponível". `reconnect`
+// means the login was refused or never run, and only the owner can fix it on
+// the PC; `unavailable` means the provider or the network is down and the
+// server retries by itself. A bare string is read as `reconnect`, the answer
+// that asks for action, because an entry this build cannot read is safer
+// treated as one somebody has to look at.
+function failedLine(failed, w) {
+    if (!Array.isArray(failed)) {
+        return null;
+    }
+    const groups = { reconnect: [], unavailable: [] };
+    for (const entry of failed) {
+        if (typeof entry === 'string' && entry) {
+            groups.reconnect.push(entry);
+        } else if (entry && typeof entry === 'object' && typeof entry.source === 'string' && entry.source) {
+            groups[entry.reason === 'unavailable' ? 'unavailable' : 'reconnect'].push(entry.source);
+        }
+    }
+    const parts = [];
+    for (const reason of ['reconnect', 'unavailable']) {
+        if (groups[reason].length) {
+            parts.push(`${groups[reason].join(', ')}: ${w[reason]}`);
+        }
+    }
+    return parts.length ? parts.join(' · ') : null;
+}
+
 /**
  * Everything a theme needs to draw the AGENDA card, as strings, or null when
  * there is no card to draw: an older server (no `agenda`) or a PC with no
@@ -759,7 +804,9 @@ function dayWord(date, days, w) {
  *              neon does it in colour -- can draw on its own. At neon's
  *              countdown size the whole of `when` does not fit the card
  *   inProgress true while the event is running, for a theme that marks it
- *   failed     "google/personal: reconectar", or null. A failed account is
+ *   failed     "google/personal: reconectar", "microsoft/work: indisponível",
+ *              or null (see failedLine). With no event and a failure, `when`
+ *              is empty rather than "nada à vista". A failed account is
  *              named and the rest of the card still draws: the other
  *              provider's meeting is still the next meeting.
  *
@@ -772,13 +819,13 @@ function agendaFields(agenda, now, language) {
         return null;
     }
     const w = strings(language).agenda;
-    const failedSources = Array.isArray(agenda.failed)
-        ? agenda.failed.filter((s) => typeof s === 'string' && s)
-        : [];
-    const failed = failedSources.length ? `${failedSources.join(', ')}: ${w.reconnect}` : null;
+    const failed = failedLine(agenda.failed, w);
     const next = nextEvent(agenda.events, now);
     if (!next) {
-        return { title: null, when: w.none, until: null, inProgress: false, failed };
+        // "Nothing ahead" is a claim, and with an account failing the panel
+        // cannot make it: the meeting may be in the calendar it could not
+        // read. The failure line is the whole card then.
+        return { title: null, when: failed ? '' : w.none, until: null, inProgress: false, failed };
     }
     let when;
     let until = null;
@@ -786,7 +833,11 @@ function agendaFields(agenda, now, language) {
         const days = localDay(next.start) - localDay(now);
         when = days <= 0 ? w.allDay : dayWord(next.start, days, w);
     } else if (next.inProgress) {
-        until = next.end > next.start ? `${w.until} ${hhmm(next.end)}` : null;
+        // With the day when it ends on another one: "até 10:00" about a
+        // conference that ends on Thursday reads as this morning, already past.
+        const endDays = localDay(next.end) - localDay(now);
+        const endText = endDays === 0 ? hhmm(next.end) : `${dayWord(next.end, endDays, w)} ${hhmm(next.end)}`;
+        until = next.end > next.start ? `${w.until} ${endText}` : null;
         when = until ? `${w.now} · ${until}` : w.now;
     } else {
         when = untilText(next.start, now, language);

@@ -67,23 +67,32 @@ window.onData({
     // put the panel back into pt-BR the moment this fixture landed, and
     // report the right tag while measuring the wrong words (T6.11).
     language: new URLSearchParams(location.search).get('lang') || undefined,
-    // The widest AGENDA the card can be asked to draw (T9.1): a meeting in
-    // progress, whose line is the longest countdown there is ("agora · até
-    // 23:59"), a title far longer than any line the card has, and both
-    // accounts failed, which is the longest "reconnect" line. Every one of the
-    // three must ellipsise rather than wrap -- a wrapped title is how this
-    // card would grow into the weather card above it. Instants from the page's
-    // pinned clock, for the reason the date below is.
+    // The widest AGENDA the card can be asked to draw (T9.1): the widest
+    // countdown at the card's full size -- "amanhã 09:00" here, "tomorrow
+    // 09:00" under --lang en, fourteen characters and the most neon's 32px
+    // line holds (the in-progress case, which steps down a size instead, is
+    // e2e/layout/agenda.js) -- under a title far longer
+    // than any line the card has, and the longest failure line: one account
+    // to reconnect and one unavailable. The meeting is the third account's,
+    // because a failed account contributes no events (providers_calendar).
+    // Every line must ellipsise rather than wrap: a wrapped title is how this
+    // card would grow into the one above it. From the page's pinned clock,
+    // for the reason the date below is.
     agenda: (() => {
-        const now = window.Date.now();
-        const iso = (minutes) => new window.Date(now + minutes * 60000).toISOString();
+        const now = new window.Date();
+        const tomorrow = new window.Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 9, 0);
         return {
-            accounts: 2,
+            accounts: 3,
             events: [{
-                start: iso(-10), end: iso(50), allDay: false, source: 'microsoft/work',
+                start: tomorrow.toISOString(),
+                end: new window.Date(tomorrow.getTime() + 3600000).toISOString(),
+                allDay: false, source: 'google/personal',
                 title: 'Revisão trimestral de planejamento com as equipes de plataforma e dados',
             }],
-            failed: ['microsoft/work', 'google/personal'],
+            failed: [
+                { source: 'microsoft/work', reason: 'reconnect' },
+                { source: 'google/work', reason: 'unavailable' },
+            ],
         };
     })(),
 });

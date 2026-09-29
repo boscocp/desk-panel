@@ -1044,16 +1044,33 @@
         }
         els.agenda.removeAttribute('data-reserved');
         const body = el('div', null, 'a-body');
-        const when = el('div', null, fields.inProgress ? 'a-when a-live' : 'a-when');
         // In progress, the colour says "now" and the line says until when:
-        // "agora · até 14:30" is 17 characters and the card holds about 12 at
+        // "agora · até 14:30" is 17 characters and the card holds about 14 at
         // this size, so the whole phrase ellipsised to "agora · até 15..." --
-        // the one number the line exists for, cut off. The full phrase stays
-        // the accessible name, because a colour is not something a screen
-        // reader says.
-        when.textContent = fields.inProgress && fields.until ? fields.until : fields.when;
-        when.setAttribute('aria-label', fields.when);
-        body.appendChild(when);
+        // the one number the line exists for, cut off. The "agora" is still
+        // in the line, visually hidden, because a colour is not something a
+        // screen reader says -- and text rather than an aria-label, which
+        // ARIA 1.2 does not allow on a plain div.
+        const live = fields.inProgress && fields.until;
+        const shown = live ? fields.until : fields.when;
+        if (shown) {
+            // Smaller past fourteen characters. Measured in headless Chrome at
+            // 872x392: "tomorrow 09:00", fourteen, is 187px of the line's 200 at
+            // 32px, and "até amanhã 10:00", sixteen -- a meeting in progress
+            // that ends tomorrow -- is 217, so the time was the part cut off.
+            // At 24px the longest, "until tomorrow 10:00", is 184.
+            // Shrinking one line beats cutting off its time.
+            const long = shown.length > 14;
+            const when = el('div', null,
+                'a-when' + (fields.inProgress ? ' a-live' : '') + (long ? ' a-long' : ''));
+            if (live) {
+                const hidden = el('span', null, 'sr-only');
+                hidden.textContent = `${words.agenda.now} · `;
+                when.appendChild(hidden);
+            }
+            when.appendChild(document.createTextNode(shown));
+            body.appendChild(when);
+        }
         if (fields.title) {
             const title = el('div', null, 'a-title');
             title.textContent = fields.title;

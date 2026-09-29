@@ -1244,8 +1244,8 @@ body {
  *
  * The same box as #weather -- the two share #side's 1fr/1fr -- so the same
  * budget: 143px of content under a 27px title. Three lines at most, and the
- * worst case is all three: 35 + 30 + 26 = 91px, which leaves room the weather
- * card does not have. None of them wraps. The countdown is short by
+ * worst case is all three with the failure line at its two: 35 + 30 + 52 =
+ * 117px. The countdown and the title never wrap. The countdown is short by
  * construction, a title can be anything a person typed into a calendar, and a
  * wrapped title is how this card would grow into the one under it -- so every
  * line ellipsises and the card's own clip is the backstop.
@@ -1263,8 +1263,7 @@ body {
 }
 
 .a-when,
-.a-title,
-.a-failed {
+.a-title {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1275,6 +1274,29 @@ body {
     line-height: 1.1;
     letter-spacing: 0.01em;
     text-shadow: 0 0 6px var(--glow-dim);
+}
+
+/* A countdown longer than the fourteen characters 32px holds -- an
+ * in-progress meeting that ends on another day, "até amanhã 10:00". Same
+ * line box as .a-when (24 x 1.45 = 34.8px against 32 x 1.1 = 35.2), so the
+ * card does not change height when the line changes size. */
+.a-long {
+    font-size: 24px;
+    line-height: 1.45;
+}
+
+/* Read aloud and never drawn: the "agora" an in-progress line says in colour.
+ * The standard clip pattern, so it takes no space and no ink. */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
 }
 
 /* In progress: the meeting has started. The colour is --warn, the panel's
@@ -1290,9 +1312,19 @@ body {
     line-height: 1.25;
 }
 
-/* Which account needs its login run again. Dim, small and last: it is the
- * owner's to fix on the PC, not something to read from the chair. */
+/* Which account needs its login run again, or is down. Dim, small and last:
+ * it is the owner's to fix on the PC, not something to read from the chair.
+ *
+ * Two lines, clamped, where the other two ellipsise. One line held
+ * "microsoft/work: reconect..." and dropped the second account entirely --
+ * the one line on the card that is a list. Two fit: 35 + 30 + 2 x 26 = 117px
+ * of the 143 the card has, measured with the stress fixture's two failures. */
 .a-failed {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    overflow-wrap: anywhere;
     margin-top: 4px;
     font-size: 20px;
     line-height: 1.3;

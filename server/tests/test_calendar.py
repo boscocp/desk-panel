@@ -11,6 +11,8 @@ import re
 import stat
 import tempfile
 import unittest
+import unittest.mock
+import urllib.error
 import urllib.parse
 from pathlib import Path
 
@@ -83,10 +85,24 @@ class ScopeTests(unittest.TestCase):
         with self.assertRaises(oauth.ScopeError):
             oauth.check_scope("microsoft", "")
 
-    def test_a_broad_google_grant_is_not_kept_at_login(self):
-        post = Recorder(dict(GOOGLE_GRANT, scope="https://www.googleapis.com/auth/calendar"))
+    def test_a_broad_google_grant_is_not_kept_at_login_and_is_revoked(self):
+        post = Recorder(dict(GOOGLE_GRANT, scope="https://www.googleapis.com/auth/calendar"), {})
         with self.assertRaises(oauth.ScopeError):
             oauth.google_exchange_code("cid", "sec", "code", "ver", "http://127.0.0.1:1", post=post)
+        self.assertEqual(post.calls[1], (oauth.GOOGLE_REVOKE_URL, {"token": "rt-google"}))
+
+    def test_an_absent_scope_means_the_one_requested(self):
+        # RFC 6749 section 5.1, and Microsoft's own docs: omitted = identical.
+        oauth.check_scope("microsoft", None, oauth.MICROSOFT_SCOPE)
+        oauth.check_scope("google", None, oauth.GOOGLE_SCOPE)
+        grant = {k: v for k, v in MICROSOFT_GRANT.items() if k != "scope"}
+        self.assertEqual(oauth.microsoft_refresh("c", "rt", post=Recorder(grant))["access_token"], "at")
+
+    def test_a_percent_encoded_scope_is_read_as_the_scope(self):
+        oauth.check_scope("microsoft", "https%3A%2F%2Fgraph.microsoft.com%2FCalendars.ReadBasic")
+        with self.assertRaises(oauth.ScopeError):
+            oauth.check_scope("microsoft", "https%3A%2F%2Fgraph.microsoft.com%2FMail.Read "
+                                           "Calendars.ReadBasic")
 
 
 class GoogleFlowTests(unittest.TestCase):
@@ -129,6 +145,40 @@ class GoogleFlowTests(unittest.TestCase):
         self.assertNotIn("the-verifier", str(ctx.exception))
 
 
+class RevokeTests(unittest.TestCase):
+    def test_a_refused_revocation_raises(self):
+        with self.assertRaises(oauth.OAuthError) as ctx:
+            oauth.google_revoke("rt", post=Recorder({"error": "invalid_token"}))
+        self.assertEqual(ctx.exception.code, "invalid_token")
+
+    def test_an_empty_200_is_success(self):
+        self.assertEqual(oauth.google_revoke("rt", post=Recorder({})), {})
+
+
+class PostFormTests(unittest.TestCase):
+    """Every failure leaves the module as OAuthError, never as something else."""
+
+    def _post(self, side_effect):
+        from unittest import mock
+
+        with mock.patch.object(oauth.urllib.request, "urlopen", side_effect=side_effect):
+            return oauth.post_form("https://example.invalid/token", {"secret": "s3cr3t"})
+
+    def test_a_truncated_body_is_an_oauth_error(self):
+        import http.client
+
+        with self.assertRaises(oauth.OAuthError) as ctx:
+            self._post(http.client.IncompleteRead(b"par"))
+        self.assertEqual(ctx.exception.code, "network")
+        self.assertNotIn("s3cr3t", str(ctx.exception))
+
+    def test_a_400_with_json_is_returned_for_the_caller_to_read(self):
+        import io
+
+        error = urllib.error.HTTPError("u", 400, "Bad", {}, io.BytesIO(b'{"error": "authorization_pending"}'))
+        self.assertEqual(self._post(error), {"error": "authorization_pending"})
+
+
 class MicrosoftFlowTests(unittest.TestCase):
     DEVICE = {"device_code": "dc", "user_code": "ABCD-EFGH", "interval": 5,
               "expires_in": 900, "verification_uri": "https://microsoft.com/devicelogin"}
@@ -165,6 +215,12 @@ class MicrosoftFlowTests(unittest.TestCase):
                 with self.assertRaises(oauth.OAuthError) as ctx:
                     self._poll({"error": error})
                 self.assertEqual(ctx.exception.code, error)
+
+    def test_a_network_blip_doubles_the_interval_and_keeps_polling(self):
+        # RFC 8628 section 3.5.
+        result, slept, _ = self._poll(oauth.OAuthError("network"), MICROSOFT_GRANT)
+        self.assertEqual(result["refresh_token"], "rt-microsoft")
+        self.assertEqual(slept, [5, 10])
 
     def test_the_code_expiring_locally_stops_polling(self):
         device = dict(self.DEVICE, expires_in=7)
@@ -217,6 +273,31 @@ class TokenStoreTests(TempStore):
             self.store.load()
         self.assertNotIn("1//secret", str(ctx.exception))
 
+    def test_an_unreadable_file_is_an_oauth_error(self):
+        self.path.write_bytes(b"\xff\xfe not utf-8")
+        with self.assertRaises(oauth.OAuthError) as ctx:
+            self.store.load()
+        self.assertEqual(ctx.exception.code, "store")
+
+    def test_a_failed_write_is_an_oauth_error_and_leaves_the_old_file(self):
+        from unittest import mock
+
+        self.store.put("a/b", "old")
+        with mock.patch.object(oauth.os, "replace", side_effect=PermissionError("locked")):
+            with self.assertRaises(oauth.OAuthError) as ctx:
+                self.store.put("a/b", "new")
+        self.assertEqual(ctx.exception.code, "store")
+        self.assertEqual(self.store.refresh_token("a/b"), "old")
+        self.assertEqual([p.name for p in Path(self.tmp.name).iterdir()], ["calendar-tokens.json"])
+
+    def test_replace_is_a_compare_and_swap(self):
+        self.store.put("m/w", "old")
+        self.store.replace("m/w", "old", "new")
+        self.assertEqual(self.store.refresh_token("m/w"), "new")
+        self.store.delete("m/w")
+        self.store.replace("m/w", "new", "newer")
+        self.assertIsNone(self.store.refresh_token("m/w"), "a disconnect was undone")
+
     def test_the_permission_warning(self):
         self.assertIsNone(oauth.tokens_permission_warning(0o100600, "linux", "p"))
         self.assertIn("chmod 600", oauth.tokens_permission_warning(0o100644, "linux", "p"))
@@ -232,6 +313,19 @@ class CredentialsTests(TempStore):
         self.assertEqual(creds.access_token(), "at")
         self.assertEqual(self.store.refresh_token("microsoft/work"), "new")
         self.assertEqual(post.calls[0][1]["refresh_token"], "old")
+
+    def test_a_disconnect_during_the_refresh_is_not_undone_by_the_rotation(self):
+        self.store.put("microsoft/work", "old")
+
+        def post(url, fields):
+            # The owner runs --disconnect while this refresh is in flight.
+            self.store.delete("microsoft/work")
+            return dict(MICROSOFT_GRANT, refresh_token="new")
+
+        creds = oauth.Credentials("microsoft/work", "microsoft", {"microsoft_client_id": "c"},
+                                  self.store, post=post)
+        creds.access_token()
+        self.assertIsNone(self.store.refresh_token("microsoft/work"))
 
     def test_the_access_token_is_reused_until_near_expiry(self):
         self.store.put("google/personal", "rt")
@@ -253,6 +347,36 @@ class CredentialsTests(TempStore):
         creds.access_token()
         self.assertNotIn('"at"', self.path.read_text(encoding="utf-8"))
 
+    def test_the_access_token_is_refreshed_inside_the_margin(self):
+        self.store.put("google/personal", "rt")
+        now = [1000.0]
+        post = Recorder(GOOGLE_GRANT, dict(GOOGLE_GRANT, access_token="at2"))
+        creds = oauth.Credentials("google/personal", "google", {}, self.store,
+                                  post=post, clock=lambda: now[0])
+        creds.access_token()
+        now[0] = 1000 + 3599 - 30   # 30 s before expiry: inside a 60 s margin
+        self.assertEqual(creds.access_token(), "at2")
+
+    def test_a_refused_token_is_not_sent_again_until_it_changes(self):
+        self.store.put("google/personal", "rt")
+        post = Recorder({"error": "invalid_grant"}, GOOGLE_GRANT)
+        creds = oauth.Credentials("google/personal", "google", {}, self.store, post=post)
+        for _ in range(3):
+            with self.assertRaises(oauth.OAuthError):
+                creds.access_token()
+        self.assertEqual(len(post.calls), 1)
+        self.store.put("google/personal", "rt-new")   # calendar_login ran
+        self.assertEqual(creds.access_token(), "at")
+        self.assertEqual(len(post.calls), 2)
+
+    def test_a_provider_outage_is_retried_next_cycle(self):
+        self.store.put("google/personal", "rt")
+        post = Recorder(oauth.OAuthError("network"), GOOGLE_GRANT)
+        creds = oauth.Credentials("google/personal", "google", {}, self.store, post=post)
+        with self.assertRaises(oauth.OAuthError):
+            creds.access_token()
+        self.assertEqual(creds.access_token(), "at")
+
     def test_not_connected_says_what_to_run(self):
         creds = oauth.Credentials("google/personal", "google", {}, self.store, post=Recorder())
         with self.assertRaises(oauth.OAuthError) as ctx:
@@ -266,6 +390,8 @@ class CredentialsTests(TempStore):
         creds = oauth.Credentials("google/personal", "google", {}, self.store, post=post)
         with self.assertRaises(oauth.ScopeError):
             creds.access_token()
+        self.assertIsNone(self.store.refresh_token("google/personal"),
+                          "a token that now grants more than read-only was kept")
 
 
 class NormaliseTests(unittest.TestCase):
@@ -295,11 +421,21 @@ class NormaliseTests(unittest.TestCase):
         event = providers_calendar.normalise_graph(raw, "microsoft/x")[0]
         self.assertEqual((event["start"], event["end"]), ("2026-09-23", "2026-09-24"))
 
-    def test_a_graph_zone_that_is_not_utc_is_skipped_rather_than_guessed(self):
+    def test_a_graph_zone_that_is_not_utc_fails_the_account_rather_than_guessing(self):
         raw = {"value": [{"subject": "x", "isAllDay": False,
                           "start": {"dateTime": "2026-09-22T10:00:00", "timeZone": "Pacific Standard Time"},
                           "end": {"dateTime": "2026-09-22T11:00:00", "timeZone": "Pacific Standard Time"}}]}
-        self.assertEqual(providers_calendar.normalise_graph(raw, "microsoft/x"), [])
+        with self.assertRaises(UpstreamError):
+            providers_calendar.normalise_graph(raw, "microsoft/x")
+
+    def test_other_spellings_of_utc_are_utc(self):
+        for label in ("Etc/GMT", "Coordinated Universal Time", "tzone://Microsoft/Utc"):
+            raw = {"value": [{"subject": "x", "isAllDay": False,
+                              "start": {"dateTime": "2026-09-22T10:00:00", "timeZone": label},
+                              "end": {"dateTime": "2026-09-22T11:00:00", "timeZone": label}}]}
+            with self.subTest(label=label):
+                self.assertEqual(providers_calendar.normalise_graph(raw, "m/x")[0]["start"],
+                                 "2026-09-22T10:00:00+00:00")
 
     def test_garbage_is_empty_not_an_exception(self):
         for raw in (None, [], {"items": "x"}, {"items": [None, 3, {"start": "x"}]}):
@@ -315,6 +451,27 @@ class NormaliseTests(unittest.TestCase):
         self.assertTrue(title.startswith("a [31m b "))
         self.assertLessEqual(len(title), providers_calendar.MAX_TITLE)
         self.assertNotRegex(title, r"[\x00-\x1f]")
+
+    def test_a_long_title_is_cut_with_an_ellipsis(self):
+        raw = {"items": [{"summary": "x" * 200, "start": {"dateTime": "2026-09-22T10:00:00Z"},
+                          "end": {"dateTime": "2026-09-22T11:00:00Z"}}]}
+        self.assertEqual(providers_calendar.normalise_google(raw, "g/x")[0]["title"],
+                         "x" * (providers_calendar.MAX_TITLE - 1) + "…")
+
+    def test_bidi_and_zero_width_characters_are_stripped(self):
+        # A title is text from whoever sent the invitation (ADR 0017).
+        raw = {"items": [{"summary": "pay\u202egnp.exe\u200b\u2066x\x85",
+                          "start": {"dateTime": "2026-09-22T10:00:00Z"},
+                          "end": {"dateTime": "2026-09-22T11:00:00Z"}}]}
+        self.assertEqual(providers_calendar.normalise_google(raw, "g/x")[0]["title"],
+                         "pay gnp.exe x")
+
+    def test_graph_all_day_dates_survive_utc_plus_12(self):
+        raw = {"value": [{"subject": "x", "isAllDay": True, "isCancelled": False,
+                          "start": {"dateTime": "2026-06-22T12:00:00.0000000", "timeZone": "UTC"},
+                          "end": {"dateTime": "2026-06-23T12:00:00.0000000", "timeZone": "UTC"}}]}
+        event = providers_calendar.normalise_graph(raw, "microsoft/x")[0]
+        self.assertEqual((event["start"], event["end"]), ("2026-06-23", "2026-06-24"))
 
     def test_an_event_without_a_title_has_no_title_key(self):
         raw = {"items": [{"start": {"dateTime": "2026-09-22T10:00:00Z"},
@@ -360,18 +517,25 @@ class SelectAndLoadTests(unittest.TestCase):
 
         logged = []
         result = providers_calendar.load(
-            [("google", "personal"), ("microsoft", "work"), ("microsoft", "home")],
+            [("google", "personal"), ("microsoft", "work"), ("microsoft", "home"),
+             ("google", "broken")],
             {"google/personal": Creds(),
              "microsoft/work": Creds(oauth.OAuthError("invalid_grant", "microsoft refresh: invalid_grant")),
-             "microsoft/home": Creds()},
+             "microsoft/home": Creds(),
+             "google/broken": Creds(PermissionError("locked"))},
             NOW, 24, True,
             google=lambda *a: GOOGLE,
             graph=lambda *a: (_ for _ in ()).throw(UpstreamError("HTTP 503 from graph")),
             log=logged.append)
-        self.assertEqual(result["accounts"], 3)
-        self.assertEqual(result["failed"], ["microsoft/work", "microsoft/home"])
+        self.assertEqual(result["accounts"], 4)
+        self.assertEqual(result["failed"], [
+            {"source": "microsoft/work", "reason": "reconnect"},
+            {"source": "microsoft/home", "reason": "unavailable"},
+            {"source": "google/broken", "reason": "unavailable"},
+        ])
         self.assertEqual({e["source"] for e in result["events"]}, {"google/personal"})
-        self.assertEqual(len(logged), 2)
+        self.assertEqual(len(logged), 3)
+        self.assertNotIn("locked", logged[2])
         self.assertIn("microsoft/work", logged[0])
         self.assertFalse(any("Standup" in line for line in logged))
 
@@ -386,6 +550,8 @@ class SelectAndLoadTests(unittest.TestCase):
         providers_calendar.fetch_graph("tok", NOW, NOW + datetime.timedelta(hours=24), get=get)
         google, graph = seen
         gq = urllib.parse.parse_qs(urllib.parse.urlsplit(google[0]).query)
+        self.assertEqual(gq["eventTypes"], ["default", "fromGmail"])
+        self.assertIn("nextPageToken", gq["fields"][0])
         self.assertTrue(google[0].startswith(
             "https://www.googleapis.com/calendar/v3/calendars/primary/events?"))
         self.assertEqual(gq["timeMin"], ["2026-09-22T09:00:00Z"])
@@ -399,7 +565,50 @@ class SelectAndLoadTests(unittest.TestCase):
         self.assertEqual(graph[1]["Prefer"], 'outlook.timezone="UTC"')
 
 
+class PagingTests(unittest.TestCase):
+    def test_google_follows_next_page_token_and_stops(self):
+        pages = [{"items": [], "nextPageToken": "p2"}, {"items": [{"x": 1}], "nextPageToken": "p3"},
+                 {"items": [{"x": 2}]}, {"items": [{"x": "never"}]}]
+        urls = []
+
+        def get(url, headers=None):
+            urls.append(url)
+            return pages[len(urls) - 1]
+
+        raw = providers_calendar.fetch_google("t", NOW, NOW, get=get)
+        self.assertEqual(raw, {"items": [{"x": 1}, {"x": 2}]})
+        self.assertIn("pageToken=p3", urls[2])
+
+    def test_graph_follows_next_link_only_to_graph(self):
+        pages = [{"value": [{"a": 1}], "@odata.nextLink": "https://graph.microsoft.com/v1.0/next"},
+                 {"value": [{"a": 2}], "@odata.nextLink": "https://evil.example/steal"}]
+        urls = []
+
+        def get(url, headers=None):
+            urls.append(url)
+            return pages[len(urls) - 1]
+
+        raw = providers_calendar.fetch_graph("t", NOW, NOW, get=get)
+        self.assertEqual(raw, {"value": [{"a": 1}, {"a": 2}]})
+        self.assertEqual(len(urls), 2, "a nextLink off Graph would carry the bearer token")
+
+
 class ConfigTests(unittest.TestCase):
+    def test_the_calendar_keys_are_type_checked(self):
+        for key, bad in (("calendar_show_titles", "false"), ("calendar_show_titles", 0),
+                         ("calendar_interval_s", "300"), ("calendar_interval_s", 0),
+                         ("calendar_interval_s", True), ("calendar_lookahead_h", "24"),
+                         ("calendar_lookahead_h", 0), ("allowed_hosts", "mypc.local"),
+                         ("allowed_hosts", [""])):
+            with self.subTest(key=key, bad=bad):
+                with self.assertRaises(ValueError):
+                    providers_calendar.check_config({key: bad})
+        providers_calendar.check_config({})
+
+    def test_a_quoted_false_never_reaches_the_payload_as_true(self):
+        with self.assertRaises(ValueError):
+            App({"calendar_show_titles": "false"})
+
     def test_accounts_are_validated(self):
         self.assertEqual(providers_calendar.accounts_from_config(
             [{"provider": "google", "name": "personal"}]), [("google", "personal")])
@@ -411,12 +620,20 @@ class ConfigTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     providers_calendar.accounts_from_config(bad)
 
-    def test_a_provider_in_use_needs_its_client_id(self):
+    def test_a_provider_in_use_needs_its_client_keys(self):
         accounts = [("google", "a"), ("microsoft", "b")]
         self.assertEqual(providers_calendar.missing_client_ids(accounts, {}),
-                         ["google_client_id", "microsoft_client_id"])
+                         ["google_client_id", "google_client_secret", "microsoft_client_id"])
         self.assertEqual(providers_calendar.missing_client_ids(
-            accounts, {"google_client_id": "g", "microsoft_client_id": "m"}), [])
+            accounts, {"google_client_id": None, "google_client_secret": "s",
+                       "microsoft_client_id": "m"}), ["google_client_id"])
+        self.assertEqual(providers_calendar.missing_client_ids(
+            accounts, {"google_client_id": "g", "google_client_secret": "s",
+                       "microsoft_client_id": "m"}), [])
+
+    def test_a_name_with_a_trailing_newline_is_refused(self):
+        with self.assertRaises(ValueError):
+            providers_calendar.accounts_from_config([{"provider": "google", "name": "work\n"}])
 
     def test_a_bad_account_fails_at_construction(self):
         with self.assertRaises(ValueError):
@@ -474,7 +691,8 @@ class GoogleLoopbackTests(unittest.TestCase):
                 params = tamper(params)
 
             def hit():
-                for path in ("/favicon.ico", "/?" + urllib.parse.urlencode(params)):
+                forged = "/?" + urllib.parse.urlencode({"state": "forged", "code": "evil"})
+                for path in ("/favicon.ico", forged, "/?" + urllib.parse.urlencode(params)):
                     try:
                         urllib.request.urlopen(redirect + path, timeout=5).read()
                     except Exception:  # noqa: BLE001 - 404 and 400 are expected here
@@ -487,7 +705,8 @@ class GoogleLoopbackTests(unittest.TestCase):
             exchanged.update(code=code, verifier=verifier)
             return dict(GOOGLE_GRANT)
 
-        with mock.patch.object(calendar_login.webbrowser, "open", fake_browser), \
+        with mock.patch.object(calendar_login, "LOGIN_TIMEOUT_S", 15), \
+                mock.patch.object(calendar_login.webbrowser, "open", fake_browser), \
                 mock.patch.object(calendar_login.oauth, "google_exchange_code", fake_exchange), \
                 contextlib.redirect_stdout(io.StringIO()):
             grant = calendar_login.google_login({"google_client_id": "cid"})
@@ -499,10 +718,45 @@ class GoogleLoopbackTests(unittest.TestCase):
         self.assertEqual(exchanged["code"], "the-code")
         self.assertEqual(len(exchanged["verifier"]), 43)
 
-    def test_a_forged_state_stores_nothing(self):
-        with self.assertRaises(oauth.OAuthError) as ctx:
-            self._login(lambda p: dict(p, state="forged"))
-        self.assertEqual(ctx.exception.code, "state")
+    def test_a_forged_state_neither_wins_nor_ends_the_wait(self):
+        # Every run of `_login` sends a forged redirect before the real one.
+        # It is answered 404, and the real one is exchanged afterwards.
+        grant, exchanged = self._login()
+        self.assertEqual(exchanged["code"], "the-code")
+
+    def test_a_non_ascii_state_is_a_404_not_a_crash(self):
+        grant, _ = self._login(lambda p: p)  # the forged one above is ASCII
+        import urllib.request
+        from server import calendar_login
+
+        server = calendar_login._LoopbackServer("expected")
+        self.addCleanup(server.server_close)
+        import threading
+        threading.Thread(target=server.handle_request, daemon=True).start()
+        port = server.server_address[1]
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/?state=%C3%A9", timeout=5)
+        self.assertEqual(ctx.exception.code, 404)
+        self.assertIsNone(server.result)
+
+    def test_a_silent_connection_does_not_block_the_listener_for_ever(self):
+        import socket
+        import threading
+        from server import calendar_login
+
+        server = calendar_login._LoopbackServer("s")
+        self.addCleanup(server.server_close)
+        done = threading.Event()
+
+        def serve():
+            server.handle_request()
+            done.set()
+
+        with unittest.mock.patch.object(calendar_login._Redirect, "timeout", 0.5):
+            threading.Thread(target=serve, daemon=True).start()
+            silent = socket.create_connection(server.server_address)
+            self.addCleanup(silent.close)
+            self.assertTrue(done.wait(5), "handle_request is still blocked on a silent socket")
 
     def test_a_refused_consent_is_an_error(self):
         with self.assertRaises(oauth.OAuthError) as ctx:
@@ -511,23 +765,43 @@ class GoogleLoopbackTests(unittest.TestCase):
 
 
 class ReadOnlyGuardTests(unittest.TestCase):
-    """The build fails if the server could ever ask for, or do, a write (ADR 0017)."""
+    """The build fails if the server could ever ask for, or do, a write (ADR 0017).
 
-    FILES = ("oauth.py", "providers_calendar.py", "calendar_login.py")
+    An allowlist, not a denylist: every Google scope URL and every Graph
+    permission named anywhere in `server/*.py` must be one of the read-only
+    ones. A denylist of write scopes was the first version, and it missed
+    `calendar.events.owned`, `calendar.app.created` and `calendar.acls`.
+    """
+
+    GOOGLE_READ_ONLY = {"https://www.googleapis.com/auth/calendar.events.owned.readonly",
+                        "https://www.googleapis.com/auth/userinfo.email",
+                        "https://www.googleapis.com/auth/userinfo.profile"}
+    GRAPH_READ_ONLY = {"Calendars.ReadBasic", "User.Read"}
+    CALENDAR_MODULES = ("oauth.py", "providers_calendar.py", "calendar_login.py")
 
     def _sources(self):
-        for name in self.FILES:
-            path = SERVER_DIR / name
-            if path.exists():
-                yield name, path.read_text(encoding="utf-8")
+        for path in sorted(SERVER_DIR.glob("*.py")):
+            yield path.name, path.read_text(encoding="utf-8")
 
-    def test_no_write_scope_is_named(self):
-        # `auth/calendar` or `auth/calendar.events` with nothing after them is
-        # full or read-write access; every read-only scope continues with a dot.
-        write = re.compile(r"auth/calendar(\.events)?(?![.\w])|ReadWrite|Read\.Shared|Mail\.")
+    def test_the_modules_it_guards_exist(self):
+        for name in self.CALENDAR_MODULES:
+            self.assertTrue((SERVER_DIR / name).is_file(), f"{name} moved; point the guard at it")
+
+    def test_every_scope_named_in_the_server_is_read_only(self):
+        google = re.compile(r"https://www\.googleapis\.com/auth/[A-Za-z0-9._/-]+")
+        graph = re.compile(r"\b(?:Calendars|Mail|Contacts|Files|User|Directory|Sites|Tasks|Notes|People)"
+                           r"\.[A-Za-z]+(?:\.[A-Za-z]+)*\b")
         for name, source in self._sources():
             with self.subTest(file=name):
-                self.assertIsNone(write.search(source), f"{name} names a write or broad scope")
+                for scope in google.findall(source):
+                    self.assertIn(scope, self.GOOGLE_READ_ONLY, f"{name} names {scope}")
+                for scope in graph.findall(source):
+                    self.assertIn(scope, self.GRAPH_READ_ONLY, f"{name} names {scope}")
+
+    def test_the_guard_would_catch_a_write_scope(self):
+        google = "https://www.googleapis.com/auth/calendar.events.owned"
+        self.assertNotIn(google, self.GOOGLE_READ_ONLY)
+        self.assertNotIn("Calendars.ReadWrite", self.GRAPH_READ_ONLY)
 
     def test_the_calendar_calls_are_gets(self):
         source = (SERVER_DIR / "providers_calendar.py").read_text(encoding="utf-8")

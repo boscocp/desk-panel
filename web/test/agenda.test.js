@@ -34,6 +34,18 @@ function timed(start, end, source = 'google/personal', title = 'Standup') {
 
 const NOW = new Date(2026, 8, 29, 13, 35); // Tue 29 Sep 2026, 13:35 local
 
+// A child process, because a DST boundary belongs to a zone and the suite
+// must not depend on the zone of the machine it runs on.
+function inZone(tz, body) {
+    const format = path.join(__dirname, '..', 'js', 'format.js');
+    const code = `const f = require(${JSON.stringify(format)});\n${body}`;
+    return execFileSync(process.execPath, ['-e', code], {
+        env: Object.assign({}, process.env, { TZ: tz }),
+        encoding: 'utf8',
+    }).trim();
+}
+
+
 test('the soonest future event is the next one', () => {
     const events = [
         timed(at(2026, 9, 29, 16, 0), at(2026, 9, 29, 16, 30), 'microsoft/work', 'Review'),
@@ -42,6 +54,17 @@ test('the soonest future event is the next one', () => {
     const next = nextEvent(events, NOW);
     assert.equal(next.title, 'Standup');
     assert.equal(next.inProgress, false);
+});
+
+test('of two events in progress, the one that started last wins', () => {
+    // A 09-18 focus block must not hide the 13:30 meeting that has just
+    // started inside it -- that is the meeting you are late for.
+    const events = [
+        timed(at(2026, 9, 29, 9, 0), at(2026, 9, 29, 18, 0), 'g', 'Focus'),
+        timed(at(2026, 9, 29, 13, 30), at(2026, 9, 29, 14, 0), 'm', 'Board'),
+    ];
+    assert.equal(nextEvent(events, NOW).title, 'Board');
+    assert.equal(nextEvent(events.slice().reverse(), NOW).title, 'Board');
 });
 
 test('an event in progress wins over the next one and says so', () => {
@@ -79,11 +102,63 @@ test('an all-day event shows once no timed event is left today', () => {
 
 test('an all-day date is local midnight, not UTC midnight', () => {
     // new Date('2026-09-30') is UTC midnight -- 21:00 on the 29th in Brazil --
-    // and would put tomorrow's all-day event on today's card.
-    const tomorrow = { start: '2026-09-30', end: '2026-10-01', allDay: true, source: 's', title: 'T' };
-    const f = agendaFields({ accounts: 1, events: [tomorrow], failed: [] },
-                           new Date(2026, 8, 29, 22, 0), 'en');
-    assert.equal(f.when, 'tomorrow');
+    // and would put tomorrow's all-day event on today's card. In a child
+    // process in Sao Paulo, because in UTC -- which is what CI runs in -- the
+    // two midnights are the same one and the bug passes.
+    const out = inZone('America/Sao_Paulo', `
+        const tomorrow = { start: '2026-09-30', end: '2026-10-01', allDay: true, source: 's', title: 'T' };
+        console.log(f.agendaFields({ accounts: 1, events: [tomorrow], failed: [] },
+                                   new Date(2026, 8, 29, 22, 0), 'en').when);
+    `);
+    assert.equal(out, 'tomorrow');
+});
+
+test('an all-day event that ended at today\'s midnight is gone', () => {
+    // `end` is exclusive for all-day events too: yesterday's holiday ends at
+    // the midnight that starts today.
+    const yesterday = { start: '2026-09-28', end: '2026-09-29', allDay: true, source: 'g', title: 'Y' };
+    assert.equal(nextEvent([yesterday], NOW), null);
+});
+
+test('on a later day a timed event comes before an all-day one', () => {
+    // The all-day event starts at midnight, so by start alone it would win.
+    const allDay = { start: '2026-09-30', end: '2026-10-01', allDay: true, source: 'g', title: 'Trip' };
+    const meeting = timed(at(2026, 9, 30, 9, 0), at(2026, 9, 30, 9, 30), 'g', 'Standup');
+    assert.equal(nextEvent([allDay, meeting], NOW).title, 'Standup');
+});
+
+test('near midnight a meeting within the hour beats today\'s all-day event', () => {
+    // untilText calls a 00:10 meeting "in 20 min" at 23:50, so the card must
+    // not put the holiday that ends at midnight above it.
+    const late = new Date(2026, 8, 29, 23, 50);
+    const holiday = { start: '2026-09-29', end: '2026-09-30', allDay: true, source: 'g', title: 'Feriado' };
+    const soon = timed(at(2026, 9, 30, 0, 10), at(2026, 9, 30, 0, 40), 'g', 'Late call');
+    const f = agendaFields({ accounts: 1, events: [holiday, soon], failed: [] }, late, 'en');
+    assert.equal(f.title, 'Late call');
+    assert.equal(f.when, 'in 20 min');
+    // An hour and more out, it is tomorrow's meeting and today still has the
+    // holiday.
+    const tomorrow = timed(at(2026, 9, 30, 0, 51), at(2026, 9, 30, 1, 30), 'g', 'Later');
+    assert.equal(nextEvent([holiday, tomorrow], late).title, 'Feriado');
+});
+
+test('2026-02-31 is not quietly 3 March', () => {
+    // On 3 March the rolled-over date would cover today and be drawn.
+    const bogus = { start: '2026-02-31', end: '2026-03-04', allDay: true, source: 'g', title: 'X' };
+    assert.equal(nextEvent([bogus], new Date(2026, 2, 3, 12, 0)), null);
+});
+
+test('source decides a tie even when the titles would order it the other way', () => {
+    const a = timed(at(2026, 9, 29, 14, 0), at(2026, 9, 29, 15, 0), 'microsoft/work', 'A');
+    const b = timed(at(2026, 9, 29, 14, 0), at(2026, 9, 29, 15, 0), 'google/personal', 'B');
+    assert.equal(nextEvent([a, b], NOW).source, 'google/personal');
+});
+
+test('the title decides a tie between two events from one source', () => {
+    const a = timed(at(2026, 9, 29, 14, 0), at(2026, 9, 29, 15, 0), 'g', 'B');
+    const b = timed(at(2026, 9, 29, 14, 0), at(2026, 9, 29, 15, 0), 'g', 'A');
+    assert.equal(nextEvent([a, b], NOW).title, 'A');
+    assert.equal(nextEvent([b, a], NOW).title, 'A');
 });
 
 test('two events in the same minute always come out in the same order', () => {
@@ -108,7 +183,9 @@ test('an instant without an offset is refused rather than guessed', () => {
 
 test('untilText counts minutes up, never down to zero', () => {
     const start = new Date(2026, 8, 29, 14, 0);
-    assert.equal(untilText(start, new Date(2026, 8, 29, 13, 57, 30), 'en'), 'in 3 min');
+    // :59 and not :30 -- at the half minute rounding and ceiling agree, and
+    // only a test they disagree on can tell them apart.
+    assert.equal(untilText(start, new Date(2026, 8, 29, 13, 57, 59), 'en'), 'in 3 min');
     assert.equal(untilText(start, new Date(2026, 8, 29, 13, 59, 59), 'en'), 'in 1 min');
     assert.equal(untilText(start, new Date(2026, 8, 29, 13, 35), 'pt-BR'), 'em 25 min');
 });
@@ -126,15 +203,27 @@ test('untilText gives hours and minutes later today', () => {
 });
 
 test('untilText stays in minutes across midnight, then says tomorrow', () => {
-    const late = new Date(2026, 8, 29, 23, 50);
-    assert.equal(untilText(new Date(2026, 8, 30, 0, 10), late, 'en'), 'in 20 min');
-    assert.equal(untilText(new Date(2026, 8, 30, 9, 0), late, 'en'), 'tomorrow 09:00');
-    assert.equal(untilText(new Date(2026, 8, 30, 9, 0), late, 'pt-BR'), 'amanhã 09:00');
+    // In a zone that is not UTC, because in UTC the local calendar and the
+    // UTC one are the same and a day computed from the wrong one passes.
+    const out = inZone('America/Sao_Paulo', `
+        const late = new Date(2026, 8, 29, 23, 50);
+        console.log(f.untilText(new Date(2026, 8, 30, 0, 10), late, 'en'));
+        console.log(f.untilText(new Date(2026, 8, 30, 9, 0), late, 'en'));
+        console.log(f.untilText(new Date(2026, 8, 30, 9, 0), late, 'pt-BR'));
+        // 22:00 in Sao Paulo is 01:00 UTC the next day: a UTC calendar
+        // would call a 23:30 meeting "tomorrow".
+        console.log(f.untilText(new Date(2026, 8, 29, 23, 30), new Date(2026, 8, 29, 22, 0), 'en'));
+    `);
+    assert.deepEqual(out.split('\n'), ['in 20 min', 'tomorrow 09:00', 'amanhã 09:00', 'in 1 h 30']);
 });
 
 test('untilText names the weekday beyond tomorrow, and the date beyond a week', () => {
     assert.equal(untilText(new Date(2026, 9, 1, 9, 0), NOW, 'en'), 'Thu 09:00');
     assert.equal(untilText(new Date(2026, 9, 1, 9, 0), NOW, 'pt-BR'), 'qui 09:00');
+    // Six days out is still this week; seven is next week's Tuesday, and
+    // needs the date to not be read as today.
+    assert.equal(untilText(new Date(2026, 9, 5, 9, 0), NOW, 'en'), 'Mon 09:00');
+    assert.equal(untilText(new Date(2026, 9, 6, 9, 0), NOW, 'en'), 'Tue 06 09:00');
     assert.equal(untilText(new Date(2026, 9, 8, 9, 0), NOW, 'en'), 'Thu 08 09:00');
 });
 
@@ -142,17 +231,6 @@ test('untilText is empty rather than wrong for a bad date', () => {
     assert.equal(untilText(new Date('nope'), NOW, 'en'), '');
     assert.equal(untilText(null, NOW, 'en'), '');
 });
-
-// A child process, because a DST boundary belongs to a zone and the suite
-// must not depend on the zone of the machine it runs on.
-function inZone(tz, body) {
-    const format = path.join(__dirname, '..', 'js', 'format.js');
-    const code = `const f = require(${JSON.stringify(format)});\n${body}`;
-    return execFileSync(process.execPath, ['-e', code], {
-        env: Object.assign({}, process.env, { TZ: tz }),
-        encoding: 'utf8',
-    }).trim();
-}
 
 test('tomorrow is a calendar day across a DST change, not 24 hours', () => {
     // America/New_York leaves DST at 02:00 on Sunday 1 Nov 2026, so that day
@@ -193,6 +271,14 @@ test('agendaFields draws the countdown and the title', () => {
     assert.deepEqual(f, { title: 'Standup', when: 'em 25 min', until: null, inProgress: false, failed: null });
 });
 
+test('a blank title is no title', () => {
+    const f = agendaFields({
+        accounts: 1,
+        events: [timed(at(2026, 9, 29, 14, 0), at(2026, 9, 29, 14, 30), 's', '   ')],
+    }, NOW, 'en');
+    assert.equal(f.title, 'Meeting');
+});
+
 test('agendaFields uses the generic word when the PC withheld the title', () => {
     const f = agendaFields({
         accounts: 1,
@@ -217,14 +303,52 @@ test('agendaFields says until when in progress, and all day for an all-day event
     assert.equal(allDay.when, 'o dia todo');
 });
 
+test('an event in progress that ends on another day says which', () => {
+    const conference = timed(at(2026, 9, 28, 10, 0), at(2026, 9, 30, 10, 0), 'g', 'Conference');
+    const f = agendaFields({ accounts: 1, events: [conference] }, NOW, 'pt-BR');
+    assert.equal(f.until, 'até amanhã 10:00');
+    assert.equal(f.when, 'agora · até amanhã 10:00');
+    const trip = timed(at(2026, 9, 28, 10, 0), at(2026, 10, 1, 18, 0), 'g', 'Trip');
+    assert.equal(agendaFields({ accounts: 1, events: [trip] }, NOW, 'en').until, 'until Thu 18:00');
+});
+
 test('a failed account is named and the other one still draws', () => {
     const f = agendaFields({
         accounts: 2,
         events: [timed(at(2026, 9, 29, 14, 0), at(2026, 9, 29, 14, 30))],
-        failed: ['microsoft/work', 7],
+        failed: [{ source: 'microsoft/work', reason: 'reconnect' }],
     }, NOW, 'en');
     assert.equal(f.title, 'Standup');
     assert.equal(f.failed, 'microsoft/work: reconnect');
+});
+
+test('only a refused login asks to reconnect; an outage says unavailable', () => {
+    const f = agendaFields({
+        accounts: 3,
+        events: [],
+        failed: [
+            { source: 'google/work', reason: 'unavailable' },
+            { source: 'microsoft/work', reason: 'reconnect' },
+            { source: 'google/personal', reason: 'unavailable' },
+        ],
+    }, NOW, 'pt-BR');
+    assert.equal(f.failed,
+        'microsoft/work: reconectar · google/work, google/personal: indisponível');
+});
+
+test('a bare string in failed is read as reconnect, and junk is skipped', () => {
+    const f = agendaFields({
+        accounts: 2, events: [], failed: ['microsoft/work', 7, null, { reason: 'unavailable' }],
+    }, NOW, 'en');
+    assert.equal(f.failed, 'microsoft/work: reconnect');
+});
+
+test('with an account failing and no event, the card does not claim nothing is ahead', () => {
+    const f = agendaFields({
+        accounts: 2, events: [], failed: [{ source: 'google/personal', reason: 'unavailable' }],
+    }, NOW, 'en');
+    assert.equal(f.when, '');
+    assert.equal(f.failed, 'google/personal: unavailable');
 });
 
 test('no event at all still draws a card that says so', () => {

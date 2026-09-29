@@ -79,8 +79,12 @@ read [ADR 0017](adr/0017-calendars-are-personal-data.md) first. In short:
   `Calendars.ReadBasic`. The server refuses and discards any grant broader than that.
 - **Tokens stay on this PC**, in `server/calendar-tokens.json` beside the config: gitignored,
   mode 0600, never in `config.toml`, never on the phone.
-- **Titles are on by default, and anyone on your Wi-Fi can read them** at `/quotes`. Set
-  `calendar_show_titles = false` and the card shows only the countdown.
+  - **On Windows, clone the repository inside your own profile** (`C:\Users\<you>\...`) and
+    outside any folder OneDrive syncs. Mode bits do nothing there, so the file is exactly as
+    private as the folder it sits in.
+- **Titles are on by default, and anyone on your Wi-Fi can read them** at `/quotes`, for up to
+  your next five events. Set `calendar_show_titles = false` and the card shows only the
+  countdown.
 
 You register your own OAuth client with each provider. Nobody ships a shared one.
 
@@ -161,15 +165,17 @@ in with the account you named. The command finishes by itself.
 ### Checking it, and undoing it
 
 - `python server/server.py --check-only` names the configured accounts and the token file.
-- A failing account is named on the card (`microsoft/work: reconnect`) and in the server log,
-  with the reason. The log never contains a token, a code or a title.
+- A failing account is named on the card and in the server log, with the reason. The log never
+  contains a token, a code or a title.
+  - `microsoft/work: reconnect` means the grant is over: run the login again.
+  - `unavailable` means the provider or the network is down, and it retries by itself.
 - To disconnect, run `python server/calendar_login.py google --account personal --disconnect`.
   For Google this also revokes the grant. Microsoft has no per-app revocation endpoint, so
   remove the app yourself:
   - work or school: [My Apps](https://myapplications.microsoft.com/)
-  - personal: your Microsoft account's privacy page, under apps that can access your data
+  - personal: [account.live.com/consent/Manage](https://account.live.com/consent/Manage)
 - Google access can also be removed at
-  [myaccount.google.com/linkedapps](https://myaccount.google.com/linkedapps).
+  [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
 - Deleting `server/calendar-tokens.json` disconnects every account on this PC.
 
 ## Run it once by hand

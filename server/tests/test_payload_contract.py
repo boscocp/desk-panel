@@ -33,6 +33,7 @@ have not been taught the new key.
 """
 import datetime
 import json
+import contextlib
 import os
 import tempfile
 import unittest
@@ -151,13 +152,11 @@ def build():
     """
     import server.server as server_module
 
-    originals = []
+    with contextlib.ExitStack() as undo:
+        def patch(module, name, value):
+            undo.callback(setattr, module, name, getattr(module, name))
+            setattr(module, name, value)
 
-    def patch(module, name, value):
-        originals.append((module, name, getattr(module, name)))
-        setattr(module, name, value)
-
-    try:
         for name, market in (("providers_brapi", "quotes"),
                              ("providers_awesomeapi", "fx"),
                              ("providers_binance", "crypto")):
@@ -181,9 +180,8 @@ def build():
         patch(calendar, "fetch_google", lambda *a, **k: dict(RAW_GOOGLE))
         patch(calendar, "fetch_graph", lambda *a, **k: dict(RAW_GRAPH))
 
-        tokens = tempfile.TemporaryDirectory()
-        originals.append((tokens, "cleanup", None))
-        store = Path(tokens.name) / "calendar-tokens.json"
+        tokens = undo.enter_context(tempfile.TemporaryDirectory())
+        store = Path(tokens) / "calendar-tokens.json"
         store.write_text(json.dumps({
             "google/personal": {"refresh_token": "fixture-google"},
             "microsoft/work": {"refresh_token": "fixture-microsoft"},
@@ -207,7 +205,7 @@ def build():
         # And the moon, for the same reason and one more. `App.weather()`
         # starts a background refresh whenever the moon cache is cold, and
         # that thread resolves `providers_usno.moon_phase` *itself* -- while
-        # the `finally` below is putting the real one back. Losing that race
+        # the ExitStack is putting the real one back. Losing that race
         # costs a live request to the USNO from a test whose whole claim is
         # that it reaches no network, and `_refresh_moon_async` swallows the
         # failure, so the only symptom is a slow suite. Priming it here means
@@ -215,12 +213,6 @@ def build():
         # comes from the production branch rather than from the fallback.
         app.moon_cache.get(app.clock(), CONFIG["moon_interval_s"], usno.moon_phase)
         return {"quotes": app.quotes(), "weather": app.weather()}
-    finally:
-        for module, name, value in reversed(originals):
-            if name == "cleanup":
-                module.cleanup()
-            else:
-                setattr(module, name, value)
 
 
 def key_of(market):

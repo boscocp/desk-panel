@@ -60,9 +60,15 @@ class CalendarContract(ContractCase):
                                           "fixtures/google_events.json")
                     rows = providers_calendar.normalise_google(raw, "x")
                     for item in raw["items"]:
-                        self.assertIn("start", item, "an event has no `start`")
+                        # assertTrue, never assertIn: assertIn's message
+                        # prints the container, and the container is an event.
+                        self.assertTrue("start" in item, "an event has no `start`")
                         self.assertTrue({"date", "dateTime"} & set(item["start"]),
                                         "`start` has neither `date` nor `dateTime`")
+                    kept = [i for i in raw["items"] if i.get("status") != "cancelled"
+                            and i.get("eventType") not in providers_calendar.SKIPPED_GOOGLE_TYPES
+                            and not any(a.get("self") and a.get("responseStatus") == "declined"
+                                        for a in i.get("attendees", []))]
                 else:
                     raw = providers_calendar.fetch_graph(token, self.now, self.until)
                     self.assertIsInstance(raw.get("value"), list,
@@ -70,10 +76,15 @@ class CalendarContract(ContractCase):
                                           "fixtures/graph_calendarview.json")
                     rows = providers_calendar.normalise_graph(raw, "x")
                     for item in raw["value"]:
-                        self.assertEqual(str(item["start"].get("timeZone")).upper(), "UTC",
-                                         "Prefer: outlook.timezone=\"UTC\" was not honoured")
-                        self.assertIn("isAllDay", item)
-                # Every event the provider returned either survived or was one
-                # the filters drop; a normaliser that silently read nothing
-                # would pass the checks above.
-                self.assertLessEqual(len(rows), providers_calendar.FETCH_PER_ACCOUNT)
+                        self.assertTrue(str(item["start"].get("timeZone")).upper()
+                                        in providers_calendar.UTC_LABELS,
+                                        "Prefer: outlook.timezone=\"UTC\" was not honoured")
+                        self.assertTrue("isAllDay" in item, "an event has no `isAllDay`")
+                    kept = [i for i in raw["value"] if not i.get("isCancelled")
+                            and (i.get("responseStatus") or {}).get("response") != "declined"]
+                # Every event the filters keep must come out of the normaliser.
+                # A normaliser that silently read nothing would pass every
+                # check above; this is the one it fails. Counts only, never
+                # the events, in the message.
+                self.assertEqual(len(rows), len(kept),
+                                 f"{len(kept)} events should survive and {len(rows)} did")

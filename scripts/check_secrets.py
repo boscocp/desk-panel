@@ -113,6 +113,7 @@ FORBIDDEN_NAMES = (
     ("server/config.json", "the live config, which holds the brapi token"),
     ("server/config.toml", "the live config, which holds the brapi token"),
     ("calendar-tokens.json", "calendar refresh tokens (ADR 0017)"),
+    (".calendar-tokens.*", "a half-written calendar token file, with the same tokens in it"),
     ("*.keystore", "a signing keystore"),
     ("*.jks", "a signing keystore"),
     ("keystore.properties", "signing passwords"),

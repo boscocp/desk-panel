@@ -552,7 +552,7 @@ early. Both packaged themes do this with a one-line signature.
 ## The next meeting is yours to draw, and not yours to decide
 
 The payload's `agenda` (T9.1, [ADR 0017](adr/0017-calendars-are-personal-data.md))
-holds up to five events from the owner's calendars, already filtered on the PC —
+holds up to five events (three timed, two all-day) from the owner's calendars, already filtered on the PC —
 no declined or cancelled event, no attendee, no body, and no `title` at all when
 the owner turned titles off. Absent from an older server.
 
@@ -571,15 +571,23 @@ const fields = agendaFields(payload.agenda, new Date(), words.tag);
   never "in 25 min", so redraw from the payload you already have whenever the
   minute turns — from `tick`, never by waiting for the next payload, which
   arrives on a clock of its own.
-- **`failed` is a line, not a blank card.** It names the account whose login
-  has to be run again on the PC; the other account's meeting is still the next
-  meeting, and the rest of the panel is none of its business.
+- **`failed` is a line, not a blank card.** In the payload it is a list of
+  `{source, reason}`: `reconnect` when the login was refused or never run, so
+  only the owner can fix it on the PC, and `unavailable` when the provider or
+  the network is down and the server retries by itself. `agendaFields` turns it
+  into one string — `microsoft/work: reconectar · google/work: indisponível` —
+  and reads a bare string entry as `reconnect`. The other account's meeting is
+  still the next meeting, and the rest of the panel is none of its business.
+  With a failure and no event, `when` is empty rather than "nada à vista": the
+  meeting may be in the calendar the PC could not read.
 - **Nothing in it may wrap.** A title is whatever somebody typed into a
   calendar. Ellipsise every line, inside an element of its own rather than on
   the section: an ellipsis on the section is content wider than its box, and
   the harness reports it as a clipped card — correctly, since it cannot tell
-  one from the other. `e2e/layout/stress.js` carries the widest case: a meeting
-  in progress, a very long title and two failed accounts.
+  one from the other. `e2e/layout/stress.js` carries the widest countdown at full
+  size ("amanhã 09:00"), a very long title and the longest failure line;
+  `e2e/layout/agenda.js` carries a meeting in progress that ends tomorrow,
+  which neon draws a size smaller.
 
 ## Checking it
 

@@ -37,13 +37,17 @@ Only the **primary** calendar is read (`calendars/primary`, `/me/calendar/calend
 
 Two checks enforce this in the code, not only in this record:
 
-- **The granted scope is compared to the requested one** after every token response. Google
-  and Microsoft both return a `scope` field. A grant that carries anything else is refused, and
-  nothing is stored. The owner cannot tick an extra box on a consent screen and end up with a
-  write token on the desk.
-- **A guard test fails the build** if `server/` names a write scope (`auth/calendar"` or
-  `calendar.events"` without `readonly`, `Calendars.ReadWrite`) or makes a calendar request
-  with any method but `GET`.
+- **The granted scope is compared to the requested one** after every token response, at login
+  and at every refresh. A grant that carries anything outside a short read-only list is refused.
+  - At login, nothing is stored, and a broad Google grant is revoked on the spot.
+  - At a refresh, the stored token is deleted.
+  - The owner cannot tick an extra box on a consent screen and end up with a write token on the
+    desk.
+  - A response with no `scope` field means the scope requested (RFC 6749 section 5.1, and
+    Microsoft documents the same). That request is read-only by construction.
+- **A guard test fails the build** unless every Google scope URL and every Graph permission
+  named anywhere in `server/*.py` is on the read-only allowlist. It also fails if a calendar
+  request uses any method but `GET`.
 
 ### Credentials stay on the PC, in their own file
 
@@ -73,7 +77,8 @@ Two checks enforce this in the code, not only in this record:
 
 ### What the panel receives
 
-The server sends at most three upcoming events, each with `start`, `end`, `allDay`, `source`
+The server sends at most five upcoming events, three with a time and two all-day, each with
+`start`, `end`, `allDay`, `source`
 (`google/personal`), and `title`. Nothing else leaves the server: no attendees, location, body,
 link, organiser or event id.
 
@@ -84,7 +89,8 @@ is never on the LAN at all.
 calendar with whatever title the sender chose. So a title is treated as hostile input all the
 way down:
 
-- On the server, control characters are stripped and the title is cut to 80 characters.
+- On the server, every control and format character is stripped: C0 and C1, bidi overrides,
+  and zero-width characters. The title is then cut to 80 characters.
 - `DataPayload` escapes the whole payload for the script it is injected into, as it always has.
 - Both themes write the title with `textContent`, never as markup.
 
@@ -92,8 +98,8 @@ An invitation can put words on the panel, and it cannot put anything else there.
 
 **Titles are shown by default** (`calendar_show_titles = true`). That is the owner's decision,
 asked for explicitly on 2026-09-29, and it has this cost, which the example config states
-beside the key: **anyone on the same Wi-Fi can read the titles of the owner's next three
-meetings.** Set it to `false` and the title is removed on the server, before the payload is
+beside the key: **anyone on the same Wi-Fi can read the titles of the owner's next five
+events.** Set it to `false` and the title is removed on the server, before the payload is
 built, so the panel says `in 25 min` and the LAN learns only that there is a meeting.
 
 ### What a web page can get, and why it now gets nothing
@@ -113,10 +119,18 @@ URL in the documentation does too.
 ### Failure is loud, per account, and never stale
 
 A price from five minutes ago is still useful, and a meeting from five minutes ago may be one
-already missed. So the calendar is the one upstream whose failure is **not** served stale. An
-account that fails costs its own events, the payload names it in `failed`, and the card says
-which one needs reconnecting. The server log names the provider and the account, never the
-token, the authorisation code or a title.
+already missed. So the calendar is the one upstream whose failure is **not** served stale.
+
+- An account that fails costs its own events, and only its own. That holds for any exception,
+  not just the expected ones.
+- The payload names the account in `failed`, with a reason:
+  - `reconnect`: the grant is over, and `calendar_login.py` fixes it.
+  - `unavailable`: the provider or the network is down, and the next cycle retries by itself.
+- The card says which. The server log names the provider and the account, never the token,
+  the authorisation code or a title.
+- **A refused token is not sent again.** After an auth error, that token is remembered as dead,
+  and no request goes out until the store holds a different one. A provider that is merely
+  down is retried at the next cycle.
 
 ### What the owner has to know before connecting a work account
 
@@ -137,12 +151,35 @@ Microsoft's work and school accounts belong to a tenant, and the tenant decides.
   the owner clicks past the unverified-app warning once.
 - **A Google token can still die silently.** Six months unused, a revocation, or a hundredth
   newer token for the same client all invalidate it. The panel says `reconnect` and the log
-  names the account; nothing retries a refresh that has been refused.
-- **Revoking is documented, not automated.** Google: myaccount.google.com/linkedapps, or
-  `POST https://oauth2.googleapis.com/revoke`. Microsoft work or school:
-  myapplications.microsoft.com. Microsoft personal: the account's privacy settings, "Apps and
-  services that can access your data". Deleting `server/calendar-tokens.json` disconnects every
-  account on that PC.
+  names the account.
+- **The fixtures are written from the documentation, not recorded.** No live response from
+  either provider has been captured, because that needs the owner's account. The shapes are a
+  premise until `contract_calendar.py` runs green once. Two defences keep a wrong premise loud
+  rather than silent:
+  - a Graph instant labelled with any zone but UTC fails the account;
+  - the contract test fails if the normaliser drops an event the filters would have kept.
+- **On Windows the token file is as private as the folder the repository is cloned into.**
+  Mode bits do nothing there.
+  - Inside the user's profile (`C:\Users\<name>\...`), only that user can read the file.
+  - At `C:\desk-panel` it inherits the drive root's ACL.
+  - In a folder OneDrive syncs, the file goes to the cloud.
+  - The setup guide says where to clone.
+- **The Microsoft client id can be borrowed.** A public, multi-tenant registration with public
+  client flows on is what lets one registration serve a personal and a work account. Anyone can
+  start a device code flow with its id and send the code to someone else, who would see the
+  owner's app name on the consent screen. The victim's calendar is what is at risk, not the
+  owner's, and the scope is still `Calendars.ReadBasic`.
+  - An owner with only a personal account can register for personal accounts only, which
+    narrows this.
+  - The id is in no committed file.
+- **Revoking is partly automated.**
+  - `calendar_login.py --disconnect` revokes a Google grant (`POST
+    https://oauth2.googleapis.com/revoke`) and says whether Google agreed. Access can also be
+    removed at myaccount.google.com/permissions.
+  - Microsoft has no per-app revocation endpoint. The owner removes the app at
+    myapplications.microsoft.com (work or school) or at account.live.com/consent/Manage
+    (personal; the page behind that URL was not checked without a session).
+  - Deleting `server/calendar-tokens.json` disconnects every account on that PC.
 - **One APK rebuild.** `DataPayload.merge` rebuilds the payload key by key, so `agenda` needs a
   line there once. After that, which accounts, whether titles are shown and how far ahead to
   look are all `config.toml`.

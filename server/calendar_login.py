@@ -38,8 +38,8 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from server import oauth, providers_calendar  # noqa: E402
-from server.server import (SCRIPT_DIR, ConfigError, config_search_paths,  # noqa: E402
-                           load_config, tokens_path_for)
+from server.server import (SCRIPT_DIR, ConfigError, _allow_reuse_address,  # noqa: E402
+                           config_search_paths, load_config, tokens_path_for)
 
 LOGIN_TIMEOUT_S = 300
 
@@ -57,22 +57,44 @@ def parse_args(argv):
     return parser.parse_args(argv)
 
 
+class _LoopbackServer(http.server.HTTPServer):
+    """127.0.0.1 only, one request at a time, and no SO_REUSEADDR on Windows.
+
+    On Windows that flag lets a second process bind the same port and take
+    the connection, which is the reason `server.Server` turns it off too.
+    """
+
+    allow_reuse_address = _allow_reuse_address(os.name)
+
+    def __init__(self, state):
+        super().__init__(("127.0.0.1", 0), _Redirect)
+        self.expected_state = state
+        self.result = None
+
+
 class _Redirect(http.server.BaseHTTPRequestHandler):
     """The one request Google's redirect makes. Records its query and says so."""
 
-    result = None
+    # Per connection. Without it a connection that sends nothing (a
+    # browser's speculative preconnect is enough) blocks `handle_request`
+    # for ever, and the login deadline is never checked.
+    timeout = 10
 
     def do_GET(self):
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
-        if "state" not in query:
-            # A browser's favicon request, or anything else that is not the
-            # redirect: answered, and the wait goes on.
+        state = query.get("state", [""])[0]
+        if not secrets.compare_digest(state.encode("utf-8"),
+                                      self.server.expected_state.encode("utf-8")):
+            # A favicon request, or any local process guessing at the port:
+            # answered, and the wait goes on. Only the redirect carrying the
+            # state this run generated can end it, so a forged one cannot
+            # abort the login either.
             self.send_response(404)
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        type(self).result = {k: v[0] for k, v in query.items()}
-        ok = "code" in type(self).result
+        self.server.result = {k: v[0] for k, v in query.items()}
+        ok = "code" in self.server.result
         body = ("Connected. You can close this tab." if ok
                 else "Not connected. See the terminal.").encode("utf-8")
         self.send_response(200 if ok else 400)
@@ -93,8 +115,7 @@ def google_login(config, open_browser=True):
     verifier, challenge = oauth.pkce_pair()
     state = secrets.token_urlsafe(24)
 
-    _Redirect.result = None
-    server = http.server.HTTPServer(("127.0.0.1", 0), _Redirect)
+    server = _LoopbackServer(state)
     server.timeout = 1
     redirect_uri = f"http://127.0.0.1:{server.server_address[1]}"
     url = oauth.google_auth_url(client_id, redirect_uri, challenge, state)
@@ -104,16 +125,14 @@ def google_login(config, open_browser=True):
         if open_browser:
             webbrowser.open(url)
         deadline = time.monotonic() + LOGIN_TIMEOUT_S
-        while _Redirect.result is None:
+        while server.result is None:
             if time.monotonic() > deadline:
                 raise oauth.OAuthError("timeout", "no redirect within five minutes")
             server.handle_request()
     finally:
         server.server_close()
 
-    result = _Redirect.result
-    if not secrets.compare_digest(result.get("state", ""), state):
-        raise oauth.OAuthError("state", "the redirect's state does not match; nothing stored")
+    result = server.result
     if "error" in result:
         raise oauth.OAuthError(result["error"], f"google consent: {result['error']}")
     if "code" not in result:
@@ -157,12 +176,12 @@ def main(argv=None):
                 oauth.google_revoke(token)
                 print("Google revoked the grant.")
             except oauth.OAuthError as exc:
-                print(f"Google did not confirm the revocation ({exc.code}); "
-                      f"remove it at https://myaccount.google.com/linkedapps", file=sys.stderr)
+                print(f"Google did not revoke it ({exc.code}); remove the app yourself at "
+                      f"https://myaccount.google.com/permissions", file=sys.stderr)
         elif args.provider == "microsoft":
             print("Microsoft has no endpoint to revoke one app's token. Remove the app at "
-                  "https://myapplications.microsoft.com (work or school) or in your "
-                  "account's privacy settings (personal).")
+                  "https://myapplications.microsoft.com (work or school) or "
+                  "https://account.live.com/consent/Manage (personal).")
         store.delete(account)
         print(f"{account}: token removed from {store.path}")
         return 0
