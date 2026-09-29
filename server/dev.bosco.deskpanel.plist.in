@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The macOS carrier for the login signal (T3.10). A template: install_agent.sh
+  substitutes @PYTHON@, @SERVER_PY@, @CONFIG@ and @LOG@ with absolute paths,
+  XML-escaped, and writes the result to
+  ~/Library/LaunchAgents/dev.bosco.deskpanel.plist.
+
+  Every key below is load-bearing for the same reason every line of
+  desk-panel.service.in is: the server answering has to mean a human is logged
+  in at this Mac's screen (docs/adr/0010-login-signal-is-session-scoped.md).
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>dev.bosco.deskpanel</string>
+
+	<!--
+	  launchd runs no shell, so every element is one argv entry and every path
+	  is absolute. A path with a space in it is therefore safe here, which it
+	  is not in a systemd ExecStart.
+	-->
+	<key>ProgramArguments</key>
+	<array>
+		<string>@PYTHON@</string>
+		<string>-u</string>
+		<string>@SERVER_PY@</string>
+		<string>--config</string>
+		<string>@CONFIG@</string>
+	</array>
+
+	<key>RunAtLoad</key>
+	<true/>
+
+	<!--
+	  Restart on a crash, never on a clean exit: a clean exit is somebody
+	  stopping it, and restarting then would fight them.
+	-->
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+
+	<!--
+	  **The invariant.** Unset, an agent also loads in the LoginWindow and
+	  Background sessions (the login screen and SSH), and
+	  the panel lights up for an empty room. Aqua is the logged-in GUI session
+	  and nothing else.
+	-->
+	<key>LimitLoadToSessionType</key>
+	<string>Aqua</string>
+
+	<!--
+	  Interactive keeps App Nap and the background QoS clamp off a long-lived
+	  listener; without it a /ping can take seconds to answer while the Mac is
+	  idle, and the phone's short timeout reads that as "logged out".
+	-->
+	<key>ProcessType</key>
+	<string>Interactive</string>
+
+	<key>StandardOutPath</key>
+	<string>@LOG@</string>
+	<key>StandardErrorPath</key>
+	<string>@LOG@</string>
+</dict>
+</plist>
