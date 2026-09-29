@@ -35,9 +35,9 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from server import (oauth, providers_awesomeapi, providers_binance,  # noqa: E402
-                    providers_brapi, providers_calendar, providers_openmeteo,
-                    providers_usno)
+from server import (market_hours, oauth, providers_awesomeapi,  # noqa: E402
+                    providers_binance, providers_brapi, providers_calendar,
+                    providers_openmeteo, providers_usno)
 from server import actions as actions_module  # noqa: E402
 from server.config_format import ConfigError, format_for_path, merge, parse  # noqa: E402
 from server.upstream import UpstreamError  # noqa: E402
@@ -120,6 +120,10 @@ DEFAULT_CONFIG = {
     # generous: it costs four requests a day across two providers.
     "history_interval_s": 21600,
     "history_days": 30,
+    # When brapi can have a new B3 price. "auto" follows the exchange's two
+    # seasons -- it moves its close with US daylight saving -- plus brapi's
+    # delay; see market_hours.py. Outside it the quote cache is not refreshed.
+    "b3_hours": "auto",
     "night_start": "22:00",
     "night_end": "07:00",
     # Which theme renders the panel. Read by T6.7: it rides the /quotes
@@ -512,6 +516,9 @@ class App:
             config.get("calendar_accounts"))
         providers_calendar.check_config(config)
         self.wall_clock = wall_clock or (lambda: datetime.datetime.now(datetime.timezone.utc))
+        # Validated here like the coordinates: a malformed window is a startup
+        # failure, not a gate that silently never opens.
+        self.b3_hours = market_hours.hours_from_config(config)
         self.tokens = oauth.TokenStore(tokens_path or SCRIPT_DIR / TOKENS_FILENAME)
         self.credentials = {
             f"{provider}/{name}": oauth.Credentials(
@@ -562,7 +569,11 @@ class App:
         payload = {}
         stale = False
         for market, produce in producers.items():
-            rows, market_stale = self.market_caches[market].get(now, ttl, produce)
+            cache = self.market_caches[market]
+            if self._held_until_the_open(market, cache.value):
+                rows, market_stale = cache.value, cache.stale
+            else:
+                rows, market_stale = cache.get(now, ttl, produce)
             rows = rows if rows is not None else []
 
             # Before the partial-market check below, which reads it. Assigned
@@ -606,6 +617,11 @@ class App:
             ]
             stale = stale or market_stale
         payload["stale"] = stale
+        # Whether B3's session is running, for the CLOSED label beside the B3
+        # title. Decided here and not on the phone, unlike `night`: the window
+        # is the exchange's, in Sao Paulo, and follows US daylight saving --
+        # a rule the page would have to be rebuilt to learn (market_hours.py).
+        payload["b3Open"] = market_hours.exchange_open(self.wall_clock())
         # Not a market fact, and it rides here anyway: /quotes and /weather are
         # the only two things the phone asks for, DataPoller merges them into
         # the one payload the page gets, and a third endpoint would be a third
@@ -720,10 +736,28 @@ class App:
         """
         history = {}
         for market, cache in self.history_caches.items():
-            if not cache.fresh_at(now, self._history_ttl(market)):
+            if self._held_until_the_open(market, cache.value):
+                pass
+            elif not cache.fresh_at(now, self._history_ttl(market)):
                 self._refresh_history_async(market)
             history[market] = cache.value or {}
         return history
+
+    def _held_until_the_open(self, market, value):
+        """Whether B3's rows are complete and B3 cannot have moved since.
+
+        Only brapi's market: FX trades around the clock on weekdays and crypto
+        never stops. Only a *complete* answer is held -- a cold start, or a
+        ticker a 429 dropped, is fetched as before, so a PC that logs in on a
+        Saturday still shows Friday's close and no row stays missing all
+        night. Everything the panel polls in between is served from what is
+        on hand, which costs brapi nothing.
+        """
+        if market != "quotes" or not value:
+            return False
+        if len(value) < len(self.config.get("quotes", [])):
+            return False
+        return not market_hours.is_open(self.wall_clock(), self.b3_hours)
 
     def _history_ttl(self, market):
         """Six hours once every row has a line, minutes while any is missing.
@@ -1459,6 +1493,7 @@ def main(argv=None):
     # start, after the launcher had already called the config good.
     try:
         providers_openmeteo.coords_from_config(config)
+        market_hours.hours_from_config(config)
     except ValueError as exc:
         print(exc, file=sys.stderr)
         sys.exit(1)

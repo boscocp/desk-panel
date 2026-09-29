@@ -185,6 +185,27 @@ history_interval_s = 21600
 # covers this; the other two providers take the count as written.
 history_days = 30
 
+# When brapi is asked for B3 prices at all. Outside this window the panel
+# keeps the prices it already has -- Friday's close all weekend -- and spends
+# nothing, which is most of the month: three tickers at 600s cost 3,100 to 3,500
+# requests a month inside it, against 12,960 around the clock.
+#
+#   "auto"              B3's own session, weekdays, Sao Paulo time. It opens at
+#                       10:00 and closes at 17:00 while the US is on daylight
+#                       saving (second Sunday of March to first Sunday of
+#                       November) and at 18:00 the rest of the year -- B3
+#                       follows the US clock, not Brazil's. Plus 45 minutes,
+#                       because the free plan serves quotes ~30 minutes late.
+#   ["10:00", "18:45"]  a fixed window, weekdays, Sao Paulo time, all year.
+#                       For the after-market, or a paid plan with less delay.
+#   []                  never hold back: refresh every quotes_interval_s.
+#
+# Holidays are not known, so a holiday costs an ordinary weekday. A cold start
+# or a missing ticker is fetched whatever the hour, so the card is never empty
+# for want of the window. The CLOSED label beside the B3 title always follows
+# the exchange's own session, whatever this says.
+b3_hours = "auto"
+
 
 # ---------------------------------------------------------------------------
 # Presentation

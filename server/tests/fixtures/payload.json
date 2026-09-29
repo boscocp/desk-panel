@@ -39,6 +39,7 @@
       ],
       "failed": []
     },
+    "b3Open": false,
     "crypto": [
       {
         "changePct": 1.01,

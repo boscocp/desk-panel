@@ -24,6 +24,7 @@
   "moon_interval_s": 21600,
   "history_interval_s": 21600,
   "history_days": 30,
+  "b3_hours": "auto",
   "night_start": "22:00",
   "night_end": "07:00",
   "theme": "neon",

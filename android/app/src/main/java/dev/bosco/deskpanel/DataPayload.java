@@ -27,7 +27,9 @@ import org.json.JSONObject;
  *  theme:  string,
  *  language: string,
  *  night:  {start, end},
- *  actions: [id, ...]}
+ *  actions: [id, ...],
+ *  agenda: {...},
+ *  b3Open: bool}
  * </pre>
  *
  * <p>{@code battery} is added afterwards by {@link #withBattery}, because it
@@ -184,6 +186,15 @@ public final class DataPayload {
             // the AGENDA card reserved -- the same thing it does for a PC with
             // no calendar connected.
             payload.put("agenda", quotes.optJSONObject("agenda"));
+
+            // Whether B3's session is running, for the CLOSED label beside the
+            // B3 title. Decided on the PC (server/market_hours.py), because the
+            // window follows US daylight saving and the phone has no business
+            // knowing that. Absent for an older server, and the page then draws
+            // no label rather than guessing.
+            if (quotes.has("b3Open")) {
+                payload.put("b3Open", quotes.optBoolean("b3Open", true));
+            }
 
             return escapeForScript(payload.toString());
         } catch (JSONException malformed) {

@@ -1173,6 +1173,15 @@
         agenda = payload.agenda;
         renderAgenda(new Date());
         els.stale.hidden = !payload.stale;
+        // The CLOSED label beside the B3 title, drawn by #quotes::after from
+        // this attribute for the reason the title is drawn by ::before: the
+        // section's own children are the list, refilled on every payload.
+        // Only an explicit false: an older server sends no key at all.
+        if (payload.b3Open === false) {
+            els.lists.quotes.section.setAttribute('data-status', words.marketClosed);
+        } else {
+            els.lists.quotes.section.removeAttribute('data-status');
+        }
     }
 
     function tick(now, root) {

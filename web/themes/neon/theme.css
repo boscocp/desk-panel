@@ -535,6 +535,31 @@ body {
     margin-bottom: 3px;
 }
 
+/* CLOSED, beside the B3 title while the exchange is shut. theme.js writes
+ * data-status only then, so the rule has nothing to draw the rest of the time.
+ * Absolute rather than a flex item: the card is a column, and a second item
+ * would take a row of its own and push the list down. On the title's line,
+ * right after it -- the title is "B3" in every language, so 3em clears it.
+ * Dim and unboxed, unlike STALE: a shut market is the normal state for most
+ * of the week, not something wrong. */
+#quotes {
+    position: relative;
+}
+
+#quotes[data-status]::after {
+    content: attr(data-status);
+    position: absolute;
+    top: 7px;
+    left: calc(11px + 3em);
+    font-size: 15px;
+    line-height: 1.2;
+    letter-spacing: 0.14em;
+    color: var(--accent-dim);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 0 5px;
+}
+
 /* The four words used to be here. They are in the language tables in
  * web/js/format.js now (T6.11) and reach this file as data-title.
  *

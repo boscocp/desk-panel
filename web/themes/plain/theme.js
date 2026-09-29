@@ -439,6 +439,15 @@
         agenda = payload.agenda;
         renderAgenda(new Date());
         els.stale.hidden = !payload.stale;
+        // The CLOSED label beside the B3 heading. The loop above rewrote the
+        // heading's text, which took any earlier label with it, so this only
+        // ever adds. Only an explicit false: an older server sends no key.
+        const b3 = root.querySelector('#quotes .col-title');
+        if (b3 && payload.b3Open === false) {
+            const tag = el('span', null, 'market-closed');
+            tag.textContent = words.marketClosed;
+            b3.append(' ', tag);
+        }
     }
 
     function tick(now, root) {

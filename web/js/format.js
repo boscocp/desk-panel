@@ -345,6 +345,8 @@ const LANGUAGES = {
         // market is called in Portuguese anyway, which is exactly what this
         // badge means.
         stale: 'DEFASADO',
+        // Beside the B3 title while the exchange is shut (server/market_hours.py).
+        marketClosed: 'FECHADO',
         // "na bateria" rather than "desconectado", which in Portuguese reads
         // first as a network having dropped -- the wrong alarm entirely on a
         // panel whose other states are about the PC being away.
@@ -435,6 +437,7 @@ const LANGUAGES = {
             'waning-crescent': 'Waning crescent',
         },
         stale: 'STALE',
+        marketClosed: 'CLOSED',
         unplugged: 'unplugged',
         // SCHEDULE, not AGENDA: in English an agenda is the list of items
         // for one meeting, and what this card will show is the next one.

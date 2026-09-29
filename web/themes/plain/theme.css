@@ -113,6 +113,13 @@ body {
 
 /* A real element, not ::before content. Half of what this theme exists to
  * show is that a theme decides what a card is made of. */
+.market-closed {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: #6A6A6A;
+}
+
 .col-title {
     flex: 0 0 auto;
     margin: 0 0 4px 0;
