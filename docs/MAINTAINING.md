@@ -138,9 +138,10 @@ root with an authenticated `gh` that has admin on it.
 
 ### Labels
 
-One per area of the codebase, plus the two the contribution guide promises. The third it
-promises is GitHub's default `good first issue`, kept by that exact name because it is the one
-GitHub's newcomer search surfaces; a hyphenated twin was created once and deleted for that reason.
+One per area of the codebase, plus the two the repository uses by name: `device-report`, which
+the device-report form applies, and `needs-adr`, which `CONTRIBUTING.md` names. Newcomer issues
+use GitHub's default `good first issue`, kept by that exact name because it is the one GitHub's
+newcomer search surfaces; a hyphenated twin was created once and deleted for that reason.
 `--force` makes each line idempotent.
 
 ```bash

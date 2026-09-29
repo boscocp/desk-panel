@@ -73,6 +73,10 @@ python server/server.py
 enabled, and then request lines as they arrive. Leave it running and visit
 <http://127.0.0.1:8777/quotes> in a browser.
 
+The example turns on the two mute buttons (`actions`), so anyone on this network can mute this
+machine's speakers and microphone. That is the point on a desk you own. On a network you do not
+control, set `actions = []` ([ADR 0015](adr/0015-the-panel-can-act-on-the-pc.md)).
+
 `config.example.toml` is the documentation for the configuration — every key, its default and the
 values that actually work, in the file itself. Weather needs no credential. Quotes want a free
 token from the provider named in that file; without one, that route answers with what it can and
