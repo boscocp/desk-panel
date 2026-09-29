@@ -350,3 +350,15 @@ androidComponents {
         }
     }
 }
+
+// The JVM tests read two files the server writes (Contract.java): the payload
+// description and the action ids. Gradle does not know that, so after a fixture
+// changed it called the tests up to date and skipped them, a green check that
+// had not run. Found in wave 38, when `agenda` joined the payload. Declared as
+// inputs, a changed fixture reruns the suite.
+tasks.withType<Test>().configureEach {
+    inputs.files(
+        rootProject.file("../server/tests/fixtures/payload.json"),
+        rootProject.file("../server/tests/fixtures/action_ids.json"),
+    ).withPropertyName("serverFixtures")
+}
