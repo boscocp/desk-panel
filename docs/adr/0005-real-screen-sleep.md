@@ -3,6 +3,7 @@
 Status: accepted, primary mechanism **validated on the device** · 2026-09-13, validated
 2026-09-19
 Supersedes an earlier draft of this project that specified dim-to-black as the primary approach.
+Amended by [0012](0012-thermal-screen-cutoff.md), which reuses brightness zero for thermal blanking.
 Amended by [ADR 0014](0014-poll-loop-outlives-the-screen.md), which decides who stays awake to
 enforce this policy once the Activity is allowed to stop.
 
@@ -12,7 +13,8 @@ enforce this policy once the Activity is allowed to stop.
 Note 10, MIUI 14 / Android 12, four consecutive offline-online cycles took the display from
 `mWakefulness=Dozing` to `Awake` with nobody touching the phone, and `screen=sleep` /
 `screen=wake` were logged once each per transition. `screenBrightness` was left at `-1f`
-throughout; nothing in the app dims anything any more. `docs/DEVICE-CARE.md` may keep asserting
+for the PC-driven transition. Brightness is still set, but only by the thermal cutoff (ADR 0012)
+and the night profile (T6.4). `docs/DEVICE-CARE.md` may keep asserting
 the behaviour as fact.
 
 Two conditions, both outside the code, and the panel fails silently without either:
@@ -29,8 +31,9 @@ Both are now steps in `docs/INSTALL-PHONE.md`. The device PIN turned out not to 
 keyguard was up (`isKeyguardLocked=true`) in every successful cycle, and the permission — not
 the lock — is what decides it.
 
-The fallback below is kept as documentation of a road not taken. Nothing in the code implements
-it any more, so reinstating it means writing it, not flipping a flag.
+The fallback below is kept as documentation of a road not taken for the PC-offline case, which
+nothing in the code uses. ADR 0012 reuses brightness zero for thermal blanking, so the mechanism
+exists; making it the PC-offline path again would still mean wiring it, not flipping a flag.
 
 ## Context
 

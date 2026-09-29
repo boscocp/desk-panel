@@ -2,8 +2,8 @@
 <!--
   Cleartext HTTP is permitted for the PC and for nothing else.
 
-  The panel talks to the PC server over plain http on the LAN, so exactly one
-  host needs an exemption. Granting it through a base-config instead would open
+  The panel talks to the PC servers over plain http on the LAN, so the listed
+  hosts need an exemption, one <domain> each (ADR 0016). Granting it through a base-config instead would open
   cleartext to every address on the internet, and setting the manifest-wide
   cleartext flag on <application> does the same; both are forbidden here. See
   android/CLAUDE.md and T4.1, whose acceptance greps for precisely that mistake.

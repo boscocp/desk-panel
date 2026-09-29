@@ -175,7 +175,7 @@ not to write something.**
   timeout later, because invariant 3 forbids the app from owning that timer. Shortening it is a
   device setting, not an app change.
 - The markers still fire at the moment of the decision, not at the moment the display obeys, so
-  the E2E suite's 20s allowances are unaffected — `screen=sleep` lands within the poll interval
+  the 20s allowances in `docs/TESTING.md`'s scenarios are unaffected — `screen=sleep` lands within the poll interval
   and the panel goes dark up to a display timeout later. What that separation costs is the
   meaning of the marker: `screen=sleep` says the app asked, never that the panel went out.
   Proving it went out is eyes-only and stays in T4.4's manual check.

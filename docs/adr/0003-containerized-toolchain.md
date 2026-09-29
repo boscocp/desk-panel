@@ -1,6 +1,7 @@
 # 0003 — Containerised Android toolchain
 
-Status: accepted · 2026-09-13
+Status: accepted · 2026-09-13 · context amended by [0010](0010-login-signal-is-session-scoped.md),
+which made Linux and macOS hosts too; the `adb` question settled by T7.2
 
 ## Context
 
@@ -40,8 +41,9 @@ through Docker Desktop is slow enough to be annoying.
 - **No IDE.** No debugger, no layout inspector. Acceptable for an app this size; VS Code with
   Java extensions covers editing.
 - `adb` talking to the phone from inside a container is not something the Android docs cover.
-  Wireless debugging is tried first; the fallback is extracting `platform-tools` into
-  `tools/` in the repo — a zip, no installer, and deleting the folder removes it completely.
+  T7.2 settled it: `adb` stays on the host, and the recommendation is extracting
+  `platform-tools` into `tools/` in the repo — a zip, no installer, and deleting the folder
+  removes it completely.
 
 ## Alternatives considered
 

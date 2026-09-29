@@ -1,6 +1,7 @@
 # 0013 — Two kinds of local configuration, and the line between them
 
-Status: accepted · 2026-09-16 · amended 2026-09-20 (T3.12)
+Status: accepted · 2026-09-16 · amended 2026-09-20 (T3.12) · amended by
+[0016](0016-more-than-one-pc.md), which makes `PC_IP` a list
 
 **Amendment, T3.12.** The runtime side is now `server/config.toml`, and `config.json` is still
 read so that no existing install breaks. Only the file's *format* changed: the line this record
@@ -39,7 +40,7 @@ The obvious fix is a `.env`. The obvious fix is also how a token ends up inside 
 | Ends up | baked into the APK | on the PC only |
 | Changing it needs | a rebuild and a reinstall | a server restart |
 | Committed twin | `.env.example` | `server/config.example.toml` |
-| Holds | the PC's LAN address, signing passwords, the panel's orientation | the brapi token, tickers, city, intervals |
+| Holds | the PCs' LAN addresses (a list, ADR 0016), signing passwords, the panel's orientation | the brapi token, tickers, city, intervals |
 
 **API tokens never go in `.env`.** Not the brapi token, not any future one. The phone never talks
 to a data provider — it talks to the PC, and the PC talks to the provider
@@ -52,7 +53,7 @@ that habit is right everywhere except here.
 `server/CLAUDE.md`: *if a change to what the panel shows requires rebuilding the APK, the design
 has been violated*. So anything the owner might want to change — tickers, city, intervals, the
 night window — is runtime config by definition. `.env` is only for things that cannot be
-anything else: the address the APK must be allowed to reach in cleartext, and the key it is
+anything else: the addresses the APK must be allowed to reach in cleartext, and the key it is
 signed with.
 
 **`PANEL_ORIENTATION` joined later (2026-09-19, T4.4)** and is worth recording as a test of the
@@ -72,7 +73,7 @@ signing values fit the definition exactly. The `.env.example` names the keys wit
 `.gitignore` covers `.env` as it already covers `keystore.properties`.
 
 **The committed placeholder stays.** `network_security_config.xml` keeps `192.168.1.100` in git
-and Gradle substitutes the real address at build time from `.env`. T7.3's pre-public sweep,
+and Gradle substitutes one `<domain>` per address from `.env` at build time. T7.3's pre-public sweep,
 which requires that no LAN address other than the placeholder appears in committed non-doc
 source, keeps working unchanged — and now it is structurally true rather than true by the
 operator remembering.

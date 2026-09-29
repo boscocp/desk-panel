@@ -64,10 +64,10 @@ invariant hold regardless, which matters because linger is commonly on for unrel
 (podman, pipewire, user timers). The acceptance proves the stronger property directly: the unit
 is not in the transitive closure of `default.target`.
 
-**Support tiers.** Windows is primary and verified. Linux is supported and verified on the
-development machine. macOS ships written but unverified — the task is `blocked` until there is
-a Mac to run it on, because a task file whose acceptance can never execute is a task file that
-lies.
+**Support tiers.** All three launchers are written and their shape checks pass on real
+hardware: Windows, Linux, and macOS since wave 34 (`server/install_agent.sh`). Each is still
+`blocked` on its behaviour half, a logout watched from a second device, because a task file whose
+acceptance has not executed is a task file that lies.
 
 ## Consequences
 
