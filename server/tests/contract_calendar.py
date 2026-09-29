@@ -16,7 +16,6 @@ is the kind of file that gets pasted into an issue.
 """
 import datetime
 import os
-import unittest
 
 from server import oauth, providers_calendar
 from server.server import SCRIPT_DIR, config_search_paths, load_config, tokens_path_for
