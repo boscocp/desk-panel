@@ -28,10 +28,13 @@ extended from one desk chair to two.
 - **Online means some host answered.** `PcHosts` (plain Java, JVM-tested) keeps the list and the
   host that answered last. Each cycle asks that host first and stops at the first 200. While a PC
   is up, a cycle is one probe, as before. Offline, a cycle asks every host, so its worst case is
-  N × 3 s.
+  N × 3 s. N is capped at 3, by the build and by `PcHosts`, because the dormant probe runs
+  under a 10 s wake lock.
 - **Data and presses go to the host that answered last.** Both halves of a data cycle read it
   once, so a payload never pairs one PC's tickers with the other's city. Each PC keeps its own
-  `server/config.toml`, and when the panel moves between PCs, what it shows moves too.
+  `server/config.toml`, and when the panel moves between PCs, what it shows moves too, at the
+  next data refresh, up to a minute later. Until then, a button drawn from the old PC's payload
+  acts on the new PC.
 - **No flapping.** With both PCs on, the panel stays on the one it has until that one stops
   answering. A move is logged as plain text (`pc answered at <ip>`), not as a marker, because
   the state did not change.
@@ -41,8 +44,8 @@ extended from one desk chair to two.
 - The screen sleeps only when **every** listed PC is away, which is the owner's intent. Anyone
   reading `state=online` in the log should now read it as "some listed PC".
 - An offline cycle lasts longer with more hosts, and the dormancy ladder (T5.6) spaces offline
-  cycles out, so the battery cost grows with the number of hosts, not with time. Two is the case
-  measured; nothing tries to support ten.
+  cycles out, so the battery cost grows with the number of hosts, not with time. `ping=` is one
+  line per cycle, so T5.3's count is of cycles and requests are that times N.
 - Every listed PC needs its own static DHCP reservation. One drifting address is no longer
   "offline for ever", but it is a PC the panel silently stops following, which is harder to
   notice.

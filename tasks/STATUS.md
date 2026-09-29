@@ -199,6 +199,24 @@ and the first line of each file says so.
 | T9.1 | **The next meeting, under the clock** | todo | Google Calendar and Microsoft Outlook merged, the soonest event under the clock in the `#shortcuts` strip, between T8.2's two buttons. Blocked behind T8.2 for a layout reason and behind **ADR 0016** for a bigger one: this is the first feature that puts *personal data* on a panel whose server has no authentication, and the refresh tokens it needs are credentials sitting on a desktop PC. OAuth stays on the PC and never reaches the APK — two acceptance lines exist for exactly that. The merge is where the design is: the two providers disagree about all-day events, about time zones and about the word for "declined" |
 | T9.2 | **Spike: can the panel talk to an assistant for nothing?** | todo | A button to ask something out loud and hear an answer, with the whole pipeline on the PC — invariant 1 means the page cannot call anything. Time-boxed, produces `docs/spikes/2026-voice-assistant.md` and a throwaway prototype under `spikes/`, and is allowed to conclude *do not build this*. The unknown is whether offline STT, a small local model and offline TTS fit inside a latency a person will stand at a panel for; Claude and DeepSeek are the paid comparison, not the plan. Also has to answer the awkward ones: `RECORD_AUDIO` would be the app's first dangerous permission, and an unauthenticated LAN endpoint that runs a model and speaks in someone's room is not in ADR 0015's family |
 
+## Resuming after 2026-09-29 (wave 35)
+
+Wave 35 is **T4.5**, the panel following more than one PC (ADR 0016), on `wave/35-two-pcs`,
+stacked on wave 34's branch. Code, build and JVM tests are done and green. The phone half is not.
+
+**Next: T4.5's behaviour block, on the phone.** Build with `PC_IP=<windows>,<mac>`, install, log out
+of whichever PC the panel is on, and watch for `pc answered at` with no `state=offline`. Then T7.3.
+
+### What is still only true on this desk
+
+- **The phone still runs the Windows-only APK.** Installing the two-PC build needs the Windows
+  PC's IP (not known on the Mac), the adb RSA prompt accepted, and possibly an uninstall if the
+  installed build is release-signed. The uninstall resets MIUI autostart and the battery
+  exemption, and needs the owner's say.
+- `.env` on the Mac holds only the Mac's address. It needs the Windows one added before building.
+- `DataPoller` and the presses following the active host are pinned by the device block only.
+- Everything carried from wave 34 is carried unchanged.
+
 ## Resuming after 2026-09-29 (wave 34)
 
 Wave 34 was **the first Mac**, on `wave/34-macos-validation`. The repository runs on macOS now:

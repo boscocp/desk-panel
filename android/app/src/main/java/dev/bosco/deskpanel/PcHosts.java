@@ -26,6 +26,41 @@ import java.util.List;
  */
 public final class PcHosts {
 
+    /**
+     * The most hosts a build may list. An offline cycle asks every one, at up
+     * to 3 s each (connect plus read timeout), and the dormant probe runs
+     * under {@code PanelService.PROBE_WINDOW_MS}, a 10 s wake lock: three
+     * hosts is 9 s and fits, four would let the CPU suspend mid-cycle. The
+     * build enforces the same number (found by review).
+     */
+    public static final int MAX_HOSTS = 3;
+
+    /** One {@code /ping} against one host: null for a 200, else why not. */
+    public interface Prober {
+        String probe(String host);
+    }
+
+    /** Asked between hosts, so a stopped loop does not keep dialling. */
+    public interface Stopped {
+        boolean now();
+    }
+
+    /** What one cycle found. */
+    public static final class Cycle {
+        /** Null if some host answered, else every host's failure, for the log. */
+        public final String failure;
+        /** Whether the host that answered is a different one from last time. */
+        public final boolean moved;
+        /** The host that answered, or null. */
+        public final String host;
+
+        Cycle(String failure, boolean moved, String host) {
+            this.failure = failure;
+            this.moved = moved;
+            this.host = host;
+        }
+    }
+
     private final List<String> hosts;
 
     private volatile String active;
@@ -57,6 +92,10 @@ public final class PcHosts {
         if (unique.isEmpty()) {
             throw new IllegalArgumentException("no PC host configured: '" + csv + "'");
         }
+        if (unique.size() > MAX_HOSTS) {
+            throw new IllegalArgumentException(
+                    "more than " + MAX_HOSTS + " PC hosts configured: '" + csv + "'");
+        }
         return new PcHosts(new ArrayList<>(unique));
     }
 
@@ -81,6 +120,30 @@ public final class PcHosts {
             }
         }
         return order;
+    }
+
+    /**
+     * One poll cycle: each host in {@link #probeOrder()}, stopping at the first
+     * that answers and making it the active one. The loop lives here rather
+     * than in {@code PcPoller} so the order and the move are covered on the
+     * JVM; the poller only supplies the socket.
+     */
+    public Cycle cycle(Prober prober, Stopped stopped) {
+        StringBuilder failures = new StringBuilder();
+        for (String host : probeOrder()) {
+            if (stopped.now()) {
+                break;
+            }
+            String failure = prober.probe(host);
+            if (failure == null) {
+                return new Cycle(null, answered(host), host);
+            }
+            if (failures.length() > 0) {
+                failures.append("; ");
+            }
+            failures.append(host).append(": ").append(failure);
+        }
+        return new Cycle(failures.length() > 0 ? failures.toString() : "not attempted", false, null);
     }
 
     /**
