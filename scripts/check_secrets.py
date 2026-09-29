@@ -25,8 +25,12 @@ which the file format requires. An allowlist of bare patterns is a way of turnin
 off with extra steps; the reason is what makes the second run readable and the third one
 worth doing.
 
-Exit codes: 0 clean, 1 a finding in the tree, 2 usage error, 3 a finding in the history
-(rotate; if both halves have findings the exit is 3, and the report names both).
+One invocation runs one half. There is no combined mode and no combined exit code: CI
+runs both, as two steps in two jobs, so that a red tick says which half went red without
+anybody opening the log.
+
+Exit codes: 0 clean, 1 a finding in the tree (or a stale allowlist entry, reported under
+its own heading), 2 usage error or an unusable allowlist, 3 a finding in the history.
 
 Usage:
   python scripts/check_secrets.py [--allowlist PATH]            # the tree
@@ -252,13 +256,17 @@ def stale(entries, tracked):
     """Allowlist entries naming a file that is not in the tree.
 
     An entry that outlived the thing it allowed is a comment claiming a decision that no
-    longer exists. `history = true` marks the ones that are about blobs rather than files
-    and are stale by nature.
+    longer exists. Two kinds escape: `history = true`, and `where = "history"` -- which
+    is about blobs rather than files and becomes *most* necessary at the moment the file
+    is renamed or deleted. Reading only the first of those would have turned a correct
+    history entry red exactly when it started to matter. Found by review.
     """
     problems = []
     for entry in entries:
         path = entry.get("path")
-        if not path or entry.get("history") or any(c in path for c in "*?["):
+        if not path or any(c in path for c in "*?["):
+            continue
+        if entry.get("history") or entry.get("where") == "history":
             continue
         if path not in tracked:
             problems.append(f"allowlist names {path}, which is not in the tree any more")
@@ -289,57 +297,78 @@ def scan_tree(entries):
     return sieve(found, entries)
 
 
-def history_blobs():
-    """Every blob in the history, as (sha, path) -- the path it was last seen under.
+def history_objects():
+    """Every named object in the history, as sha -> the set of paths it has had.
 
-    `--all` covers every ref; a blob reachable from none of them is not in a clone either.
-    One `cat-file --batch` for the whole walk, because 2,000 subprocesses is the difference
-    between a check CI runs and a check somebody disables.
+    `--all` covers every ref; an object reachable from none of them is not in a clone
+    either. One `cat-file --batch` for the whole walk, because 2,000 subprocesses is the
+    difference between a check CI runs and a check somebody disables.
+
+    A *set* of paths, because `rev-list --objects` emits the same sha once per path it has
+    ever had, and keeping only the last one mis-attributes the finding: a secret committed
+    at `server/config.toml` and later copied elsewhere would be reported under whichever
+    path came last, and an allowlist entry naming the real file would silently miss.
+    Trees are named here too and are dropped in the walk, where `cat-file` says which is
+    which. Found by review.
     """
     listing = _git("rev-list", "--objects", "--all").decode("utf-8", "replace")
-    blobs = {}
+    objects = {}
     for line in listing.splitlines():
         sha, _, path = line.partition(" ")
         if path:
-            blobs[sha] = path
-    return blobs
+            objects.setdefault(sha, set()).add(path)
+    return objects
 
 
 def scan_history(entries):
-    blobs = history_blobs()
-    if not blobs:
-        return []
+    """Findings in every blob in the pack, and how many blobs that was.
+
+    Returns (findings, blob count). The count is what `cat-file` called a blob, not what
+    `rev-list --objects` named: that listing includes trees, and counting them made the
+    headline "1,970 blobs" for a history with 1,080 of them -- a number that had already
+    been copied into three documents as the proof of coverage. Found by review.
+    """
+    objects = history_objects()
+    if not objects:
+        return [], 0
+
     # Findings are collected against the *bare* path and sieved before the blob sha is
     # appended for the report. The first cut decorated first, so every allowlist entry
     # naming a path matched nothing here and the history half reported thirty-six
     # allowed hashes as findings. Found by running it.
     found = []
-    for sha, path in blobs.items():
-        for rule, _p, text in name_findings(path):
-            found.append((rule, path, text, sha))
+    for sha, paths in objects.items():
+        for path in sorted(paths):
+            for rule, _p, text in name_findings(path):
+                found.append((rule, path, text, sha))
 
-    request = "".join(f"{sha}\n" for sha in blobs)
+    request = "".join(f"{sha}\n" for sha in objects)
     out = subprocess.run(["git", "cat-file", "--batch"], input=request.encode(),
                          capture_output=True, check=True).stdout
-    offset = 0
+    offset, blobs = 0, 0
     while offset < len(out):
         end = out.index(b"\n", offset)
         sha, kind, size = out[offset:end].decode("utf-8").split()
         body = out[end + 1:end + 1 + int(size)]
         offset = end + 1 + int(size) + 1
-        if kind != "blob" or int(size) > MAX_BYTES or b"\0" in body[:8000]:
+        if kind != "blob":
+            continue
+        blobs += 1
+        if int(size) > MAX_BYTES or b"\0" in body[:8000]:
             continue
         try:
             text = body.decode("utf-8")
         except UnicodeDecodeError:
             continue
-        path = blobs.get(sha, "")
-        found.extend((rule, p, match, sha) for rule, p, match in findings_in(text, path))
+        # One finding per (blob, path): the same bytes committed under two names are two
+        # decisions, and a path-scoped allowlist entry has to be able to cover one of them.
+        for path in sorted(objects.get(sha, {""})):
+            found.extend((rule, p, match, sha) for rule, p, match in findings_in(text, path))
 
     kept = sieve([(rule, path, text) for rule, path, text, _sha in found], entries, "history")
     keep = {(rule, path, text) for rule, path, text in kept}
-    return [(rule, f"{path} ({sha[:12]})", text)
-            for rule, path, text, sha in found if (rule, path, text) in keep]
+    return ([(rule, f"{path} ({sha[:12]})", text)
+             for rule, path, text, sha in found if (rule, path, text) in keep], blobs)
 
 
 def report(found, half, stream=sys.stderr):
@@ -373,13 +402,13 @@ def main(argv):
 
     entries, problems = load_allowlist(allowlist)
     if problems:
-        print(f"check_secrets: the allowlist is not usable", file=sys.stderr)
+        print("check_secrets: the allowlist is not usable", file=sys.stderr)
         for line in problems:
             print(f"  {line}", file=sys.stderr)
         return 2
 
     if history:
-        found = scan_history(entries)
+        found, blobs = scan_history(entries)
         report(found, "history")
         if found:
             print("\n  These are in the pack, so they are in every clone. Deleting them now\n"
@@ -387,14 +416,22 @@ def main(argv):
                   "  rewriting history -- which is a force-push over published commits and\n"
                   "  is a person's decision, not this script's.", file=sys.stderr)
             return 3
-        print(f"check_secrets: {len(history_blobs())} blob(s) in the history, nothing found")
+        print(f"check_secrets: {blobs} blob(s) in the history, nothing found")
         return 0
 
     found = scan_tree(entries)
     report(found, "tree")
     leftovers = stale(entries, set(tracked_files()))
-    for line in leftovers:
-        print(f"  {line}", file=sys.stderr)
+    if leftovers:
+        # Its own heading. A stale entry is not a credential in the tree, and printing it
+        # as unlabelled lines under the exit code documented as "a finding in the tree"
+        # told the reader the wrong thing about their own repository. Found by review.
+        print(f"check_secrets: {len(leftovers)} stale allowlist entry(ies)", file=sys.stderr)
+        for line in leftovers:
+            print(f"  {line}", file=sys.stderr)
+        print("\n  Each allows something that is not there any more. Delete the entry, or"
+              "\n  mark it `where = \"history\"` if it is about a blob rather than a file.",
+              file=sys.stderr)
     if found or leftovers:
         return 1
     print(f"check_secrets: {len(tracked_files())} tracked file(s), nothing found; "
@@ -410,22 +447,39 @@ def main(argv):
 # tokens are the documented prefix plus filler, and nothing here opens anything.
 # --------------------------------------------------------------------------
 
+def _sample(*parts):
+    """A sample assembled from pieces, so that no rule matches this file.
+
+    Every string below would otherwise be a finding in `scripts/check_secrets.py`, and it
+    was: the first version of this file failed its own guard fifteen times. The obvious
+    fix is an allowlist entry covering this path, and it is the wrong one -- it would
+    blind the sweep to a real key pasted into the one file nobody would think to look in.
+    Splitting each sample so the *pattern* never appears whole keeps the guard live over
+    its own source, and costs a join. Each split falls inside the part of the pattern that
+    cannot be spelled around it.
+    """
+    return "".join(parts)
+
+
 SAMPLES = {
-    "private-key": "-----BEGIN RSA PRIVATE KEY-----\nMIIB\n-----END RSA PRIVATE KEY-----",
-    "ssh-public-key": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDnotarealkey user@host",
-    "jwt": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJub2JvZHkifQ.c2lnbmF0dXJlLWdvZXMtaGVyZQ",
-    "aws-key": "AKIAIOSFODNN7EXAMPLE",
-    "github-token": "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8",
-    "slack-token": "xoxb-000000000000-000000000000-abcdefghijklmnop",
-    "google-key": "AIza" + "SyD-0123456789abcdefghijklmnopqrstu",
-    "bearer-header": 'Authorization: Bearer abcdefghijklmnopqrstuvwxyz012345',
+    "private-key": _sample("-----BEGIN RSA PRIVATE", " KEY-----\nMIIB\n-----END-----"),
+    "ssh-public-key": _sample("ssh-", "rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDnotarealkey"),
+    "jwt": _sample("ey", "JhbGciOiJIUzI1NiJ9.eyJzdWIiOiJub2JvZHkifQ.c2lnbmF0dXJlLWhlcmU"),
+    "aws-key": _sample("AKI", "AIOSFODNN7EXAMPLE"),
+    # Three parts, not two: the token's body is itself a 36-character high-entropy run,
+    # so `random-blob` found it after `github-token` stopped matching. The same for the
+    # Google key below. Every piece here is under the 32-character floor.
+    "github-token": _sample("ghp_", "A1b2C3d4E5f6G7h8", "I9j0K1l2M3n4O5p6Q7r8"),
+    "slack-token": _sample("xox", "b-000000000000-000000000000-abcdefghijklmnop"),
+    "google-key": _sample("AIza", "SyD-0123456789", "abcdefghijklmnopqrstu"),
+    "bearer-header": _sample("Authorization: Bearer ", "abcdefghijklmnopqrstuvwxyz012345"),
     # The shape this project would actually leak. The key is a *suffix*: a rule anchored
     # with \b immediately before `token` misses `brapi_token`, which is the name of the
     # only credential this repository has.
-    "assigned-secret": 'brapi_token = "abcd1234efgh5678"',
-    "lan-address": "the PC answers on 192.168.15.3 today",
-    "hex-blob": "d41d8cd98f00b204e9800998ecf8427e5f3a1b2c9d8e7f60",
-    "random-blob": "Zx9Qv2Lm8Tb4Nc7Rj1Ks6Hd3Gf0Pw5Yt2Ua9Ie4Oq7",
+    "assigned-secret": _sample('brapi_token = ', '"abcd1234efgh5678"'),
+    "lan-address": _sample("the PC answers on 192.168.", "15.3 today"),
+    "hex-blob": _sample("d41d8cd98f00b204e980", "0998ecf8427e5f3a1b2c9d8e7f60"),
+    "random-blob": _sample("Zx9Qv2Lm8Tb4Nc7Rj1Ks", "6Hd3Gf0Pw5Yt2Ua9Ie4Oq7"),
 }
 
 CLEAN = """\
@@ -455,7 +509,8 @@ def _self_test():
        findings_in("http://192.168.1.100:8777/quotes", "x.py") == [])
     ok("a camelCase name is not a key", not looks_random("anAbsentOrEmptyLanguageLeaves"))
     ok("a file path is not a key", findings_in("android/app/src/main/java/dev/bosco", "x") == [])
-    ok("a git sha is hex and not a random blob", not looks_random("3d3c42e5aac5ba805825da76410c181273ba90b1"))
+    ok("a git sha is hex and not a random blob",
+       not looks_random(_sample("3d3c42e5aac5ba80", "5825da76410c181273ba90b1")))
     ok("prose about a token is not a finding",
        findings_in("The brapi token lives on the PC and is proxied.", "x.md") == [])
     ok("an empty value is not a finding", findings_in('brapi_token = ""', "x.toml") == [])

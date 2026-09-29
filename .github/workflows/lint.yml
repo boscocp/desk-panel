@@ -119,8 +119,10 @@ jobs:
       # Not a list of scripts: `lint-selftests` discovers them by grep over a
       # glob, so the next one to grow a --self-test is covered by being written.
       - run: make lint-selftests
-      # The tree half. The history half is the `secrets` job below, because it
-      # needs a checkout this one does not have.
+      # The tree half, once. The history half is the `secrets` job below, which
+      # needs a checkout this one does not have and runs *only* that half: the
+      # first cut ran the tree scan in both places, which is a second green tick
+      # for a scan that already passed. Found by review.
       - run: make lint-secrets
 
   secrets:
@@ -132,11 +134,11 @@ jobs:
     # says "we looked at the history" is worse than no tick, and this repository
     # has paid for that shape of check twice already.
     #
-    # Two runs of the same script, not one: the tree half is what a clone gets
-    # today and is fixed by deleting something; the history half is in the pack
-    # of every clone for ever and is fixed by rotating the credential. They are
-    # reported apart and exit differently, and a reader should see which one
-    # went red without opening the log.
+    # The history half only. The tree half is `make lint-secrets` in the guards
+    # job, and running it here too would be a second tick for the same scan.
+    # The two halves are reported apart and exit differently -- a finding in the
+    # tree is fixed by deleting it, one in the history by rotating the credential
+    # -- and keeping them in separate jobs is what lets a red tick say which.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -145,5 +147,4 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
-      - run: python scripts/check_secrets.py
       - run: python scripts/check_secrets.py --history
