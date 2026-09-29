@@ -198,6 +198,36 @@ and the first line of each file says so.
 | T9.1 | **The next meeting, under the clock** | todo | Google Calendar and Microsoft Outlook merged, the soonest event under the clock in the `#shortcuts` strip, between T8.2's two buttons. Blocked behind T8.2 for a layout reason and behind **ADR 0016** for a bigger one: this is the first feature that puts *personal data* on a panel whose server has no authentication, and the refresh tokens it needs are credentials sitting on a desktop PC. OAuth stays on the PC and never reaches the APK — two acceptance lines exist for exactly that. The merge is where the design is: the two providers disagree about all-day events, about time zones and about the word for "declined" |
 | T9.2 | **Spike: can the panel talk to an assistant for nothing?** | todo | A button to ask something out loud and hear an answer, with the whole pipeline on the PC — invariant 1 means the page cannot call anything. Time-boxed, produces `docs/spikes/2026-voice-assistant.md` and a throwaway prototype under `spikes/`, and is allowed to conclude *do not build this*. The unknown is whether offline STT, a small local model and offline TTS fit inside a latency a person will stand at a panel for; Claude and DeepSeek are the paid comparison, not the plan. Also has to answer the awkward ones: `RECORD_AUDIO` would be the app's first dangerous permission, and an unauthenticated LAN endpoint that runs a model and speaks in someone's room is not in ADR 0015's family |
 
+## Resuming after 2026-09-29 (wave 34)
+
+Wave 34 was **the first Mac**, on `wave/34-macos-validation`. The repository runs on macOS now:
+`make check` is green on Apple Silicon, T3.10's shape half and the macOS mute presses have run
+on real hardware, and `after_update.py` has a Darwin branch. The note is
+`docs/harness-notes/2026-09-29-wave-34.md`.
+
+**Next: T7.3**, unchanged from wave 33 — the pre-public review, then T7.7. Nothing here moved it.
+
+### What running it found that reasoning had not
+
+The row for T3.10 said "Plist and docs ship anyway", and the plist did not exist. Writing it and
+running it on the Mac found three defects that 97 green fixture cases had not: an XML comment the
+verifier could not parse, a `launchctl print` parser that read a nested block's `type =`, and a
+firewall message naming the wrong binary. The review then found that `after_update.py` read the
+file on disk instead of the loaded job, and that nothing pinned the `-k` in `kickstart -k`.
+
+### What is still only true on this desk
+
+- **T3.10's behaviour half** — that nothing answers at the login window — needs a logout and a
+  second device. Still `blocked`, now on that and not on "no Mac".
+- **This Mac's firewall blocks the LAN.** `/ping` is up on `127.0.0.1` and down on the LAN address
+  until `Python.app` is allowed in System Settings. That is a manual grant.
+- **The agent here points at a scratchpad copy of the example config.** The session could not
+  write `server/config.toml`; the owner copies it and re-runs `sh server/install_agent.sh`.
+- **The Linux restart has the gap macOS just closed**: nothing pins that `systemctl --user
+  restart` restarted anything, and nothing checks the pid. Small, and not done here.
+- `server/config.json` mode 0644, the Windows installer's TOML branch, `WINDOWS-NEXT-SESSION.md`,
+  the twenty taps and the phone on adb: carried unchanged from wave 33.
+
 ## Resuming after 2026-09-28 (wave 33)
 
 Wave 33 is **T7.10**, on `wave/33-pre-public-sweep`. The repository has been looked at — every
