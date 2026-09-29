@@ -5,6 +5,40 @@
       "mute-audio",
       "mute-mic"
     ],
+    "agenda": {
+      "accounts": 2,
+      "events": [
+        {
+          "allDay": true,
+          "end": "2026-09-23",
+          "source": "google/personal",
+          "start": "2026-09-22",
+          "title": "Feriado"
+        },
+        {
+          "allDay": false,
+          "end": "2026-09-22T09:45:00-03:00",
+          "source": "google/personal",
+          "start": "2026-09-22T09:30:00-03:00",
+          "title": "Standup"
+        },
+        {
+          "allDay": false,
+          "end": "2026-09-22T14:30:00+00:00",
+          "source": "microsoft/work",
+          "start": "2026-09-22T14:00:00+00:00",
+          "title": "1:1 with the manager"
+        },
+        {
+          "allDay": true,
+          "end": "2026-09-24",
+          "source": "microsoft/work",
+          "start": "2026-09-23",
+          "title": "Offsite"
+        }
+      ],
+      "failed": []
+    },
     "crypto": [
       {
         "changePct": 1.01,

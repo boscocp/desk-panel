@@ -172,6 +172,19 @@ public final class DataPayload {
             // same thing it does for a PC that enabled none.
             payload.put("actions", quotes.optJSONArray("actions"));
 
+            // The owner's next meetings (T9.1, ADR 0017), passed straight
+            // through like the four keys above. What an event is -- which one
+            // is next, how long until it starts -- is decided in js/format.js
+            // against the phone's clock, and what may be in it at all is
+            // decided on the PC, before it is sent: no attendees, no body, and
+            // no title when the owner turned titles off. This layer only
+            // carries it, so it has nothing to filter and nothing to leak.
+            //
+            // Absent rather than empty for an older server, so the page leaves
+            // the AGENDA card reserved -- the same thing it does for a PC with
+            // no calendar connected.
+            payload.put("agenda", quotes.optJSONObject("agenda"));
+
             return escapeForScript(payload.toString());
         } catch (JSONException malformed) {
             // A body that is not JSON is a failure like any other: keep what

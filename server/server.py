@@ -12,8 +12,10 @@ tests can call them directly without a socket -- see server/CLAUDE.md and
 TT.2.
 """
 import argparse
+import datetime
 import functools
 import html
+import ipaddress
 import json
 import os
 import re
@@ -33,8 +35,9 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from server import (providers_awesomeapi, providers_binance, providers_brapi,  # noqa: E402
-                    providers_openmeteo, providers_usno)
+from server import (oauth, providers_awesomeapi, providers_binance,  # noqa: E402
+                    providers_brapi, providers_calendar, providers_openmeteo,
+                    providers_usno)
 from server import actions as actions_module  # noqa: E402
 from server.config_format import ConfigError, format_for_path, merge, parse  # noqa: E402
 from server.upstream import UpstreamError  # noqa: E402
@@ -68,6 +71,12 @@ RELEASE_APK_NAME = "desk-panel-release.apk"
 # is not this shape is replaced rather than quoted. A file in out/ is build
 # output, but it is also whatever anybody drops there.
 SAFE_FILENAME = re.compile(r"^[A-Za-z0-9._-]+$")
+
+# Where the calendar refresh tokens live: beside the config file that names
+# the accounts, never inside it. The server writes this file -- Microsoft
+# rotates its refresh token on every use -- and a server that rewrote the
+# hand-edited config.toml would destroy its comments (ADR 0017).
+TOKENS_FILENAME = "calendar-tokens.json"
 
 # The two names the script_dir fallback will answer to, best first. Order is
 # the whole rule: config.toml wins wherever both exist (T3.12 step 3).
@@ -128,6 +137,24 @@ DEFAULT_CONFIG = {
     # right default and the right setting on a network the owner does not
     # control -- see ADR 0015.
     "actions": [],
+    # The owner's calendars (T9.1, ADR 0017). Empty is the default and costs
+    # nothing: no account, no request, and the AGENDA card stays reserved.
+    "calendar_accounts": [],
+    "google_client_id": "",
+    "google_client_secret": "",
+    "microsoft_client_id": "",
+    # Five minutes. A calendar changes rarely, both APIs have quotas, and the
+    # countdown is re-drawn on the phone every minute from the instant it
+    # already holds, which costs no request at all.
+    "calendar_interval_s": 300,
+    "calendar_lookahead_h": 24,
+    # True by the owner's decision, with the cost stated in ADR 0017 and in
+    # the example file: anyone on the Wi-Fi can read the titles.
+    "calendar_show_titles": True,
+    # Names, besides IP literals and localhost, that the Host header may
+    # carry. Anything else is a 421 before any route runs: it is what a DNS
+    # rebinding attack looks like (ADR 0017).
+    "allowed_hosts": [],
 }
 
 
@@ -161,6 +188,16 @@ def load_config(path):
         raise ConfigError(f"cannot read {path}: {exc}") from None
 
     return merge(parse(raw, format_for_path(path), name=str(path)), DEFAULT_CONFIG)
+
+
+def tokens_path_for(config_path):
+    """Pure: the calendar token file that goes with `config_path`.
+
+    Beside the config, because the config names the accounts and the two are
+    a pair: a `--config` pointing elsewhere must not read another setup's
+    tokens out of `server/`. `calendar_login.py` resolves it the same way.
+    """
+    return Path(config_path).with_name(TOKENS_FILENAME)
 
 
 def config_search_paths(argv, env, script_dir, exists=None):
@@ -420,7 +457,8 @@ class App:
     routes and serialises, and nothing else lives in the socket layer.
     """
 
-    def __init__(self, config, clock=time.monotonic):
+    def __init__(self, config, clock=time.monotonic, tokens_path=None,
+                 wall_clock=None, oauth_post=oauth.post_form):
         self.config = config
         self.clock = clock
         # One cache per market, not one for the three together. They come from
@@ -462,6 +500,21 @@ class App:
         # broken `actions` in a test raises for the same reason and that is
         # the behaviour being asserted.
         self.enabled_actions = actions_module.enabled_actions(config.get("actions"))
+        # Validated here for the same reason, and raising ValueError the same
+        # way: a misspelled provider is found by whoever restarts the server.
+        self.calendar_accounts = providers_calendar.accounts_from_config(
+            config.get("calendar_accounts"))
+        providers_calendar.check_config(config)
+        self.wall_clock = wall_clock or (lambda: datetime.datetime.now(datetime.timezone.utc))
+        self.tokens = oauth.TokenStore(tokens_path or SCRIPT_DIR / TOKENS_FILENAME)
+        self.credentials = {
+            f"{provider}/{name}": oauth.Credentials(
+                f"{provider}/{name}", provider, config, self.tokens, post=oauth_post)
+            for provider, name in self.calendar_accounts
+        }
+        self.agenda_cache = TimedCache()
+        self._agenda_lock = threading.Lock()
+        self._agenda_refreshing = False
 
     def run_action(self, action):
         """Execute an enabled action, or raise. Never called with an unknown id.
@@ -586,7 +639,63 @@ class App:
         # an action the server would answer 404 to is a button that does
         # nothing, which T8.2 step 7 calls worse than no button at all.
         payload["actions"] = list(self.enabled_actions)
+        # The next meetings (T9.1), riding /quotes for the fourth time and for
+        # the same reason. Always present, even with no account configured, so
+        # DataPayload.merge and mock.js are held to the key by the payload
+        # contract rather than by somebody remembering it.
+        payload["agenda"] = self.agenda()
         return payload
+
+    def agenda(self):
+        """`{accounts, events, failed}`, served from cache and never blocking.
+
+        Refreshed off the request path, like the moon and the histories: one
+        account is a token refresh plus an events call, each with a ten
+        second timeout, against a phone that gives the whole request five.
+        A cold start therefore serves no events for one cycle.
+
+        The cached value is what the last refresh returned, whole, and
+        `providers_calendar.load` never raises, so there is no "last good
+        value" to fall back on. A failed account is in `failed`, not in
+        `events`. That is the "never stale" rule of ADR 0017, kept by
+        construction rather than by a flag.
+        """
+        if not self.calendar_accounts:
+            return {"accounts": 0, "events": [], "failed": []}
+        ttl = self.config.get("calendar_interval_s", 300)
+        if not self.agenda_cache.fresh_at(self.clock(), ttl):
+            self._refresh_agenda_async(ttl)
+        return self.agenda_cache.value or {
+            "accounts": len(self.calendar_accounts), "events": [], "failed": []}
+
+    def _produce_agenda(self):
+        return providers_calendar.load(
+            self.calendar_accounts, self.credentials, self.wall_clock(),
+            lookahead_h=self.config.get("calendar_lookahead_h", 24),
+            show_titles=self.config.get("calendar_show_titles", True) is True)
+
+    def _refresh_agenda_async(self, ttl):
+        """One background refresh of the agenda, or leave the running one alone."""
+        with self._agenda_lock:
+            if self._agenda_refreshing:
+                return
+            self._agenda_refreshing = True
+
+        def run():
+            try:
+                self.agenda_cache.get(self.clock(), ttl, self._produce_agenda)
+            except Exception:  # noqa: BLE001 - a bug here must not kill the server
+                traceback.print_exc()
+            finally:
+                with self._agenda_lock:
+                    self._agenda_refreshing = False
+
+        threading.Thread(target=run, name="agenda", daemon=True).start()
+
+    def warm_agenda(self):
+        """Start the first calendar fetch at startup, like `warm_history`."""
+        if self.calendar_accounts:
+            self._refresh_agenda_async(self.config.get("calendar_interval_s", 300))
 
     def _history(self, now):
         """`{market: {symbol: [values]}}`, refreshed off the request path.
@@ -971,8 +1080,14 @@ def route(method, path, app=None, request_headers=None):
     route: `POST /action/<id>` is the only one that changes the machine, and
     it is the only one that has to know whether a browser sent the request.
     Every other route reads none of it, which is why it stays optional rather
-    than becoming a parameter the whole file threads around.
+    than becoming a parameter the whole file threads around. The one header
+    every route does read is `Host`, before anything else: see host_allowed.
     """
+    if request_headers is not None:
+        extra = (getattr(app, "config", None) or {}).get("allowed_hosts", [])
+        if not host_allowed(request_headers.get("Host"), extra):
+            return _json(421, {"error": "unknown host"})
+
     if method == "GET" and path == "/ping":
         return _json(200, {"ok": True})
 
@@ -998,6 +1113,44 @@ def route(method, path, app=None, request_headers=None):
             return run_action(action, app, request_headers)
 
     return 404, b"", "text/plain", ()
+
+
+def host_allowed(host, extra=()):
+    """Pure: whether a request's `Host` header names this PC the way a friend would.
+
+    **The attack this closes is DNS rebinding.** A page on `evil.example`
+    re-points its own name at this PC's LAN address, and from then on its
+    requests to `evil.example:8777` are same-origin, so it can read the
+    replies. With the calendar on `/quotes` that would hand a stranger the
+    owner's meetings without them being anywhere near the Wi-Fi (ADR 0017).
+    Every such request carries the attacker's hostname, because that is the
+    name the browser resolved.
+
+    So the header must be an IP literal (v4, or v6 in brackets), `localhost`,
+    or a name the owner listed in `allowed_hosts`. The phone, `curl` and
+    `probe.py` all address the PC by IP. A request with no Host at all is
+    HTTP/1.0, which no browser sends, and is let through.
+    """
+    if host is None:
+        return True
+    host = host.strip()
+    if host.startswith("["):
+        name = host[1:].split("]", 1)[0]
+    elif host.count(":") == 1:
+        name = host.split(":", 1)[0]
+    else:
+        name = host
+    if not name:
+        return False
+    try:
+        ipaddress.ip_address(name)
+        return True
+    except ValueError:
+        pass
+    name = name.lower().rstrip(".")
+    if name == "localhost":
+        return True
+    return name in {str(h).strip().lower().rstrip(".") for h in extra or ()}
 
 
 def sent_by_a_browser(request_headers):
@@ -1285,6 +1438,34 @@ def main(argv=None):
         for line in actions_module.describe(enabled):
             print(line, file=sys.stderr)
 
+    # The calendars, checked here for the reason the actions are: before
+    # --check-only returns, so the launchers find a typo rather than the owner
+    # waiting for a meeting that never shows up.
+    try:
+        calendar_accounts = providers_calendar.accounts_from_config(
+            config.get("calendar_accounts"))
+        providers_calendar.check_config(config)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        sys.exit(1)
+    missing = providers_calendar.missing_client_ids(calendar_accounts, config)
+    if missing:
+        print(f"calendar_accounts needs {', '.join(missing)} in {config_path}; "
+              f"see docs/SERVER-SETUP.md", file=sys.stderr)
+        sys.exit(1)
+    tokens_path = tokens_path_for(config_path)
+    if calendar_accounts:
+        print(f"notice: calendars: {', '.join(f'{p}/{n}' for p, n in calendar_accounts)} "
+              f"(tokens in {tokens_path})", file=sys.stderr)
+        if os.name != "nt":
+            try:
+                tokens_mode = os.stat(tokens_path).st_mode
+            except OSError:
+                tokens_mode = None
+            warning = oauth.tokens_permission_warning(tokens_mode, sys.platform, tokens_path)
+            if warning:
+                print(warning, file=sys.stderr)
+
     if args.check_only:
         print(f"config OK: {config_path}")
         return
@@ -1293,10 +1474,11 @@ def main(argv=None):
     # functools.partial rather than a class attribute: the app is per-server
     # state, and a class attribute would be shared by every server in a test
     # process that starts more than one.
-    app = App(config)
+    app = App(config, tokens_path=tokens_path)
     # Before the socket is bound rather than after: the first poll lands within
     # seconds of a login, and the series should already be on its way.
     app.warm_history()
+    app.warm_agenda()
     server = Server((HOST, port), functools.partial(Handler, app=app))
     try:
         server.serve_forever()

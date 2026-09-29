@@ -58,6 +58,41 @@
         return asked ? asked.split(',') : [];
     })();
 
+    // The next meetings (T9.1), as the server's `agenda` would say. Instants
+    // fixed at page load rather than rebuilt per tick, so the countdown in a
+    // browser moves the way it does on the desk: one minute a minute, from the
+    // phone's clock, while the payload keeps arriving unchanged. One meeting
+    // 25 minutes out, one an hour after it with a title long enough to have to
+    // ellipsise, and an all-day event behind both. `?agenda=off` sends a PC
+    // with no calendar connected, which leaves the card reserved -- the state
+    // a theme is most likely to forget to draw.
+    const AGENDA = (() => {
+        const asked = new URLSearchParams(location.search).get('agenda');
+        if (asked === 'off') {
+            return { accounts: 0, events: [], failed: [] };
+        }
+        const now = Date.now();
+        const minutes = (n) => new Date(now + n * 60000).toISOString();
+        const today = new Date();
+        const day = (offset) => {
+            const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + offset);
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        };
+        return {
+            accounts: 2,
+            events: [
+                { start: minutes(25), end: minutes(55), allDay: false,
+                  source: 'google/personal', title: 'Standup' },
+                { start: minutes(85), end: minutes(145), allDay: false,
+                  source: 'microsoft/work',
+                  title: 'Quarterly planning with the platform and data teams' },
+                { start: day(0), end: day(1), allDay: true, source: 'google/personal',
+                  title: 'Aniversário' },
+            ],
+            failed: [],
+        };
+    })();
+
     const BASE_QUOTES = [
         { symbol: 'PETR4', price: 38.42, changePct: 1.2 },
         { symbol: 'VALE3', price: 61.75, changePct: -0.6 },
@@ -183,6 +218,17 @@
             // sends, and the panel falls back to neon.
             theme: THEME,
             actions: ACTIONS,
+            // Every seventh tick one account fails, so the failure line is
+            // drawn in a browser too -- the same argument `stale` makes above.
+            // A failed account contributes no events, exactly as on the PC, so
+            // its meeting leaves the card for that tick.
+            agenda: tick % 7 === 0 && AGENDA.accounts
+                ? {
+                    ...AGENDA,
+                    events: AGENDA.events.filter((e) => e.source !== 'microsoft/work'),
+                    failed: [{ source: 'microsoft/work', reason: 'reconnect' }],
+                }
+                : AGENDA,
         };
     }
 

@@ -19,6 +19,17 @@ too-old interpreter surfaces as a restart loop in journald rather than as a mess
   without a logged-in user reports the wrong thing (invariant 2).
 - **Secrets stay here.** The brapi token is read from `config.toml`, which is gitignored. It
   must never be embedded in the APK or echoed in a response.
+- **Calendar access is read-only, and the code checks it.**
+  [ADR 0017](../docs/adr/0017-calendars-are-personal-data.md) is the decision.
+  - `oauth.check_scope` refuses any grant broader than Google's `calendar.events.owned.readonly`
+    or Microsoft's `Calendars.ReadBasic`.
+  - `test_calendar.ReadOnlyGuardTests` fails the build over a write scope, or over a calendar
+    call that is not a GET.
+  - Refresh tokens live in `calendar-tokens.json` (0600, written atomically), never in
+    `config.toml`. The log never carries a token, a code or an event title.
+- **Every route checks `Host` first.** An IP literal, `localhost` or `allowed_hosts`, or 421.
+  That is the defence against DNS rebinding, and it is what makes a calendar title on `/quotes`
+  unreadable from a web page (ADR 0017).
 - **Config drives behaviour.** Tickers, city, intervals and the theme come from `config.toml`.
   If a change to what the panel shows requires rebuilding the APK, the design has been violated.
 - **The config file is also the documentation.** `config.example.toml` is committed and carries

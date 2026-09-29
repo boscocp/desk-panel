@@ -49,6 +49,14 @@
     // halfway cannot leave it stuck on.
     let resumed = false;
 
+    // The last `agenda` the PC sent, and the minute the card was last drawn
+    // for (T9.1). The countdown moves once a minute and the payload arrives
+    // once a minute, on unrelated clocks, so the card is redrawn from tick()
+    // whenever the minute turns -- from the instants already on hand, never
+    // by asking the PC again (ADR 0017: the phone's clock decides).
+    let agenda = undefined;
+    let agendaMinute = null;
+
     function el(tag, id, className) {
         const node = document.createElement(tag);
         if (id) {
@@ -1014,6 +1022,71 @@
         els.weather.appendChild(body);
     }
 
+    // The AGENDA card (T9.1), reserved since T6.12 and filled here.
+    //
+    // Three lines, in the order they are read from the chair: how long until
+    // it starts, largest; what it is; and, only when an account failed, which
+    // one needs reconnecting. The countdown is on top because it is the line
+    // that changes and the reason the card exists -- a title is something the
+    // owner already knows once they see the time.
+    //
+    // No payload agenda, or a PC with no calendar connected, puts the card
+    // back to reserved: empty, titled, and marked for e2e/layout/measure.js
+    // exactly as it was before this task. A failed account costs its own line
+    // and nothing else -- the other provider's meeting is still the next one.
+    function renderAgenda(now) {
+        agendaMinute = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        const fields = agendaFields(agenda, now, words.tag);
+        els.agenda.textContent = '';
+        if (!fields) {
+            els.agenda.setAttribute('data-reserved', '');
+            return;
+        }
+        els.agenda.removeAttribute('data-reserved');
+        const body = el('div', null, 'a-body');
+        // In progress, the colour says "now" and the line says until when:
+        // "agora · até 14:30" is 17 characters and the card holds about 14 at
+        // this size, so the whole phrase ellipsised to "agora · até 15..." --
+        // the one number the line exists for, cut off. The "agora" is still
+        // in the line, visually hidden, because a colour is not something a
+        // screen reader says -- and text rather than an aria-label, which
+        // ARIA 1.2 does not allow on a plain div.
+        const live = fields.inProgress && fields.until;
+        const shown = live ? fields.until : fields.when;
+        if (shown) {
+            // Smaller past fourteen characters. Measured in headless Chrome at
+            // 872x392: "tomorrow 09:00", fourteen, is 187px of the line's 200 at
+            // 32px, and "até amanhã 10:00", sixteen -- a meeting in progress
+            // that ends tomorrow -- is 217, so the time was the part cut off.
+            // At 24px the longest, "until tomorrow 10:00", is 184.
+            // Shrinking one line beats cutting off its time.
+            const long = shown.length > 14;
+            const when = el('div', null,
+                'a-when' + (fields.inProgress ? ' a-live' : '') + (long ? ' a-long' : ''));
+            if (live) {
+                const hidden = el('span', null, 'sr-only');
+                hidden.textContent = `${words.agenda.now} · `;
+                when.appendChild(hidden);
+            }
+            when.appendChild(document.createTextNode(shown));
+            body.appendChild(when);
+        }
+        if (fields.title) {
+            const title = el('div', null, 'a-title');
+            title.textContent = fields.title;
+            // The whole title for a reader that speaks the DOM, since the
+            // line itself ellipsises.
+            title.title = fields.title;
+            body.appendChild(title);
+        }
+        if (fields.failed) {
+            const failed = el('div', null, 'a-failed');
+            failed.textContent = fields.failed;
+            body.appendChild(failed);
+        }
+        els.agenda.appendChild(body);
+    }
+
     // The one diagnostic on a panel of content, so it is a line rather than a
     // card (T5.4 step 3): no title, no border, and nothing until there is
     // something to say. An empty string leaves the space genuinely empty, which
@@ -1097,6 +1170,8 @@
         renderWeather(payload.weather);
         renderBattery(payload.battery);
         renderShortcuts(payload.actions);
+        agenda = payload.agenda;
+        renderAgenda(new Date());
         els.stale.hidden = !payload.stale;
     }
 
@@ -1109,6 +1184,13 @@
         // HH:MM:SS exactly: MainActivity logs this string as evidence the page
         // rendered, and e2e/layout/measure.js asserts its shape.
         els.clock.textContent = `${hours}:${minutes}:${seconds}`;
+
+        // Only when the minute turns: the countdown has minute resolution and
+        // rebuilding the card every second would repaint a glowing box sixty
+        // times for one change.
+        if (agendaMinute !== `${hours}:${minutes}`) {
+            renderAgenda(now);
+        }
 
         // The language the PC asked for, not the host's (T6.11). `undefined`
         // means "whatever this runtime thinks", which on the device is the

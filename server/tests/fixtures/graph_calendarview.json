@@ -1,0 +1,82 @@
+{
+  "_readme": "**Written by hand from the official calendarView reference, not recorded.** No live response has been captured yet, because that needs the owner's account. The shape is therefore a premise, not a measurement (T9.1). contract_calendar.py is the check: run it once an account is connected, and if it goes red, replace this file with the live body, titles redacted.",
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#users('me')/calendar/calendarView(subject,start,end,isAllDay,isCancelled,responseStatus)",
+  "value": [
+    {
+      "@odata.etag": "W/\"1\"",
+      "id": "AAMk-1",
+      "subject": "1:1 with the manager",
+      "isAllDay": false,
+      "isCancelled": false,
+      "responseStatus": {
+        "response": "accepted",
+        "time": "2026-09-20T12:00:00Z"
+      },
+      "start": {
+        "dateTime": "2026-09-22T14:00:00.0000000",
+        "timeZone": "UTC"
+      },
+      "end": {
+        "dateTime": "2026-09-22T14:30:00.0000000",
+        "timeZone": "UTC"
+      }
+    },
+    {
+      "@odata.etag": "W/\"2\"",
+      "id": "AAMk-2",
+      "subject": "Declined review",
+      "isAllDay": false,
+      "isCancelled": false,
+      "responseStatus": {
+        "response": "declined",
+        "time": "2026-09-20T12:00:00Z"
+      },
+      "start": {
+        "dateTime": "2026-09-22T15:00:00.0000000",
+        "timeZone": "UTC"
+      },
+      "end": {
+        "dateTime": "2026-09-22T16:00:00.0000000",
+        "timeZone": "UTC"
+      }
+    },
+    {
+      "@odata.etag": "W/\"3\"",
+      "id": "AAMk-3",
+      "subject": "Cancelled sync",
+      "isAllDay": false,
+      "isCancelled": true,
+      "responseStatus": {
+        "response": "organizer",
+        "time": "0001-01-01T00:00:00Z"
+      },
+      "start": {
+        "dateTime": "2026-09-22T16:00:00.0000000",
+        "timeZone": "UTC"
+      },
+      "end": {
+        "dateTime": "2026-09-22T17:00:00.0000000",
+        "timeZone": "UTC"
+      }
+    },
+    {
+      "@odata.etag": "W/\"4\"",
+      "id": "AAMk-4",
+      "subject": "Offsite",
+      "isAllDay": true,
+      "isCancelled": false,
+      "responseStatus": {
+        "response": "notResponded",
+        "time": "0001-01-01T00:00:00Z"
+      },
+      "start": {
+        "dateTime": "2026-09-23T03:00:00.0000000",
+        "timeZone": "UTC"
+      },
+      "end": {
+        "dateTime": "2026-09-24T03:00:00.0000000",
+        "timeZone": "UTC"
+      }
+    }
+  ]
+}

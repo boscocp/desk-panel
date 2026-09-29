@@ -245,3 +245,79 @@ language = "pt-BR"
 # `lock` are deliberately not available: the threat model above only holds for
 # actions that are safe to repeat.
 actions = ["mute-audio", "mute-mic"]
+
+
+# ---------------------------------------------------------------------------
+# Calendars — the next meeting on the AGENDA card (T9.1)
+# ---------------------------------------------------------------------------
+
+# Read docs/adr/0017-calendars-are-personal-data.md before turning this on.
+# The short version: the grant is **read-only** (Google
+# `calendar.events.owned.readonly`, Microsoft `Calendars.ReadBasic`), only the
+# primary calendar is read, and the refresh tokens live on this PC in
+# `server/calendar-tokens.json` (gitignored, mode 0600), never in this file and
+# never on the phone.
+#
+# One table per account. `provider` is "google" or "microsoft"; `name` is yours,
+# lowercase letters, digits and hyphens, and it is what the panel prints when an
+# account needs reconnecting ("microsoft/work: reconnect"). Then connect each
+# one, once, from this PC:
+#
+#     python server/calendar_login.py google --account personal
+#     python server/calendar_login.py microsoft --account work
+#
+# A Microsoft *work or school* account belongs to its employer's tenant. The
+# tenant may refuse consent to an app nobody there approved, and whether its
+# calendar may sit on a panel at home is the employer's policy to answer.
+#
+# Empty, which is the default, costs nothing: no request, and the AGENDA card
+# stays reserved.
+calendar_accounts = []
+# calendar_accounts = [
+#     { provider = "google", name = "personal" },
+#     { provider = "microsoft", name = "personal" },
+#     { provider = "microsoft", name = "work" },
+# ]
+
+# The OAuth client ids you register yourself -- docs/SERVER-SETUP.md walks both.
+# Nobody ships a shared one, and the reason is not modesty: a client id is where
+# the consent screen, the quota and the right to revoke all live.
+#
+# Google's "Desktop app" client comes with a secret that Google's own
+# documentation says is "obviously not treated as a secret". It is kept here
+# anyway, beside the brapi token, because it is still half of a pair.
+# Microsoft is a public client and has no secret at all.
+google_client_id = ""
+google_client_secret = ""
+microsoft_client_id = ""
+
+# How often the server asks the calendars, in seconds. Five minutes is well
+# inside both providers' quotas, and a meeting added in the last five minutes is
+# one you already know about. The countdown itself is redrawn on the phone every
+# minute from the instant it already has, which costs no request.
+calendar_interval_s = 300
+
+# How far ahead to look, in hours. The card shows the next event; nothing
+# further out than this is asked for.
+calendar_lookahead_h = 24
+
+# **Whether the panel shows meeting titles.** On, by the owner's decision, and
+# with this cost: the server has no authentication, so **anyone on the same
+# Wi-Fi can read the titles of your next meetings** at /quotes, and a title
+# often names someone else. `false` removes every title on the server, before
+# the payload is built; the card then says "in 25 min" and the LAN learns only
+# that there is a meeting.
+calendar_show_titles = true
+
+
+# ---------------------------------------------------------------------------
+# Hosts
+# ---------------------------------------------------------------------------
+
+# The names this server answers to besides an IP address and `localhost`. A
+# request whose Host header is anything else gets 421 before any route runs,
+# because that is the shape of a DNS rebinding attack: a web page you visit
+# pointing its own name at this PC to read /quotes (ADR 0017). The phone always
+# uses the IP, so this stays empty unless you browse to the PC by name, e.g.
+# ["mypc.local"].
+allowed_hosts = []

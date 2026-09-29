@@ -296,6 +296,22 @@ body {
     min-width: 0;
 }
 
+/* The next meeting (T9.1): the one item in the footer that gives way. The
+ * battery and the buttons keep their size, and a long title ellipsises here
+ * rather than pushing either of them off the row. */
+#agenda {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 20px;
+    line-height: 1.4;
+}
+
+.a-line {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 /* The shortcut buttons (T8.2), pushed to the far end so the device line keeps
  * the left edge every other row in this theme starts at. */
 #shortcuts {

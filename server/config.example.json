@@ -26,5 +26,16 @@
   "night_end": "07:00",
   "theme": "neon",
   "language": "pt-BR",
-  "actions": ["mute-audio", "mute-mic"]
+  "actions": [
+    "mute-audio",
+    "mute-mic"
+  ],
+  "calendar_accounts": [],
+  "google_client_id": "",
+  "google_client_secret": "",
+  "microsoft_client_id": "",
+  "calendar_interval_s": 300,
+  "calendar_lookahead_h": 24,
+  "calendar_show_titles": true,
+  "allowed_hosts": []
 }

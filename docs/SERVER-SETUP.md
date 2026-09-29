@@ -69,6 +69,115 @@ Delete the old `config.json` only after that, and only once the panel has come b
 The same rule will apply to the systemd user unit and the LaunchAgent (T3.9, T3.10): whoever
 passes the path is who has to change it.
 
+## Calendars (optional)
+
+The AGENDA card shows your next meeting from Google Calendar and Outlook (T9.1). This is off
+until you list an account, and it is the one part of the panel that handles personal data, so
+read [ADR 0017](adr/0017-calendars-are-personal-data.md) first. In short:
+
+- **Read-only, primary calendar only.** Google `calendar.events.owned.readonly`, Microsoft
+  `Calendars.ReadBasic`. The server refuses and discards any grant broader than that.
+- **Tokens stay on this PC**, in `server/calendar-tokens.json` beside the config: gitignored,
+  mode 0600, never in `config.toml`, never on the phone.
+  - **On Windows, clone the repository inside your own profile** (`C:\Users\<you>\...`) and
+    outside any folder OneDrive syncs. Mode bits do nothing there, so the file is exactly as
+    private as the folder it sits in.
+- **Titles are on by default, and anyone on your Wi-Fi can read them** at `/quotes`, for up to
+  your next five events. Set `calendar_show_titles = false` and the card shows only the
+  countdown.
+
+You register your own OAuth client with each provider. Nobody ships a shared one.
+
+### Google
+
+1. In the [Google Cloud console](https://console.cloud.google.com/), create a project and enable
+   the **Google Calendar API** for it.
+2. Under **Google Auth Platform**, configure the consent screen with user type **External**, and
+   add your own address as a test user.
+3. Under **Data access**, add exactly one scope,
+   `https://www.googleapis.com/auth/calendar.events.owned.readonly`.
+4. Under **Clients**, create an OAuth client of type **Desktop app**. Copy its id and secret into
+   `google_client_id` and `google_client_secret` in `config.toml`. Google's own documentation
+   says a Desktop client's secret is "obviously not treated as a secret". It stays in the
+   gitignored file anyway.
+5. Under **Audience**, **publish the app** ("In production"). This step is not optional:
+   - A consent screen left in "Testing" issues refresh tokens that **expire after 7 days**, and
+     the card would say `reconnect` every week
+     ([Google](https://developers.google.com/identity/protocols/oauth2)).
+   - A published app nobody has verified is allowed for personal use by fewer than 100 users.
+     You click through the "Google hasn't verified this app" warning once, at login.
+
+Then list the account and connect it from this PC:
+
+```toml
+calendar_accounts = [{ provider = "google", name = "personal" }]
+```
+
+```bash
+python server/calendar_login.py google --account personal
+```
+
+- **How it connects:** your browser opens Google's consent page, and the command catches the
+  redirect on `127.0.0.1`, on a port the OS picks, and only for that one request.
+- **Why not a short device code, as with Microsoft:** Google's device flow does not allow any
+  Calendar scope.
+- **On a PC without a browser:** add `--no-browser` and open the printed URL with an SSH tunnel
+  to that port.
+
+### Microsoft (personal and work or school)
+
+1. In the [Microsoft Entra admin center](https://entra.microsoft.com/), go to **App
+   registrations** and choose **New registration**.
+   - For supported account types, choose **Accounts in any organizational directory and
+     personal Microsoft accounts**.
+   - No redirect URI is needed.
+   - If the portal says you have no directory, a free Azure account creates one.
+2. Under **Authentication**, set **Allow public client flows** to **Yes**. The device code flow
+   needs it, and a public client has no secret to leak.
+3. Under **API permissions**, choose **Add a permission**, then **Microsoft Graph**, then
+   **Delegated**, and add **Calendars.ReadBasic**. It reads events without their body,
+   attachments or extensions, and needs no admin consent. You can remove the default
+   `User.Read`; the server accepts it, since it only reads your name.
+4. Copy the **Application (client) ID** into `microsoft_client_id`.
+
+```toml
+calendar_accounts = [
+    { provider = "microsoft", name = "personal" },
+    { provider = "microsoft", name = "work" },
+]
+```
+
+```bash
+python server/calendar_login.py microsoft --account personal
+python server/calendar_login.py microsoft --account work
+```
+
+Each command prints a URL and a short code. Open the URL on any device, type the code, and sign
+in with the account you named. The command finishes by itself.
+
+**A work or school account belongs to your employer's tenant, and the tenant decides.**
+
+- The tenant may refuse consent to an app nobody there has approved. The sign-in then ends in
+  an admin-consent request, and the account is not connected.
+- Whether a work calendar may sit on a panel in your home is a question for your employer's
+  data policy. This guide cannot answer it.
+
+### Checking it, and undoing it
+
+- `python server/server.py --check-only` names the configured accounts and the token file.
+- A failing account is named on the card and in the server log, with the reason. The log never
+  contains a token, a code or a title.
+  - `microsoft/work: reconnect` means the grant is over: run the login again.
+  - `unavailable` means the provider or the network is down, and it retries by itself.
+- To disconnect, run `python server/calendar_login.py google --account personal --disconnect`.
+  For Google this also revokes the grant. Microsoft has no per-app revocation endpoint, so
+  remove the app yourself:
+  - work or school: [My Apps](https://myapplications.microsoft.com/)
+  - personal: [account.live.com/consent/Manage](https://account.live.com/consent/Manage)
+- Google access can also be removed at
+  [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
+- Deleting `server/calendar-tokens.json` disconnects every account on this PC.
+
 ## Run it once by hand
 
 ```bash

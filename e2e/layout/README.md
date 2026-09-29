@@ -127,7 +127,7 @@ and the width is **872 rather than 839** because `MainActivity` sets
 Measured on the device, not derived on paper. Do not round it off; if the cutout mode ever
 changes, this number changes with it and the layout has to be measured again.
 
-## The four passes
+## The passes
 
 `served` runs the page as `mock.js` feeds it. `stress` then pushes the widest case the panel
 can legitimately be asked to show — the longest weather label in `format.js`, a long city name,
@@ -135,8 +135,16 @@ a negative temperature, a six-figure and a sub-1 crypto price together, a symbol
 than a ticker, a zero change, the STALE badge, a 23:59:59 clock and a pt-BR date as the phone
 renders it.
 
-All four matter. The typical tick is not what breaks a layout, and each fixture says beside
+All of them matter. The typical tick is not what breaks a layout, and each fixture says beside
 its values why they are there.
+
+### `agenda`, which measures one line
+
+`agenda.js` sends a meeting in progress that ends tomorrow (T9.1). neon draws it as
+"até amanhã 10:00", four characters more than its 32px countdown holds, so the line steps down a
+size rather than cutting off the time. `stress.js` carries the other widest case, "amanhã 09:00"
+at full size, under a very long title and the longest failure line; the card shows one event at a
+time, so the two cannot share a fixture.
 
 ### `unknown`, which measures one card
 
