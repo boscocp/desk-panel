@@ -113,6 +113,11 @@ Nothing lands on the host — no JDK, no Android SDK, no Android Studio
 ([ADR 0003](adr/0003-containerized-toolchain.md)). The first run downloads the image and takes a
 few minutes; after that it is seconds.
 
+On an Apple Silicon Mac the image runs as `linux/amd64` under emulation — `docker/compose.yml`
+pins the platform because Google ships AAPT2 for Linux as x86-64 only, and an arm64 image fails
+at `processDebugResources`. Measured on 2026-09-29: the JVM suite in 27 s and the APK in 53 s,
+warm.
+
 Then:
 
 - [PHONE-SETUP.md](PHONE-SETUP.md) — what Android has to be told, and how to verify each grant.

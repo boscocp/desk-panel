@@ -6,6 +6,12 @@ services:
       context: .
       dockerfile: Dockerfile
     image: desk-panel/android-toolchain:36
+    # Google publishes AAPT2 for Linux as x86-64 only. On an Apple Silicon Mac
+    # the base image otherwise resolves to arm64, the Gradle daemon starts, and
+    # processDebugResources dies on "Dynamic loader not found:
+    # /lib64/ld-linux-x86-64.so.2". Pinning the platform runs the whole image
+    # under Rosetta there and is a no-op on every x86-64 host, CI included.
+    platform: linux/amd64
     # Without this every Gradle artefact in out/ and android/build/ lands
     # root-owned and `make clean` fails from the host. This was invisible on
     # Docker Desktop for Windows and is immediate on Linux.
