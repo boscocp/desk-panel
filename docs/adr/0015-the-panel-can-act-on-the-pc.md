@@ -200,7 +200,8 @@ The defence is not a token. A token would have to ship inside the APK, which is 
 [ADR 0013](0013-local-configuration-boundaries.md) exists to prevent, and it would be readable
 off `/app` anyway. It is that **a browser announces itself**: the Fetch standard requires an
 `Origin` header on every non-`GET` request, and `Sec-Fetch-Site` rides along on the engines that
-implement it. `POST /action/<id>` refuses with **403** when either is present.
+implement it. `POST /action/<id>` refuses with **403** when `Origin` is present, or
+`Sec-Fetch-Site` is anything other than `none`.
 
 The panel's own client is Java's `HttpURLConnection`, which sends neither. Nor do `curl` and
 `probe.py`, which is what keeps T8.1's acceptance line meaning what it says, and what makes this

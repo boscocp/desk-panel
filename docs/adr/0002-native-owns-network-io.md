@@ -1,6 +1,6 @@
 # 0002 — Native code owns all network I/O
 
-Status: accepted · 2026-09-13
+Status: accepted · 2026-09-13 · the cleartext scope amended by [0016](0016-more-than-one-pc.md)
 
 ## Context
 
@@ -27,7 +27,7 @@ webView.evaluateJavascript("window.onData(" + json + ")", null);
 ```
 
 `setMixedContentMode(MIXED_CONTENT_NEVER_ALLOW)` stays set. Cleartext to the PC is permitted by
-`network_security_config.xml`, scoped to that one address, and applies to the native HTTP
+`network_security_config.xml`, scoped to the listed PC addresses (ADR 0016), and applies to the native HTTP
 client rather than to page content.
 
 ## Consequences

@@ -26,7 +26,7 @@ host stays clean either way.
 | Web | `node:test` + `node:assert`, stable since Node 20 | `node --test "web/test/**/*.test.js"` |
 | Android unit | JUnit on the JVM | `./gradlew test` |
 | Android instrumented | Espresso, including Espresso-Web | `make connected` |
-| End-to-end | Python + adb | `python e2e/run_e2e.py` |
+| End-to-end | Python + adb | `python e2e/run_e2e.py` (planned, TT.8) |
 
 ### The E2E does not read screen state from the OS
 
@@ -41,11 +41,12 @@ Building the project's central assertion on undocumented, vendor-variable behavi
 a suite that breaks on a MIUI update with no warning.
 
 So the app reports its own state, via `Log.i` on the tag `DeskPanel`, emitting `state=online`,
-`state=offline`, `screen=sleep` and `screen=wake`. `run_e2e.py` asserts on
-`adb logcat -s DeskPanel`. This is fully under our control, documented by us, and survives OS
+`state=offline`, `screen=sleep` and `screen=wake`. `run_e2e.py` (TT.8, not yet
+written) will assert on `adb logcat -s DeskPanel`; today the same markers are checked by hand
+and by the task files' acceptance commands. This is fully under our control, documented by us, and survives OS
 updates.
 
-`dumpsys power` is still consulted as an **optional corroborating check**, isolated in one
+`dumpsys power` is to be consulted as an **optional corroborating check**, isolated in one
 function with a comment naming it as AOSP-derived. If it disagrees, the suite warns; it does
 not fail.
 

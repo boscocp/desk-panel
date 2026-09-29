@@ -1,7 +1,8 @@
 # 0004 — The PC server is both the login signal and the data proxy
 
 Status: accepted · 2026-09-13 · Amended by [0010](0010-login-signal-is-session-scoped.md),
-which restates the login-signal rule for Linux and macOS
+which restates the login-signal rule for Linux and macOS, and by
+[0016](0016-more-than-one-pc.md), which lets the panel follow more than one PC
 
 ## Context
 
@@ -15,7 +16,8 @@ APK is a token anyone can extract.
 
 ## Decision
 
-A single small Python process on the PC does both jobs.
+A single small Python process on the PC does both jobs. With more than one PC, each runs its
+own (ADR 0016).
 
 **As the login signal:** it is started by a Windows Scheduled Task with an "At log on" trigger,
 so it runs inside the user's session. "It answers" therefore means "someone is logged in". A

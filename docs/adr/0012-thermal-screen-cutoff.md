@@ -1,6 +1,7 @@
 # 0012 — Temperature is the second authority over the screen
 
-Status: accepted · 2026-09-16
+Status: accepted · 2026-09-16 · implemented in T5.5 (`ThermalState.BLANK_AT_C = 45.0`,
+`CLEAR_AT_C = 38.0`); T4.4 kept real sleep, so point 2's distinction stands
 
 ## Context
 
