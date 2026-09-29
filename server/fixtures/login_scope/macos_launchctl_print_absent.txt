@@ -1,1 +1,2 @@
-Could not find service "dev.bosco.deskpanel" in domain for gui
+Bad request.
+Could not find service "dev.bosco.deskpanel" in domain for user gui: 501

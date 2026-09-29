@@ -184,7 +184,10 @@ class WindowsScheduledTaskTests(unittest.TestCase):
 
 
 class MacOsLaunchAgentTests(unittest.TestCase):
-    """The macOS row, which nobody on this project can run for real."""
+    """The macOS row. The loaded and absent `launchctl print` fixtures are real
+    captures from a Mac (2026-09-29); the daemon one is still written to the
+    documented shape, because capturing it means installing a LaunchDaemon.
+    """
 
     def agent(self, plist_name, print_name, path="/Users/u/Library/LaunchAgents/x.plist"):
         plist = vls.parse_launchagent_plist(vls.fixture(plist_name))
@@ -230,6 +233,33 @@ class MacOsLaunchAgentTests(unittest.TestCase):
         statuses = self.agent("macos_launchagent_good.plist",
                               "macos_launchctl_print_absent.txt")
         self.assertEqual(statuses["macos.agent.loaded"], vls.FAIL)
+
+    def test_nested_blocks_do_not_override_the_services_own_keys(self):
+        """The real capture has coalition blocks with their own `type =` and
+        `state =` after the service's; a flat scan read `jetsam`.
+        """
+        printed = vls.parse_launchctl_print(vls.fixture("macos_launchctl_print_agent.txt"))
+        self.assertEqual((printed["type"], printed["state"], printed["domain"]),
+                         ("LaunchAgent", "running", "gui/501"))
+
+    def test_an_argument_that_looks_like_a_brace_is_data(self):
+        """A path ending in `{`, or an argument that is a bare `}`, is printed
+        verbatim inside `arguments = { ... }`. Counting braces made the first
+        lose `domain` and the second read `jetsam` again. Found by review.
+        """
+        real = vls.fixture("macos_launchctl_print_agent.txt")
+        for name, hostile in (("ends in {", "/Users/bosco/cfg{"), ("bare }", "}")):
+            with self.subTest(name):
+                text = real.replace("\t\t-u\n", f"\t\t{hostile}\n", 1)
+                self.assertNotEqual(text, real)
+                printed = vls.parse_launchctl_print(text)
+                self.assertEqual((printed["type"], printed["state"], printed["domain"]),
+                                 ("LaunchAgent", "running", "gui/501"))
+                self.assertEqual(printed["arguments"][1], hostile)
+
+    def test_the_absent_message_names_the_service_not_bad_request(self):
+        printed = vls.parse_launchctl_print(vls.fixture("macos_launchctl_print_absent.txt"))
+        self.assertIn("Could not find service", printed["message"])
 
     def test_a_plist_in_the_system_wide_directory_fails(self):
         """/Library/LaunchAgents loads for every user who logs in, so the

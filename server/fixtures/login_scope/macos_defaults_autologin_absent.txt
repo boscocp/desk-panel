@@ -1,1 +1,2 @@
+2026-09-29 10:57:59.675 defaults[71290:299942] 
 The domain/default pair of (/Library/Preferences/com.apple.loginwindow, autoLoginUser) does not exist

@@ -56,6 +56,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # install_user_unit.sh pins the unit name.
 TASK_NAME = "desk-panel"
 UNIT_NAME = "desk-panel.service"
+AGENT_LABEL = "dev.bosco.deskpanel"
 
 # Where the last successful run is recorded, so "changed since you last ran
 # this" is an exact statement rather than a guess. Gitignored: it is per
@@ -149,6 +150,29 @@ def parse_exec_start(unit_text):
     if len(quoted) < 2 or config is None:
         return None
     return {"python": quoted[0], "server_py": quoted[1], "config": config.group(1)}
+
+
+def parse_program_arguments(plist):
+    """`{python, server_py, config}` out of a LaunchAgent's parsed plist, or None.
+
+    The macOS sibling of `parse_exec_start`. `ProgramArguments` is already an
+    argv -- launchd runs no shell -- so there is no quoting to undo, and a path
+    with a space in it arrives whole. The shape is the one
+    `server/dev.bosco.deskpanel.plist.in` writes: python, `-u`, server.py,
+    `--config`, the config. Anything without a `--config` followed by a value
+    is None rather than a guess.
+    """
+    args = (plist or {}).get("ProgramArguments")
+    if not isinstance(args, list) or len(args) < 2 or not all(isinstance(a, str) for a in args):
+        return None
+    try:
+        config = args[args.index("--config") + 1]
+    except (ValueError, IndexError):
+        return None
+    server_py = next((a for a in args[1:] if a.endswith("server.py")), None)
+    if server_py is None:
+        return None
+    return {"python": args[0], "server_py": server_py, "config": config}
 
 
 def unit_file_path():
@@ -447,6 +471,49 @@ def restart_linux(port, timeout, dry_run):
     return Step("restart", PASS, f"unit restarted, answering on :{port}")
 
 
+def kickstart_command(uid):
+    """Pure: the restart. `-k` is the whole point -- without it kickstart
+    leaves a running job alone, the port is already open, and the step would
+    report a restart that never happened (found by review)."""
+    return ["launchctl", "kickstart", "-k", f"gui/{uid}/{AGENT_LABEL}"]
+
+
+def loaded_agent():
+    """The parsed `launchctl print` of the agent, or an error string."""
+    sys.path.insert(0, str(REPO_ROOT))
+    from server.verify_login_scope import ParseError, parse_launchctl_print
+
+    code, output = run(["launchctl", "print", f"gui/{os.getuid()}/{AGENT_LABEL}"], timeout=30)
+    if code is None:
+        return output
+    try:
+        return parse_launchctl_print(output)
+    except ParseError as exc:
+        return f"launchctl print: {exc}"
+
+
+def restart_macos(port, timeout, dry_run):
+    command = kickstart_command(os.getuid())
+    if dry_run:
+        return Step("restart", SKIP, f"would run: {' '.join(command)}")
+    before = loaded_agent()
+    before_pid = before.get("pid") if isinstance(before, dict) else None
+    # Through launchd -- "ask the launcher", never spawn the server from here
+    # (invariant 2).
+    code, output = run(command, timeout=60)
+    if code is None:
+        return Step("restart", UNKNOWN, output)
+    if code != 0:
+        return Step("restart", FAIL, f"launchctl kickstart failed: {output.strip()[:200]}")
+    if not wait_for_port(port, listening=True, timeout=timeout):
+        return Step("restart", FAIL, f"agent restarted but nothing answers on :{port}")
+    after = loaded_agent()
+    after_pid = after.get("pid") if isinstance(after, dict) else None
+    if before_pid and after_pid == before_pid:
+        return Step("restart", FAIL, f"kickstart returned 0 and pid {before_pid} is still the one serving")
+    return Step("restart", PASS, f"agent restarted (pid {before_pid} -> {after_pid}), answering on :{port}")
+
+
 # --------------------------------------------------------------------------
 # The run.
 # --------------------------------------------------------------------------
@@ -697,16 +764,27 @@ def main(argv=None):
                 config_path, server_py = parsed["config"], parsed["server_py"]
                 python_exe = parsed["python"]
     elif platform == "darwin":
-        # T3.10 is `blocked`, not done: the plist ships and has never run on a
-        # Mac. Claiming a verdict here would be the one thing ADR 0010 asks this
-        # repo not to do about macOS.
-        steps.append(
-            Step(
-                "launcher",
-                UNKNOWN,
-                "macOS has no installer yet (T3.10, blocked -- no Mac). See docs/UPDATING.md",
+        # The paths come out of the job launchd has **loaded**, not the plist
+        # on disk: `install_agent.sh --no-start` rewrites the file without
+        # reloading, and reading the file then would check config B while
+        # `kickstart` restarts the job still running config A. Found by review.
+        printed = loaded_agent()
+        if printed is None or isinstance(printed, str):
+            steps.append(Step("launcher", UNKNOWN, printed or "launchctl print failed"))
+        elif not printed.get("found"):
+            steps.append(
+                Step("launcher", FAIL, f"{AGENT_LABEL} is not loaded (run server/install_agent.sh)")
             )
-        )
+        else:
+            steps.append(Step("launcher", PASS, f"LaunchAgent {AGENT_LABEL}, loaded in {printed.get('domain')}"))
+            parsed = parse_program_arguments({"ProgramArguments": printed.get("arguments")})
+            if parsed is None:
+                steps.append(
+                    Step("launcher args", UNKNOWN, "the loaded job's arguments carry no --config")
+                )
+            else:
+                config_path, server_py = parsed["config"], parsed["server_py"]
+                python_exe = parsed["python"]
     else:
         steps.append(Step("launcher", UNKNOWN, f"unsupported platform {platform}"))
 
@@ -727,7 +805,7 @@ def main(argv=None):
             port = int(load_config(config_path).get("port", PORT))
         except Exception as exc:
             steps.append(Step("port", UNKNOWN, f"could not read the port: {exc}"))
-    if port is None and platform != "darwin":
+    if port is None:
         steps.append(Step("port", UNKNOWN, "no port to probe, so no restart was attempted"))
 
     # What gates the restart is what decides whether the server can come back
@@ -745,6 +823,8 @@ def main(argv=None):
             steps.append(restart_windows(port, args.timeout, args.dry_run))
         elif platform.startswith("linux"):
             steps.append(restart_linux(port, args.timeout, args.dry_run))
+        elif platform == "darwin":
+            steps.append(restart_macos(port, args.timeout, args.dry_run))
         if not args.dry_run:
             steps.append(step_payload(port))
             steps.append(step_login_scope(python_exe))
@@ -837,6 +917,27 @@ def self_test_cases():
         ("task arguments: no --config is None, not a guess", lambda: parse_task_arguments('"x.py"') is None),
         ("task arguments: empty is None", lambda: parse_task_arguments("") is None),
         ("task arguments: unquoted is None", lambda: parse_task_arguments("server.py --config c.toml") is None),
+        (
+            "ProgramArguments: the installer's shape comes back whole, spaces included",
+            lambda: parse_program_arguments({"ProgramArguments": [
+                "/opt/homebrew/bin/python3", "-u", "/Users/me/My Projects/server/server.py",
+                "--config", "/Users/me/My Projects/server/config.toml",
+            ]}) == {
+                "python": "/opt/homebrew/bin/python3",
+                "server_py": "/Users/me/My Projects/server/server.py",
+                "config": "/Users/me/My Projects/server/config.toml",
+            },
+        ),
+        (
+            "ProgramArguments: no --config is None, not a guess",
+            lambda: parse_program_arguments({"ProgramArguments": ["/usr/bin/python3", "server.py"]}) is None,
+        ),
+        (
+            "ProgramArguments: a trailing --config with no value is None",
+            lambda: parse_program_arguments({"ProgramArguments": ["/p", "server.py", "--config"]}) is None,
+        ),
+        ("ProgramArguments: a plist without them is None", lambda: parse_program_arguments({}) is None),
+        ("kickstart: -k, or a running job is left alone", lambda: "-k" in kickstart_command(501)),
         (
             "ExecStart: the three quoted paths come back",
             lambda: parse_exec_start(UNIT_SAMPLE)["config"].endswith("config.toml"),

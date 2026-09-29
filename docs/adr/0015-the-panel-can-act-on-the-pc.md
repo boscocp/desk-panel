@@ -150,6 +150,13 @@ claim about that one. This paragraph is the whole mitigation, and it is written 
 than left in a comment because it is a limit on a privacy promise, not an implementation
 detail. If a built-in route ever turns up, it is a change to this record.
 
+First run on a Mac, 2026-09-29 (macOS 26.5): both presses work, through `run_action` and through
+`POST /action/*` on a server launched by the LaunchAgent, and the input level came back to the
+exact value it had (63), not to the 75 fallback — the remembered-level path had never executed
+before. That Mac has three inputs: the built-in microphone (the default), a USB DAC's line-in
+and Microsoft Teams' virtual device. The press moved the first. The other two were not measured,
+because nothing within the rules can read them, and that is the limit above, now on real hardware.
+
 ### `POST` only, and no shell
 
 `GET` is out, because a `GET` that changes the machine is one browser prefetch or one link

@@ -395,20 +395,59 @@ def check_not_in_default_closure(dependencies):
 def parse_launchctl_print(text):
     """Pure: `launchctl print gui/<uid>/<label>` output.
 
-    Only the handful of lines that matter is extracted. Lines from the nested
-    `environment = { KEY => VALUE }` blocks partition on '=' too, but their
-    keys never collide with the ones read here.
+    Only the service's own top-level keys are read, plus the `arguments`
+    block, which is the argv launchd actually loaded -- not whatever the plist
+    on disk says now.
     """
     stripped = text.strip()
     if not stripped:
         raise ParseError("empty launchctl print output")
     if "Could not find service" in stripped:
-        return {"found": False, "message": stripped.splitlines()[0].strip()}
+        # A real absent print opens with "Bad request." on its own line, so
+        # the first line says nothing; the line that names the service does.
+        message = next(line.strip() for line in stripped.splitlines()
+                       if "Could not find service" in line)
+        return {"found": False, "message": message}
     if stripped.startswith("Bad request") or stripped.startswith("Unrecognized"):
         raise ParseError(f"launchctl rejected the request: {stripped.splitlines()[0]}")
 
+    # Nested blocks are skipped whole. A real print on macOS 26 carries
+    # `resource coalition = { type = resource; state = active }` and a
+    # `jetsam coalition` block after the service's `type = LaunchAgent`, so a
+    # flat scan read the last one and reported a correctly loaded agent as
+    # type='jetsam' -- FAIL on the first real Mac (T3.10, 2026-09-29).
+    #
+    # A block opens only on a line that is exactly `name = {`, and closes only
+    # on a `}` at the opener's own indentation. Counting every `{` and `}`
+    # instead -- the first cut -- broke on an argument that ends in `{` or is
+    # a bare `}`: a path is data, and launchctl prints it verbatim inside
+    # `arguments = { ... }`, one indent deeper than the brace that closes it.
+    # Found by review.
     result = {"found": True, "properties": set()}
-    for line in text.splitlines():
+    lines = text.splitlines()
+    header = next((i for i, line in enumerate(lines) if line.rstrip().endswith("= {")), None)
+    if header is None:
+        raise ParseError("launchctl print output has no opening 'label = {' line")
+    block_name = block_indent = None
+    block_lines = []
+    for line in lines[header + 1:]:
+        indent = len(line) - len(line.lstrip())
+        stripped_line = line.strip()
+        if block_name is not None:
+            if stripped_line == "}" and indent == block_indent:
+                if block_name == "arguments":
+                    result["arguments"] = block_lines
+                block_name = None
+                block_lines = []
+            else:
+                block_lines.append(stripped_line)
+            continue
+        opener = re.fullmatch(r"([^=]+?) = \{", stripped_line)
+        if opener:
+            block_name, block_indent = opener.group(1), indent
+            continue
+        if stripped_line == "}":
+            break
         key, separator, value = line.partition("=")
         if not separator:
             continue
@@ -422,6 +461,8 @@ def parse_launchctl_print(text):
             result["state"] = value
         elif key == "program":
             result["program"] = value
+        elif key == "pid":
+            result["pid"] = value
         elif key == "domain":
             # "gui/501 [100005]" -- the bracketed handle is noise.
             result["domain"] = value.split()[0] if value else ""
