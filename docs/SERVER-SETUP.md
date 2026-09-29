@@ -310,8 +310,43 @@ python server/probe.py --host <this-pc-ip> --port 8777 --expect up
 ## macOS
 
 A LaunchAgent in `~/Library/LaunchAgents` with `LimitLoadToSessionType = Aqua` (T3.10). Never a
-LaunchDaemon, and never `/Library/LaunchAgents`. Written but **unverified** — there is no Mac
-to run it on, and the task is `blocked` rather than pretending otherwise.
+LaunchDaemon, which loads at boot as root with nobody logged in, and never `/Library/LaunchAgents`,
+which loads for *every* user's login.
+
+```bash
+cp server/config.example.toml server/config.toml     # then edit it
+python3 server/server.py                             # once, in the foreground -- see below
+sh server/install_agent.sh
+```
+
+The installer renders `server/dev.bosco.deskpanel.plist.in` with absolute paths, lints it, and
+loads it into `gui/<uid>` with `launchctl bootstrap`. It refuses to run as root, beside a
+LaunchDaemon or a `/Library/LaunchAgents` copy of the same label, or from a shell that is not in
+the Aqua session (over SSH, say) unless you pass `--no-start`. Re-running it replaces the agent;
+`--uninstall` removes it.
+
+| | |
+|---|---|
+| status | `launchctl print gui/$(id -u)/dev.bosco.deskpanel` |
+| restart | `launchctl kickstart -k gui/$(id -u)/dev.bosco.deskpanel` |
+| log | `~/Library/Logs/desk-panel.log` |
+
+**The interpreter must be 3.11 or newer**, and `/usr/bin/python3` on macOS is 3.9. Homebrew's
+`python3` works. Homebrew does not install a bare `python`, which every command in this
+repository uses; `/opt/homebrew/opt/python@3.13/libexec/bin` on your `PATH` provides it.
+
+**The Application Firewall is per-binary, and the binary is not the one you think.** A framework
+Python (Homebrew's, python.org's) re-execs into `…/Resources/Python.app/Contents/MacOS/Python`,
+and that is what listens and what the firewall lists. The installer reads the running process
+and names it. With the firewall on and no allowance, `/ping` answers on `127.0.0.1` and not
+from the LAN, which looks exactly like a wrong IP. Allow it in System Settings → Network →
+Firewall → Options; a `brew upgrade` moves the binary and the allowance has to be given again.
+That is also why the server is run once in the foreground first: the "accept incoming network
+connections" dialog wants a human, and under launchd it may never be seen.
+
+Verified on macOS 26.5 (Apple Silicon) on 2026-09-29: `verify_login_scope.py` exits 0, `/ping`
+and `POST /action/*` answer from the agent. **Not yet verified: that nothing answers at the
+login window**, which needs a logout and a second machine (T3.10's behaviour block).
 
 ## Verifying the login scope
 
@@ -351,4 +386,6 @@ real captured output in `server/fixtures/login_scope/`:
 python server/verify_login_scope.py --self-test
 ```
 
-That is how the macOS checks are tested without a Mac (TT.10).
+That is how the macOS checks are tested without a Mac (TT.10). Since 2026-09-29 the macOS
+fixtures for a loaded agent and an absent one are real captures from a Mac, and the first of
+them found a parser bug that 97 green hand-written cases had not.

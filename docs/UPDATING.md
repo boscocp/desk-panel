@@ -113,20 +113,18 @@ the terminal, not with the session.
 
 ## macOS
 
-**Not implemented, and the script says so rather than guessing.** T3.10 is `blocked`: the
-LaunchAgent plist ships and has never run on a Mac. When it does, the shape is already decided
-by [ADR 0010](adr/0010-login-signal-is-session-scoped.md) — `~/Library/LaunchAgents`, with
-`LimitLoadToSessionType = Aqua`, never a LaunchDaemon and never `/Library/LaunchAgents` — and
-three things join the script:
+The same three steps as the other two platforms, through launchd. The launcher is the
+`dev.bosco.deskpanel` LaunchAgent loaded in `gui/<uid>` ([T3.10](../tasks/T3.10-macos-autostart.md));
+the paths come out of the `arguments` launchd has **loaded** (from `launchctl print`, not the
+plist on disk, which `install_agent.sh --no-start` can rewrite without reloading), the way the
+Windows branch reads the task's action and the Linux branch reads `ExecStart`; and the restart is
+`launchctl kickstart -k gui/$(id -u)/dev.bosco.deskpanel`, which is the launchd spelling of "ask
+the launcher, do not spawn it yourself". There is no socket wait between stop and start: `-k`
+does both, and macOS reuses the address the way Linux does. The step passes only if the pid
+changed, because a kickstart that left a running job alone still returns 0.
 
-- reading the agent's `ProgramArguments` for the registered paths, the way the Windows branch
-  reads the task's action;
-- `launchctl kickstart -k gui/$(id -u)/dev.bosco.desk-panel` as the restart, which is the
-  launchd spelling of "ask the launcher, do not spawn it yourself";
-- nothing about the socket wait, since macOS is POSIX here.
-
-`verify_login_scope.py` already covers macOS from fixtures (TT.10), so the check that the agent
-is session-scoped and has no LaunchDaemon twin works before any Mac exists.
+First run on a Mac, 2026-09-29: every step `ok` except `apk`, which has no reference point on a
+new machine and says so.
 
 ## The APK is the other half
 
