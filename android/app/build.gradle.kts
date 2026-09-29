@@ -79,10 +79,17 @@ pcIps?.forEach { ip ->
         throw GradleException("PC_IP in .env is not a list of IPv4 addresses: '$ip'")
     }
 }
-// Three at most, the same number as PcHosts.MAX_HOSTS: an offline cycle asks
-// every host at up to 3 s each, inside a 10 s wake lock (PanelService).
-if (pcIps != null && pcIps.size > 3) {
-    throw GradleException("PC_IP in .env lists ${pcIps.size} addresses; at most 3 fit the dormant probe's wake lock")
+// At most PcHosts.MAX_HOSTS: an offline cycle asks every host at up to 3 s
+// each, inside a 10 s wake lock (PanelService). Read from the Java source
+// rather than written here a second time, so lowering it there cannot leave a
+// build that passes and an APK that throws in PanelService.onCreate. Found by
+// review.
+val maxHosts = Regex("""MAX_HOSTS\s*=\s*(\d+)""")
+    .find(file("src/main/java/dev/bosco/deskpanel/PcHosts.java").readText())
+    ?.groupValues?.get(1)?.toInt()
+    ?: throw GradleException("PcHosts.MAX_HOSTS not found; the PC_IP cap reads it")
+if (pcIps != null && pcIps.size > maxHosts) {
+    throw GradleException("PC_IP in .env lists ${pcIps.size} addresses; at most $maxHosts fit the dormant probe's wake lock")
 }
 val pcIp = pcIps?.joinToString(",")
 val cleartextHosts = pcIps ?: listOf(cleartextPlaceholder)

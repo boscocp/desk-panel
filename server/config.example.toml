@@ -127,12 +127,15 @@ timezone = "America/Sao_Paulo"
 # 17th; at 600s it is 12,960 with the PC logged in around the clock. More
 # tickers, or a shorter interval, and that arithmetic has to be redone: four
 # tickers at 600s is 17,280 around the clock, which only fits if this PC is
-# logged in less than about 80% of the month.
+# logged in less than about 87% of the month.
 #
-# "Logged in" is the right word, because the server asks upstream only when
-# the panel asks it: the cache is filled on demand, never on a timer of its
-# own. With more than one PC (ADR 0016) the phone asks only the one it is on,
-# so a brapi token shared between PCs is not spent twice.
+# Quotes are fetched only when the panel asks: the cache fills on demand, so
+# with more than one PC (ADR 0016) only the one the phone is on spends quote
+# requests. **One exception**: at startup the server fetches every ticker's
+# history once, so the sparklines are there for the first payload -- one brapi
+# request per ticker, per login, on every PC that logs in, whether or not the
+# phone is looking at it. Small (four tickers is four requests), but it is
+# spent twice when two PCs share a token.
 quotes_interval_s = 600
 
 # Open-Meteo allows 10,000 requests a day for non-commercial use, so this is

@@ -25,6 +25,10 @@ cp server/config.example.toml server/config.toml
 Edit that copy: tickers, city, brapi token, port. `config.toml` is gitignored and never leaves
 the PC — the token in particular must never reach the APK.
 
+The copy has the two mute buttons on (`actions`). Anyone on the LAN can then press them, which
+is harmless on a home network and the reason to set `actions = []` on one you do not control
+([ADR 0015](adr/0015-the-panel-can-act-on-the-pc.md)).
+
 **Read `config.example.toml` rather than this section.** It is written as documentation, not as
 a sample: every key carries what it does, what its default is, and — the part that used to mean
 reading `providers_brapi.py` — which values actually work. Which four B3 tickers answer without
