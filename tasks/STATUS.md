@@ -199,6 +199,27 @@ and the first line of each file says so.
 | T9.1 | **The next meeting, under the clock** | todo | Google Calendar and Microsoft Outlook merged, the soonest event under the clock in the `#shortcuts` strip, between T8.2's two buttons. Blocked behind T8.2 for a layout reason and behind **ADR 0016** for a bigger one: this is the first feature that puts *personal data* on a panel whose server has no authentication, and the refresh tokens it needs are credentials sitting on a desktop PC. OAuth stays on the PC and never reaches the APK — two acceptance lines exist for exactly that. The merge is where the design is: the two providers disagree about all-day events, about time zones and about the word for "declined" |
 | T9.2 | **Spike: can the panel talk to an assistant for nothing?** | todo | A button to ask something out loud and hear an answer, with the whole pipeline on the PC — invariant 1 means the page cannot call anything. Time-boxed, produces `docs/spikes/2026-voice-assistant.md` and a throwaway prototype under `spikes/`, and is allowed to conclude *do not build this*. The unknown is whether offline STT, a small local model and offline TTS fit inside a latency a person will stand at a panel for; Claude and DeepSeek are the paid comparison, not the plan. Also has to answer the awkward ones: `RECORD_AUDIO` would be the app's first dangerous permission, and an unauthenticated LAN endpoint that runs a model and speaks in someone's room is not in ADR 0015's family |
 
+## Resuming after 2026-09-29 (wave 36)
+
+Wave 36 is **T7.7** on `wave/36-opening-the-repo`, after a history rewrite that put all 181 commits
+under the owner's personal email. Everything a private repository allows is applied; the rest is
+two commands in `docs/MAINTAINING.md` that answer 403/404 until the flip.
+
+**Next: T7.3**, the pre-public review. The secret sweeps and the link checks already pass. What is
+left is the README's final pass, reading the ADRs as an outsider, and **a photo of the panel on
+the phone in its stand**, which only the owner can take. Then the flip, which is irreversible and
+is the owner's call, followed at once by the two commands above. That closes T7.7.
+
+### What is still only true on this desk
+
+- **The work email survives in `refs/pull/46..48/head` on GitHub.** Only GitHub Support can purge
+  it; the owner files that request before or after the flip.
+- `config.toml` was deleted on the Mac; the agent reads `config.json`, which now holds the brapi
+  token at mode 600.
+- `~/Downloads/keystore.properties` still holds the signing passwords in plain text, outside the
+  repository. The owner deletes it.
+- T4.5's move between two live PCs, and everything carried from wave 35, unchanged.
+
 ## Resuming after 2026-09-29 (wave 35)
 
 Wave 35 is **T4.5**, the panel following more than one PC (ADR 0016), on `wave/35-two-pcs`,

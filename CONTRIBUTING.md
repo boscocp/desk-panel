@@ -17,11 +17,13 @@ Thirty seconds, so you know whether your idea belongs here before you spend an e
   survive a night on battery? The [device report](.github/ISSUE_TEMPLATE/device-report.yml)
   template asks the right questions. This is the contribution the project needs most, because it
   runs on one phone.
-- **Bug reports, from anybody**, with the four fields the bug template asks for.
+- **Bug reports, from anybody**, filled in through the bug template, which asks for what every
+  diagnosis here has needed.
 - **Themes and layouts.** `web/` is the natural place to contribute, and it runs in a browser with
   nothing installed.
 - **New data providers**, behind the existing normaliser shape in `server/providers_*.py`.
-- **Anything touching the three invariants in the README needs an ADR first**, then a PR. An ADR
+- **Anything touching the three design decisions the README opens with needs an ADR first**,
+  then a PR. They are stated as invariants in [CLAUDE.md](CLAUDE.md). An ADR
   is not a hurdle; it is where the conversation happens. The `needs-adr` label marks those issues.
 
 What it does not accept: authentication, cloud services, a framework in `web/`, or a dependency

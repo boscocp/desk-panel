@@ -138,13 +138,14 @@ root with an authenticated `gh` that has admin on it.
 
 ### Labels
 
-One per area of the codebase, plus the three the contribution guide promises.
+One per area of the codebase, plus the two the contribution guide promises. The third it
+promises is GitHub's default `good first issue`, kept by that exact name because it is the one
+GitHub's newcomer search surfaces; a hyphenated twin was created once and deleted for that reason.
 `--force` makes each line idempotent.
 
 ```bash
 gh label create device-report --color 1d76db --description "It works, or does not, on a phone we have not seen" --force
 gh label create needs-adr     --color d93f0b --description "Touches an invariant: an ADR comes before the PR" --force
-gh label create good-first-issue --color 7057ff --description "Small, real, and taken from the backlog" --force
 gh label create area:web      --color c5def5 --description "web/: the panel UI" --force
 gh label create area:server   --color c5def5 --description "server/: the PC half" --force
 gh label create area:android  --color c5def5 --description "android/: the phone half" --force
@@ -183,6 +184,16 @@ JSON
 
 `enforce_admins` is off on purpose. It is what would let the maintainer merge a
 fix while CI itself is broken, which is a real case for a one-person repo.
+
+### Private vulnerability reporting
+
+What makes the **Report a vulnerability** button in `SECURITY.md` exist. Like branch
+protection it answers 404 while the repository is private, so it is the second command
+after the flip.
+
+```bash
+gh api -X PUT repos/{owner}/{repo}/private-vulnerability-reporting
+```
 
 ### Review and ownership
 
