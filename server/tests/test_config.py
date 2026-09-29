@@ -6,6 +6,8 @@ holding the brapi token, in either format) is never read or written by these
 tests -- see server/CLAUDE.md.
 """
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -118,6 +120,21 @@ class LoadConfigTests(unittest.TestCase):
                     self.assertNotIn("super-secret-token", str(ctx.exception))
                 finally:
                     path.unlink()
+
+
+class CheckOnlyTests(unittest.TestCase):
+    """`--check-only` is what the launchers run, so it has to refuse what the
+    real start would die on -- a real process, because the gap was in `main`."""
+
+    def test_half_a_coordinate_pair_fails_check_only(self):
+        path = write_temp('city = "Sao Paulo"\nlatitude = -23.6\n', ".toml")
+        self.addCleanup(path.unlink)
+        result = subprocess.run(
+            [sys.executable, str(SERVER_DIR / "server.py"), "--config", str(path), "--check-only"],
+            capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("latitude and longitude must be set together", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
 
 
 class ExampleFileTests(unittest.TestCase):

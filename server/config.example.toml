@@ -111,6 +111,18 @@ city = "Sao Paulo"
 # a wrong number rather than an error. Set it to the city's own zone.
 timezone = "America/Sao_Paulo"
 
+# Where the forecast is read, in decimal degrees, as a pair. The values below
+# are Sao Paulo's centre, where the geocode lands anyway; in a city this size
+# that can be a different weather from your street, so point them there.
+# Optional: delete both lines and the city above is geocoded instead.
+# Set, they win over the geocode and `city` is only the label on the card,
+# shown as spelled here ("Sao Paulo", not the geocoder's "São Paulo"). So
+# changing `city` means changing these two, or deleting them.
+# Plain numbers, not strings. A single one, a quoted one or a point off the
+# globe stops the server at startup, and `--check-only` says so first.
+latitude = -23.5475
+longitude = -46.6361
+
 
 # ---------------------------------------------------------------------------
 # How often to refresh — seconds

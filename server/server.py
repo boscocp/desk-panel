@@ -101,6 +101,11 @@ DEFAULT_CONFIG = {
     "fx": [],
     "city": "Sao Paulo",
     "timezone": "America/Sao_Paulo",
+    # Optional, as a pair: where the forecast is read, overriding the geocode
+    # of `city`. None here means "geocode the city", as it always did; TOML
+    # has no null, so a config that wants that omits both keys.
+    "latitude": None,
+    "longitude": None,
     # 600, not 300, and the arithmetic is the reason. brapi's free plan allows
     # one symbol per request and 15k requests a month, so three tickers cost
     # three requests a refresh: at 300s that is 25,920 a month against a 15,000
@@ -492,8 +497,9 @@ class App:
         self._moon_lock = threading.Lock()
         self._moon_refreshing = False
         # Coordinates never change, so the geocode is cached for the life of
-        # the process rather than on a TTL (T3.4 step 1).
-        self.coords = None
+        # the process rather than on a TTL (T3.4 step 1). Configured ones are
+        # that cache pre-filled, and a broken pair fails startup here.
+        self.coords = providers_openmeteo.coords_from_config(config)
         # Validated once, here, rather than per request. A bad name is a
         # startup failure with a console in front of the owner (ADR 0015);
         # `main` catches the ValueError and exits. Constructing an App with a
@@ -1445,6 +1451,14 @@ def main(argv=None):
         calendar_accounts = providers_calendar.accounts_from_config(
             config.get("calendar_accounts"))
         providers_calendar.check_config(config)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        sys.exit(1)
+    # The weather's coordinates, for the same reason again: half a pair passing
+    # --check-only would only surface as a traceback from App() at the real
+    # start, after the launcher had already called the config good.
+    try:
+        providers_openmeteo.coords_from_config(config)
     except ValueError as exc:
         print(exc, file=sys.stderr)
         sys.exit(1)

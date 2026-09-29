@@ -36,6 +36,8 @@ them.
 **WMO codes stay codes.** Mapping `2` to "partly cloudy" is wording, and
 wording belongs to `web/js/format.js`. The server returns data.
 """
+import math
+
 from server.upstream import UpstreamError, get_json
 
 GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
@@ -89,6 +91,38 @@ def normalise_geocode(raw):
         # a human notices they geocoded the wrong Springfield.
         "city": str(first.get("name") or "").strip() or str(raw.get("_requested", "")),
     }
+
+
+def coords_from_config(config):
+    """Pure: the configured `latitude`/`longitude` -> `{lat, lon, city}`, or None.
+
+    None when neither is set, which leaves the city to be geocoded. A city as
+    big as Sao Paulo geocodes to its centre, and a storm over one district is
+    not one over another; the pair is how the owner points the forecast at
+    their own street. Raises ValueError for half a pair, a non-number or a
+    value off the globe: each would otherwise geocode quietly, or ask the
+    upstream for a place that does not exist, and the owner would read a
+    forecast for somewhere else. `main` runs this before `--check-only`
+    returns, so the launchers find a broken pair rather than a traceback.
+    """
+    lat_raw, lon_raw = config.get("latitude"), config.get("longitude")
+    if lat_raw is None and lon_raw is None:
+        return None
+    if lat_raw is None or lon_raw is None:
+        raise ValueError("latitude and longitude must be set together, or neither")
+    # Native numbers only. TOML and JSON both carry a float as a float, so a
+    # string here is a quoting mistake, and float() would read "1_0" as 10.
+    for raw in (lat_raw, lon_raw):
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)) or not math.isfinite(raw):
+            raise ValueError(
+                f"latitude and longitude must be numbers, got {lat_raw!r}, {lon_raw!r}")
+    lat, lon = float(lat_raw), float(lon_raw)
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        raise ValueError(f"latitude {lat} / longitude {lon} is not a place on Earth")
+    # The label stays the configured city, spelled as configured ("Sao Paulo",
+    # not the geocoder's "São Paulo"): these coordinates name no place, and
+    # the geocoder is not asked for one.
+    return {"lat": lat, "lon": lon, "city": str(config.get("city") or "")}
 
 
 def fetch_forecast(lat, lon, timezone, get=get_json):
@@ -234,5 +268,5 @@ def load(city, timezone, coords=None, get=get_json):
     return normalise(raw, city=coords.get("city") or city), coords
 
 
-__all__ = ["FORECAST_URL", "GEOCODE_URL", "UpstreamError", "fetch_forecast",
-           "fetch_geocode", "load", "normalise", "normalise_geocode"]
+__all__ = ["FORECAST_URL", "GEOCODE_URL", "UpstreamError", "coords_from_config",
+           "fetch_forecast", "fetch_geocode", "load", "normalise", "normalise_geocode"]

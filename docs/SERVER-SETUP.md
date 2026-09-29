@@ -22,8 +22,10 @@ from `default.target` — lights the panel for an empty room and looks like a ph
 cp server/config.example.toml server/config.toml
 ```
 
-Edit that copy: tickers, city, brapi token, port. `config.toml` is gitignored and never leaves
-the PC — the token in particular must never reach the APK.
+Edit that copy: tickers, city, brapi token, port. The copy also ships `latitude`/`longitude`,
+which win over `city` for the weather: point them at your own street, or delete both to geocode
+the city. `config.toml` is gitignored and never leaves the PC — the token in particular must
+never reach the APK.
 
 The copy has the two mute buttons on (`actions`). Anyone on the LAN can then press them, which
 is harmless on a home network and the reason to set `actions = []` on one you do not control
