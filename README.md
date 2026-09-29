@@ -102,6 +102,11 @@ behaviour and the two action buttons all work on the target device; phases 0–6
 and the remaining work is documentation and opening the repository. `tasks/STATUS.md` is the
 index, and it is honest about what has only ever run on one phone.
 
+**Tried it on another phone?** That is the most useful thing you can send back, whether it worked
+or not. Open an issue and pick the **Device report** form ([its questions](.github/ISSUE_TEMPLATE/device-report.yml));
+[CONTRIBUTING.md](CONTRIBUTING.md) says what else the project accepts, and
+[SECURITY.md](SECURITY.md) how to report anything private.
+
 ## License
 
 MIT
