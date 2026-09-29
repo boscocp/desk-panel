@@ -1,21 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Cleartext HTTP is permitted for the PC and for nothing else.
+  Cleartext HTTP is permitted for the PCs and for nothing else.
 
   The panel talks to the PC servers over plain http on the LAN, so the listed
-  hosts need an exemption, one <domain> each (ADR 0016). Granting it through a base-config instead would open
-  cleartext to every address on the internet, and setting the manifest-wide
-  cleartext flag on <application> does the same; both are forbidden here. See
-  android/CLAUDE.md and T4.1, whose acceptance greps for precisely that mistake.
+  hosts need an exemption, one <domain> each (ADR 0016). Granting it through a
+  base-config instead would open cleartext to every address on the internet,
+  and setting the manifest-wide cleartext flag on <application> does the same;
+  both are forbidden here. See android/CLAUDE.md and T4.1, whose acceptance
+  greps for precisely that mistake.
 
-  includeSubdomains is false because this is a bare IPv4 address: an IP has no
+  includeSubdomains is false because each is a bare IPv4 address: an IP has no
   subdomains, and leaving the attribute at its default would widen the exemption
-  past the single host it is meant to cover.
+  past the host it is meant to cover.
 
-  CHANGE THIS ADDRESS to the PC's real LAN IP. 192.168.1.100 is the repository's
-  agreed placeholder (T7.3), not a working address. It must match the static DHCP
-  reservation for the PC — if the PC's IP moves and this file does not, the app
-  reports "offline" forever and looks like a bug rather than a misconfiguration.
+  DO NOT EDIT THE ADDRESS HERE. 192.168.1.100 is the repository's agreed
+  placeholder (T7.3). Gradle copies this file into a generated tree and turns
+  the placeholder <domain> into one per address in PC_IP from .env (ADR 0013,
+  ADR 0016). Each address must match a static DHCP reservation: if a PC's IP
+  moves and .env does not, the panel silently stops following that PC.
 -->
 <network-security-config>
     <domain-config cleartextTrafficPermitted="true">

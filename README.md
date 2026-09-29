@@ -8,6 +8,8 @@ The PC can be Windows, Linux or macOS, and the panel can follow up to three of t
 while you are logged in at any one ([ADR 0016](docs/adr/0016-more-than-one-pc.md)). Built for a
 Redmi Note 10 (Android 12, MIUI 14) lying in a landscape stand, powered from the PC's USB port.
 
+![The panel on the Redmi Note 10 in its stand: clock, B3 quotes, FX, crypto, weather and the two mute buttons](docs/images/panel.jpg)
+
 ## Why this exists
 
 USB ports stay energised in S5, so a phone on your desk never learns that the PC went away.
@@ -106,11 +108,13 @@ Work is tracked as self-contained task files under [tasks/](tasks/), indexed by
 
 ## Status
 
-Running on the desk it was built for: the panel, the PC server, the screen following the PC and
-the two mute buttons all work on the target phone, against Windows and macOS. What is still open
-is not code. Each blocked task in [tasks/STATUS.md](tasks/STATUS.md) waits on a piece of hardware
-or a human step: a reboot test on the phone, a logout watched from a second machine, or both PCs
-on at once. That file is the index, and it says plainly what has only ever run on one phone.
+Running on the desk it was built for. The panel, the screen following the PC and the two mute
+buttons work on the target phone; the server has run against it from Linux, Windows and macOS,
+and on Linux it starts by itself at every login. **On Windows, starting by itself at login failed
+once and has not been diagnosed yet** (T3.8). Most other open rows in
+[tasks/STATUS.md](tasks/STATUS.md) wait on hardware or a human step, such as a reboot test on the
+phone or a logout watched from a second machine. That file is the index, and it says plainly
+what has only ever run on one phone.
 
 **Tried it on another phone?** That is the most useful thing you can send back, whether it worked
 or not. Open an issue and pick the **Device report** form ([its questions](.github/ISSUE_TEMPLATE/device-report.yml));
