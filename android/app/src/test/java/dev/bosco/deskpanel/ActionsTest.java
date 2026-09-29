@@ -56,15 +56,15 @@ public class ActionsTest {
         };
         for (String candidate : hostile) {
             assertNull(candidate, Actions.resolve(candidate));
-            assertNull(candidate, Actions.urlFor("192.168.15.3", 8777, candidate));
+            assertNull(candidate, Actions.urlFor("192.168.1.100", 8777, candidate));
         }
     }
 
     @Test
     public void urlForBuildsTheRouteTheServerReserved() {
         assertEquals(
-                "http://192.168.15.3:8777/action/mute-mic",
-                Actions.urlFor("192.168.15.3", 8777, "mute-mic"));
+                "http://192.168.1.100:8777/action/mute-mic",
+                Actions.urlFor("192.168.1.100", 8777, "mute-mic"));
     }
 
     @Test
