@@ -115,11 +115,13 @@ the terminal, not with the session.
 
 The same three steps as the other two platforms, through launchd. The launcher is the
 `dev.bosco.deskpanel` LaunchAgent loaded in `gui/<uid>` ([T3.10](../tasks/T3.10-macos-autostart.md));
-the paths come out of that agent's own `ProgramArguments`, the way the Windows branch reads the
-task's action and the Linux branch reads `ExecStart`; and the restart is
+the paths come out of the `arguments` launchd has **loaded** (from `launchctl print`, not the
+plist on disk, which `install_agent.sh --no-start` can rewrite without reloading), the way the
+Windows branch reads the task's action and the Linux branch reads `ExecStart`; and the restart is
 `launchctl kickstart -k gui/$(id -u)/dev.bosco.deskpanel`, which is the launchd spelling of "ask
 the launcher, do not spawn it yourself". There is no socket wait between stop and start: `-k`
-does both, and macOS reuses the address the way Linux does.
+does both, and macOS reuses the address the way Linux does. The step passes only if the pid
+changed, because a kickstart that left a running job alone still returns 0.
 
 First run on a Mac, 2026-09-29: every step `ok` except `apk`, which has no reference point on a
 new machine and says so.
