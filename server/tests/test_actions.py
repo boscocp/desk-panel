@@ -879,7 +879,7 @@ class BrowserOriginTests(unittest.TestCase):
         # There is no page this server serves that should be posting here --
         # the panel's client is Java. Allowing same-origin would mean trusting
         # an `Origin` an attacker also controls the spelling of.
-        status, ran = self._run({"Origin": "http://192.168.15.3:8777"})
+        status, ran = self._run({"Origin": "http://192.168.1.100:8777"})
         self.assertEqual(status, 403)
         self.assertEqual(ran, [])
 
@@ -891,7 +891,7 @@ class BrowserOriginTests(unittest.TestCase):
     def test_the_panels_own_client_sends_neither_and_is_allowed(self):
         # HttpURLConnection, curl and probe.py all send no Origin and no
         # Sec-Fetch-Site. This is the case that must keep working.
-        status, ran = self._run({"User-Agent": "Java/21", "Host": "192.168.15.3:8777"})
+        status, ran = self._run({"User-Agent": "Java/21", "Host": "192.168.1.100:8777"})
         self.assertEqual(status, 200)
         self.assertEqual(ran, ["mute-audio"])
 
