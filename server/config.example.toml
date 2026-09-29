@@ -125,7 +125,14 @@ timezone = "America/Sao_Paulo"
 # above cost three requests per refresh. At 300s that is 25,920 a month
 # against a 15,000 budget and the B3 card goes permanently stale around the
 # 17th; at 600s it is 12,960 with the PC logged in around the clock. More
-# tickers, or a shorter interval, and that arithmetic has to be redone.
+# tickers, or a shorter interval, and that arithmetic has to be redone: four
+# tickers at 600s is 17,280 around the clock, which only fits if this PC is
+# logged in less than about 80% of the month.
+#
+# "Logged in" is the right word, because the server asks upstream only when
+# the panel asks it: the cache is filled on demand, never on a timer of its
+# own. With more than one PC (ADR 0016) the phone asks only the one it is on,
+# so a brapi token shared between PCs is not spent twice.
 quotes_interval_s = 600
 
 # Open-Meteo allows 10,000 requests a day for non-commercial use, so this is
@@ -222,7 +229,10 @@ language = "pt-BR"
 # A name this server has no implementation for is a fatal error at startup,
 # with the name in the message — not a button that quietly does nothing.
 #
-# Empty is the default and is the right setting on any network you do not
-# control. `shutdown`, `sleep` and `lock` are deliberately not available: the
-# threat model above only holds for actions that are safe to repeat.
-actions = []
+# Both are on in this example, because both are harmless to repeat and the
+# buttons are half of what the panel is for on a desk you own. The server's own
+# default, for a config that leaves this key out, is still `[]`, and `[]` is the
+# right setting on any network you do not control. `shutdown`, `sleep` and
+# `lock` are deliberately not available: the threat model above only holds for
+# actions that are safe to repeat.
+actions = ["mute-audio", "mute-mic"]
