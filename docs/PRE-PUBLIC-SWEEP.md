@@ -12,8 +12,8 @@ and the list below is what they knew.
 
 | | command | covers |
 |---|---|---|
-| the tree | `python scripts/check_secrets.py` | the 332 tracked files a clone checks out |
-| the history | `python scripts/check_secrets.py --history` | all 1,935 blobs in the pack, reachable from any ref |
+| the tree | `python scripts/check_secrets.py` | the 336 tracked files a clone checks out |
+| the history | `python scripts/check_secrets.py --history` | all 1,080 blobs in the pack, reachable from any ref |
 | words | `git log -p \| grep -iE "token\|password\|keystore\|api[_-]?key"` | T7.3 step 1, kept |
 
 The two halves are reported apart and exit differently **because they have different
@@ -37,7 +37,7 @@ green. That is the property the whole task is about: `git rm` removes nothing fr
 
 ## What the sweep found
 
-**No credential, in the tree or in the history.** Everything below is deliberate, and every
+**No credential, in the tree or in any of the 1,080 blobs in the history.** Everything below is deliberate, and every
 one of them is allowed in [`scripts/secrets-allowlist.toml`](../scripts/secrets-allowlist.toml)
 with a reason — the file format refuses an entry without one, because an allowlist of bare
 patterns is a guard turned off with extra steps.
@@ -52,7 +52,7 @@ decision was to publish it.
 | **The PC's real LAN address**, `192.168.15.3` | Markdown only: ADRs, `SERVER-SETUP.md`, `BUILD.md`, harness notes, `STATUS.md`, task files | ADR 0013 is *about* this machine not being a placeholder, and the notes are a record of what was measured. An RFC1918 address is not reachable from outside the LAN it names. Rewriting a record to look tidier is how a record stops being worth keeping |
 | **The phone's adb serial**, `303f1f9c` | `tasks/STATUS.md`, three times | A USB serial. It addresses nothing over a network, and the lines it appears in are the measurements that make those entries worth reading |
 | **Home paths and the owner's names** — `/home/bosco`, `/Users/bosco`, `C:\Users\Adalberto`, `D:\projetos-vscode` | `server/fixtures/login_scope/*` | Captured command output, realistic on purpose: TT.10's argument is that a fixture with invented shapes proves less than one taken from a real machine, and the macOS half is only checkable at all because of it. The same names are in every commit's author line already |
-| **The author's name and email** | every one of the 162 commits | `Adalberto Pereira <adalbertobosco@gmail.com>`. Going public publishes it. Changing it now would mean rewriting every commit; changing it going forward is a `git config` away and is the owner's call, recorded here so it is a choice rather than a discovery |
+| **The author's name and email** | every one of the 164 commits | `Adalberto Pereira <adalbertobosco@gmail.com>`. Going public publishes it. Changing it now would mean rewriting every commit; changing it going forward is a `git config` away and is the owner's call, recorded here so it is a choice rather than a discovery |
 | **Pinned dependency digests** — action SHAs, the Docker base image, the Gradle distribution checksum | `.github/workflows/*.yml`, `docker/Dockerfile`, `gradle-wrapper.properties` | Publishing them is their entire purpose. `check_ci_hygiene.py` rule 3 *requires* the action pins |
 | **`super-secret-token`** | `server/tests/test_config_format.py` | The obviously-fake value that test asserts is not echoed back by the config endpoint. A test about not leaking a token needs a token-shaped string to not leak |
 | **A container id** | `server/fixtures/login_scope/linux_cgroup_v1_docker.txt` | 64 hex characters of captured `/proc/self/cgroup`. The container is long gone and an id is not a credential |
@@ -90,11 +90,16 @@ Each of these is a command that will keep saying so:
   for the word is `tasks/T7.1-release-keystore.md`, which is a task file.
 - **Nothing tracked that `.gitignore` excludes.** `git add -f` and a rename past a rule both
   do that silently, and the first five lines of `.gitignore` are the secret files.
-- No `TODO`, `FIXME` or `XXX:` marker in any source file. This project puts unfinished
-  business in `tasks/`, so one in the code would be either stale or a task nobody filed.
 - **The brapi token appears nowhere** — not in a fixture, a test, a doc example or a
   comment. It lives in `server/config.toml` on the PC, which is gitignored, and the phone
   never sees it (ADR 0004).
+
+One thing in this section is **not** a standing check, and is marked rather than quietly
+listed with the rest: `TODO`, `FIXME` and `XXX:` do not appear in any source file, and that
+was a grep run by hand on 2026-09-28. Nothing in `scripts/` keeps saying so. This project
+puts unfinished business in `tasks/`, so a marker in the code would be either stale or a
+task nobody filed — but until something checks it, this line is an observation with a date
+on it.
 
 ## What this sweep does not cover
 
@@ -115,7 +120,7 @@ Each of these is a command that will keep saying so:
 `make check` runs the tree half, so a credential added tomorrow fails the build before it is
 committed. CI runs the history half on every push. Both halves are in
 [`scripts/check_secrets.py`](../scripts/check_secrets.py), whose `--self-test` proves each of
-its rules can fail — 31 cases, every one of them hermetic.
+its rules can fail — 33 cases, every one of them hermetic.
 
 When a finding is deliberate, add it to the allowlist **with the reason**, and add the
 decision to the table above. A row here is what makes the answer checkable a year from now.
