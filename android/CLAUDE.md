@@ -20,7 +20,7 @@ and what has to change if that stops being true, is in
 - **Never copy `web/` into `assets/`.** `build.gradle.kts` points `assets.srcDirs` at
   `../../web`; one copy of those files, always.
 - **Cleartext stays pinned.** `res/xml/network_security_config.xml` permits `http://` for the
-  PC's IP and nothing else. Widening it to `base-config` defeats the purpose.
+  PCs' IPs, one `<domain>` each (ADR 0016), and nothing else. Widening it to `base-config` defeats the purpose.
 - **Keep logic out of Android classes.** Anything worth testing — the online/offline state
   machine, backoff timing, JSON shaping — goes in a plain class like `PcState.java` with no
   Android imports, so `./gradlew test` covers it on the JVM without a device.
