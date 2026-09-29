@@ -109,7 +109,8 @@ the phone's real viewport.
   globals: `formatPrice`, `formatRate`, `formatPair`, `formatChange`,
   `changeClass`, `formatTemp`, `formatRange`, `weatherLabel`, `weatherGlyph`,
   `formatBattery`, `tempClass`, `sparklinePath`, `isNight`, `overflowsBy`,
-  `scrollPlan`, `worthScrolling`, `shortcutsFor`. Use them. A theme that reimplemented `formatPrice` would
+  `scrollPlan`, `worthScrolling`, `shortcutsFor`, `agendaFields` (and the two it
+  is built on, `nextEvent` and `untilText`). Use them. A theme that reimplemented `formatPrice` would
   reintroduce the sub-1 rounding bug the yuan found in T6.5, once per theme —
   and one that joined a daily low and high with a hyphen would reintroduce
   `-12-42`, which is what `formatRange` exists to stop (T6.8).
@@ -136,10 +137,10 @@ the phone's real viewport.
   that has ever caught a layout bug here.
 
   `agenda` is in the harness's list too and is the one id that is **optional**:
-  `neon` reserves a card under its forecast for T9.1's next meeting, `plain` has
-  no such box, and a theme without one is not failed for the absence (T6.12).
-  Every other id there is one both themes carry, so a missing one is a
-  regression and is reported as such.
+  `neon` draws T9.1's next meeting in a card under its forecast, `plain` draws
+  it as a line in its footer, and a theme without either is not failed for the
+  absence (T6.12). Every other id there is one both themes carry, so a missing
+  one is a regression and is reported as such. See *The next meeting* below.
 
   `shortcuts` is **not** in that list, and both themes use the name: it is the
   strip the shortcut buttons live in. It is out of the harness because it holds
@@ -547,6 +548,38 @@ edits, so the buttons almost never change. Rebuilding them on every render
 throws one away mid-press and loses the acknowledgement it was showing —
 compare the ids you are about to draw against the ones you drew, and return
 early. Both packaged themes do this with a one-line signature.
+
+## The next meeting is yours to draw, and not yours to decide
+
+The payload's `agenda` (T9.1, [ADR 0017](adr/0017-calendars-are-personal-data.md))
+holds up to five events from the owner's calendars, already filtered on the PC —
+no declined or cancelled event, no attendee, no body, and no `title` at all when
+the owner turned titles off. Absent from an older server.
+
+```js
+const fields = agendaFields(payload.agenda, new Date(), words.tag);
+// null: no agenda, or no calendar connected -- keep the box, set data-reserved
+// { title, when, until, inProgress, failed }: strings, ready to draw
+```
+
+- **Which event, and what the countdown says, is `agendaFields`'s decision.**
+  An event in progress beats the next one; a timed event later today beats an
+  all-day one; ties break the same way every time, so the line never flickers
+  between two meetings in one minute. A theme that sorted the events itself
+  would get one of those wrong.
+- **The phone's clock decides**, like the night window. The PC sends instants,
+  never "in 25 min", so redraw from the payload you already have whenever the
+  minute turns — from `tick`, never by waiting for the next payload, which
+  arrives on a clock of its own.
+- **`failed` is a line, not a blank card.** It names the account whose login
+  has to be run again on the PC; the other account's meeting is still the next
+  meeting, and the rest of the panel is none of its business.
+- **Nothing in it may wrap.** A title is whatever somebody typed into a
+  calendar. Ellipsise every line, inside an element of its own rather than on
+  the section: an ellipsis on the section is content wider than its box, and
+  the harness reports it as a clipped card — correctly, since it cannot tell
+  one from the other. `e2e/layout/stress.js` carries the widest case: a meeting
+  in progress, a very long title and two failed accounts.
 
 ## Checking it
 

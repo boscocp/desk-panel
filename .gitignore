@@ -1,6 +1,9 @@
 # --- secrets: never commit ---
 server/config.json
 server/config.toml
+# Calendar refresh tokens, written by the server itself (ADR 0017).
+calendar-tokens.json
+.calendar-tokens.*
 *.keystore
 *.jks
 keystore.properties

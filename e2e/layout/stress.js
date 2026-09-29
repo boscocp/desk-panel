@@ -67,6 +67,25 @@ window.onData({
     // put the panel back into pt-BR the moment this fixture landed, and
     // report the right tag while measuring the wrong words (T6.11).
     language: new URLSearchParams(location.search).get('lang') || undefined,
+    // The widest AGENDA the card can be asked to draw (T9.1): a meeting in
+    // progress, whose line is the longest countdown there is ("agora · até
+    // 23:59"), a title far longer than any line the card has, and both
+    // accounts failed, which is the longest "reconnect" line. Every one of the
+    // three must ellipsise rather than wrap -- a wrapped title is how this
+    // card would grow into the weather card above it. Instants from the page's
+    // pinned clock, for the reason the date below is.
+    agenda: (() => {
+        const now = window.Date.now();
+        const iso = (minutes) => new window.Date(now + minutes * 60000).toISOString();
+        return {
+            accounts: 2,
+            events: [{
+                start: iso(-10), end: iso(50), allDay: false, source: 'microsoft/work',
+                title: 'Revisão trimestral de planejamento com as equipes de plataforma e dados',
+            }],
+            failed: ['microsoft/work', 'google/personal'],
+        };
+    })(),
 });
 
 document.getElementById('clock').textContent = '23:59:59';

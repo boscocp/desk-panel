@@ -221,6 +221,42 @@ public class DataPayloadTest {
     }
 
     @Test
+    public void theAgendaRidesQuotesThroughUntouched() throws Exception {
+        // T9.1. The fifth key passed straight through, and the first one that
+        // is personal data (ADR 0017) -- which is why the assertion is on the
+        // whole object and not a field: merge must neither drop the key nor
+        // grow an opinion about what is inside it.
+        JSONObject agenda = new JSONObject()
+                .put("accounts", 1)
+                .put("events", new JSONArray().put(new JSONObject()
+                        .put("start", "2026-09-29T14:00:00-03:00")
+                        .put("end", "2026-09-29T14:30:00-03:00")
+                        .put("allDay", false)
+                        .put("source", "google/personal")))
+                .put("failed", new JSONArray().put("microsoft/work"));
+        String withAgenda = Contract.quotesWith("agenda", agenda);
+        String folded = DataPayload.withBattery(
+                DataPayload.merge(withAgenda, Contract.weather()),
+                "{\"level\":50,\"tempC\":30,\"charging\":true}");
+        JSONObject arrived = new JSONObject(folded).getJSONObject("agenda");
+        assertEquals(1, arrived.getInt("accounts"));
+        JSONObject event = arrived.getJSONArray("events").getJSONObject(0);
+        assertEquals("2026-09-29T14:00:00-03:00", event.getString("start"));
+        assertEquals("google/personal", event.getString("source"));
+        assertFalse("no title was sent, none may appear", event.has("title"));
+        assertEquals("microsoft/work", arrived.getJSONArray("failed").getString(0));
+    }
+
+    @Test
+    public void anAbsentAgendaLeavesTheKeyOutAltogether() throws Exception {
+        // An older server. The page leaves the AGENDA card reserved, which is
+        // what it does for a PC with no calendar connected.
+        assertFalse("no agenda key in, no agenda key out",
+                new JSONObject(DataPayload.merge(Contract.quotesWithout("agenda"),
+                        Contract.weather())).has("agenda"));
+    }
+
+    @Test
     public void anAbsentNightWindowLeavesTheKeyOutAltogether() throws Exception {
         // An older server on the PC sends no window. Both readers treat the
         // absence as "day", so this must arrive as a missing key rather than

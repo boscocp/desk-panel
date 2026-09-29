@@ -40,6 +40,13 @@
     // most of them would take it and not use it.
     let words = strings(null);
 
+    // The last `agenda` the PC sent and the minute the line was drawn for, so
+    // tick() can move the countdown on without a payload (T9.1) -- the same
+    // arrangement as neon, because it is the same rule: the phone's clock
+    // decides, and the PC is never asked twice for one answer.
+    let agenda = undefined;
+    let agendaMinute = null;
+
     // A section is a heading plus a body the renderers refill. Two elements
     // rather than one because the heading is markup here, which is half of
     // what this theme is demonstrating.
@@ -94,7 +101,14 @@
         // nothing else moved. The buttons are the taller of the two, so the
         // line centres against them.
         const footer = el('div', null, 'footer');
-        footer.append(battery, shortcuts);
+        // The next meeting (T9.1). neon gives it a card; this theme has no
+        // card to give, and a fifth column would cost the four it has their
+        // width, so it is one line in the row that already holds the other
+        // things that are about the owner's machine and day. Between the
+        // battery and the buttons, and the one of the three allowed to shrink.
+        const agenda = el('section', 'agenda');
+        agenda.setAttribute('data-reserved', '');
+        footer.append(battery, agenda, shortcuts);
 
         root.append(header, grid, footer);
         els = {
@@ -108,6 +122,7 @@
             // before T6.6.
             weather: weather.scroller,
             shortcuts,
+            agenda,
         };
         // The signature renderShortcuts compares against describes markup that
         // has just been thrown away. mount() runs again whenever host.js empties
@@ -358,6 +373,40 @@
         els.battery.appendChild(line);
     }
 
+    // One line: the countdown, then the title, then which account needs
+    // reconnecting, joined by a separator this theme already uses nowhere
+    // else so it cannot be mistaken for part of a title. Plain text, no
+    // colour for "in progress": the words say it ("agora · até 14:30"), which
+    // is the honest test that the contract carries it and neon's palette
+    // does not have to.
+    function renderAgenda(now) {
+        agendaMinute = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+        const fields = agendaFields(agenda, now, words.tag);
+        if (!fields) {
+            els.agenda.textContent = '';
+            els.agenda.setAttribute('data-reserved', '');
+            return;
+        }
+        els.agenda.removeAttribute('data-reserved');
+        const parts = [fields.when];
+        if (fields.title) {
+            parts.push(fields.title);
+        }
+        if (fields.failed) {
+            parts.push(fields.failed);
+        }
+        // In a line of its own rather than on the section, so the ellipsis
+        // clips inside a box whose width the footer already gave it: an
+        // ellipsis on the section itself is content wider than its box, which
+        // e2e/layout/measure.js reports as clipped -- correctly, since it
+        // cannot tell a deliberate ellipsis from a card eating its text.
+        const line = el('div', null, 'a-line');
+        line.textContent = parts.join(' — ');
+        line.title = line.textContent;
+        els.agenda.textContent = '';
+        els.agenda.appendChild(line);
+    }
+
     function render(payload, root) {
         // Before ensure(), which may mount and which reads `words` for the
         // column headings and the badge (T6.11).
@@ -385,6 +434,8 @@
         renderWeather(payload.weather);
         renderBattery(payload.battery);
         renderShortcuts(payload.actions);
+        agenda = payload.agenda;
+        renderAgenda(new Date());
         els.stale.hidden = !payload.stale;
     }
 
@@ -396,6 +447,9 @@
         // HH:MM:SS, like every theme: native reads this string by id to prove
         // the page rendered (docs/THEMING.md).
         els.clock.textContent = `${hours}:${minutes}:${seconds}`;
+        if (agendaMinute !== `${hours}:${minutes}`) {
+            renderAgenda(now);
+        }
         // The language the PC asked for, not the host's (T6.11). `undefined`
         // means "whatever this runtime thinks", which on the device is the
         // phone's system locale and in a browser is the developer's -- so the

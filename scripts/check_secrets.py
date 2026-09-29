@@ -68,6 +68,13 @@ RULES = (
      "a GitHub token"),
     ("slack-token", re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}"), "a Slack token"),
     ("google-key", re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b"), "a Google API key"),
+    # T9.1's two (ADR 0017). A Google refresh token starts `1//0`, and a Desktop
+    # client's secret starts `GOCSPX-`. Google calls the second one not really a
+    # secret, and it is half of a pair all the same.
+    ("google-refresh-token", re.compile(r"\b1//0[0-9A-Za-z_-]{30,}"),
+     "a Google OAuth refresh token"),
+    ("google-client-secret", re.compile(r"\bGOCSPX-[0-9A-Za-z_-]{20,}"),
+     "a Google OAuth client secret"),
     ("bearer-header", re.compile(r"(?i)authorization\s*[:=]\s*[\"']?bearer\s+\S{12,}"),
      "a bearer token in an Authorization header"),
     ("assigned-secret", re.compile(
@@ -105,6 +112,7 @@ MIN_ENTROPY = 4.0
 FORBIDDEN_NAMES = (
     ("server/config.json", "the live config, which holds the brapi token"),
     ("server/config.toml", "the live config, which holds the brapi token"),
+    ("calendar-tokens.json", "calendar refresh tokens (ADR 0017)"),
     ("*.keystore", "a signing keystore"),
     ("*.jks", "a signing keystore"),
     ("keystore.properties", "signing passwords"),
@@ -472,6 +480,8 @@ SAMPLES = {
     "github-token": _sample("ghp_", "A1b2C3d4E5f6G7h8", "I9j0K1l2M3n4O5p6Q7r8"),
     "slack-token": _sample("xox", "b-000000000000-000000000000-abcdefghijklmnop"),
     "google-key": _sample("AIza", "SyD-0123456789", "abcdefghijklmnopqrstu"),
+    "google-refresh-token": _sample("1//0", "gAbCdEfGhIjKlMnOp", "QrStUvWxYz012345"),
+    "google-client-secret": _sample("GOCSPX-", "AbCdEfGhIjKl", "MnOpQrStUvWx"),
     "bearer-header": _sample("Authorization: Bearer ", "abcdefghijklmnopqrstuvwxyz012345"),
     # The shape this project would actually leak. The key is a *suffix*: a rule anchored
     # with \b immediately before `token` misses `brapi_token`, which is the name of the

@@ -1239,3 +1239,62 @@ body {
      * profile that also quietened the alarm would be turning the volume down
      * on the one thing worth hearing. It is on screen for minutes a month. */
 }
+
+/* --- The AGENDA card (T9.1) ------------------------------------------------
+ *
+ * The same box as #weather -- the two share #side's 1fr/1fr -- so the same
+ * budget: 143px of content under a 27px title. Three lines at most, and the
+ * worst case is all three: 35 + 30 + 26 = 91px, which leaves room the weather
+ * card does not have. None of them wraps. The countdown is short by
+ * construction, a title can be anything a person typed into a calendar, and a
+ * wrapped title is how this card would grow into the one under it -- so every
+ * line ellipsises and the card's own clip is the backstop.
+ *
+ * The countdown is the largest thing here and the only thing in the accent,
+ * because it is what the card is read for: the title is something the owner
+ * already knows once they see the time.
+ */
+#agenda {
+    color: var(--accent);
+}
+
+.a-body {
+    min-width: 0;
+}
+
+.a-when,
+.a-title,
+.a-failed {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.a-when {
+    font-size: 32px;
+    line-height: 1.1;
+    letter-spacing: 0.01em;
+    text-shadow: 0 0 6px var(--glow-dim);
+}
+
+/* In progress: the meeting has started. The colour is --warn, the panel's
+ * "look at this" that is not an alarm -- --down is a loss and a meeting you
+ * are in is not one. */
+.a-live {
+    color: var(--warn);
+}
+
+.a-title {
+    margin-top: 2px;
+    font-size: 24px;
+    line-height: 1.25;
+}
+
+/* Which account needs its login run again. Dim, small and last: it is the
+ * owner's to fix on the PC, not something to read from the chair. */
+.a-failed {
+    margin-top: 4px;
+    font-size: 20px;
+    line-height: 1.3;
+    color: var(--accent-dim);
+}

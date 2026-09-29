@@ -34,6 +34,7 @@ have not been taught the new key.
 import datetime
 import json
 import os
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -58,6 +59,15 @@ CONFIG = {
     "quotes_interval_s": 300, "weather_interval_s": 900, "brapi_token": "",
     "history_interval_s": 21600, "history_days": 30, "moon_interval_s": 21600,
     "actions": ["mute-audio", "mute-mic"],
+    # Two accounts, one per provider, so the description carries both
+    # normalisers' output merged -- the part of the agenda worth describing.
+    "calendar_accounts": [{"provider": "google", "name": "personal"},
+                          {"provider": "microsoft", "name": "work"}],
+    "google_client_id": "fixture.apps.googleusercontent.com",
+    "google_client_secret": "not-a-secret",
+    "microsoft_client_id": "00000000-0000-0000-0000-000000000000",
+    "calendar_interval_s": 300, "calendar_lookahead_h": 24,
+    "calendar_show_titles": True,
 }
 
 ROWS = {
@@ -107,6 +117,24 @@ MOON_WHEN = datetime.datetime(2026, 9, 22, 0, 27, tzinfo=datetime.timezone.utc)
 MOON = dict(providers_usno.synodic_phase(MOON_WHEN), source="usno")
 
 
+# The calendars are patched at the fetch seam, like the weather, so the two
+# real normalisers and `select` decide the shape. The raw bodies are the
+# recorded ones the provider tests read.
+RAW_GOOGLE = json.loads((FIXTURES / "google_events.json").read_text(encoding="utf-8"))
+RAW_GRAPH = json.loads((FIXTURES / "graph_calendarview.json").read_text(encoding="utf-8"))
+AGENDA_NOW = datetime.datetime(2026, 9, 22, 9, 0, tzinfo=datetime.timezone.utc)
+
+
+def fake_token_post(url, fields):
+    """Every token endpoint, answering a refresh with a read-only grant."""
+    if "googleapis" in url:
+        scope = "https://www.googleapis.com/auth/calendar.events.owned.readonly"
+    else:
+        scope = "https://graph.microsoft.com/Calendars.ReadBasic"
+    return {"access_token": "fixture-access", "expires_in": 3600, "scope": scope,
+            "token_type": "Bearer"}
+
+
 class FakeClock:
     def __call__(self):
         return 0.0
@@ -149,7 +177,24 @@ def build():
         patch(usno, "moon_phase", lambda *a, **k: dict(MOON))
         patch(usno, "synodic_phase", lambda *a, **k: dict(MOON))
 
-        app = App(dict(CONFIG), clock=FakeClock())
+        calendar = server_module.providers_calendar
+        patch(calendar, "fetch_google", lambda *a, **k: dict(RAW_GOOGLE))
+        patch(calendar, "fetch_graph", lambda *a, **k: dict(RAW_GRAPH))
+
+        tokens = tempfile.TemporaryDirectory()
+        originals.append((tokens, "cleanup", None))
+        store = Path(tokens.name) / "calendar-tokens.json"
+        store.write_text(json.dumps({
+            "google/personal": {"refresh_token": "fixture-google"},
+            "microsoft/work": {"refresh_token": "fixture-microsoft"},
+        }), encoding="utf-8")
+
+        app = App(dict(CONFIG), clock=FakeClock(), tokens_path=store,
+                  wall_clock=lambda: AGENDA_NOW, oauth_post=fake_token_post)
+        # Primed synchronously for the reason the moon is, below: the
+        # production path is a background thread, and a fixture written
+        # against a thread is sometimes written without its events.
+        app.agenda_cache.get(app.clock(), CONFIG["calendar_interval_s"], app._produce_agenda)
         # The sparklines, primed **synchronously**. `warm_history()` is the
         # production path and starts a thread per market on purpose -- a
         # sparkline must never make a payload wait -- but a fixture generated
@@ -172,7 +217,10 @@ def build():
         return {"quotes": app.quotes(), "weather": app.weather()}
     finally:
         for module, name, value in reversed(originals):
-            setattr(module, name, value)
+            if name == "cleanup":
+                module.cleanup()
+            else:
+                setattr(module, name, value)
 
 
 def key_of(market):
@@ -206,7 +254,7 @@ class PayloadFixtureTests(unittest.TestCase):
         produced = build()["quotes"]
         self.assertEqual(
             set(produced),
-            {"quotes", "fx", "crypto", "stale", "theme", "language", "night", "actions"})
+            {"quotes", "fx", "crypto", "stale", "theme", "language", "night", "actions", "agenda"})
 
     def test_the_rows_carry_their_history(self):
         # A fixture with empty sparklines would let the Android and web
