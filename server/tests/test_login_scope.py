@@ -184,7 +184,10 @@ class WindowsScheduledTaskTests(unittest.TestCase):
 
 
 class MacOsLaunchAgentTests(unittest.TestCase):
-    """The macOS row, which nobody on this project can run for real."""
+    """The macOS row. The loaded and absent `launchctl print` fixtures are real
+    captures from a Mac (2026-09-29); the daemon one is still written to the
+    documented shape, because capturing it means installing a LaunchDaemon.
+    """
 
     def agent(self, plist_name, print_name, path="/Users/u/Library/LaunchAgents/x.plist"):
         plist = vls.parse_launchagent_plist(vls.fixture(plist_name))

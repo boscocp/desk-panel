@@ -407,8 +407,26 @@ def parse_launchctl_print(text):
     if stripped.startswith("Bad request") or stripped.startswith("Unrecognized"):
         raise ParseError(f"launchctl rejected the request: {stripped.splitlines()[0]}")
 
+    # Only the service's own top-level keys. A real print on macOS 26 nests
+    # `resource coalition = { type = resource; state = active }` and a
+    # `jetsam coalition` block after the service's `type = LaunchAgent`, so a
+    # flat scan read the last one and reported a correctly loaded agent as
+    # type='jetsam' -- FAIL on the first real Mac (T3.10, 2026-09-29). The
+    # hand-written fixture had no nested block with those keys, which is why
+    # 97 green cases never saw it. Depth 1 is inside the outer `label = {`.
     result = {"found": True, "properties": set()}
+    depth = 0
     for line in text.splitlines():
+        stripped_line = line.strip()
+        if stripped_line == "}":
+            depth -= 1
+            continue
+        opens = stripped_line.endswith("{")
+        at_top = depth == 1
+        if opens:
+            depth += 1
+        if not at_top or opens:
+            continue
         key, separator, value = line.partition("=")
         if not separator:
             continue
