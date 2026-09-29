@@ -140,10 +140,17 @@ longitude = -46.6361
 # tickers, or a shorter interval, and that arithmetic has to be redone: four
 # tickers at 600s is 17,280 around the clock.
 #
+# "Around the clock" is `b3_hours = []`. With the default `b3_hours` below,
+# brapi is asked only during B3's session and those numbers shrink to about a
+# quarter -- 300s would fit -- but 600 stays the default because it has to be
+# safe with the gate off, and because FX and crypto share this interval.
+#
 # History is on top of that: one brapi request per ticker every
 # `history_interval_s` below, so four a day per ticker at the default -- 480 a
 # month for four tickers, and four tickers then fit only if this PC is logged
-# in less than about 84% of the month. **While any ticker's history is
+# in less than about 84% of the month -- again with the gate off; with it,
+# brapi's history is refreshed only inside the session and once after the
+# close, about two a weekday per ticker. **While any ticker's history is
 # missing** (a paid ticker without a token, a refresh that failed) the history
 # retries every `quotes_interval_s` instead, for every ticker, which roughly
 # doubles the spend: fix or remove the missing ticker rather than living with it.
@@ -177,13 +184,45 @@ moon_interval_s = 21600
 
 # The sparkline's series: daily closes, which change once a day, so this is on
 # a clock measured in hours. Six hours costs four requests a day per ticker,
-# pair or coin -- each series is its own request, on all three providers.
+# pair or coin -- each series is its own request, on all three providers --
+# except brapi's while `b3_hours` holds it outside the session.
 history_interval_s = 21600
 
 # How many days of history the sparkline covers. brapi only accepts named
 # ranges (5d, 1mo, 3mo, 6mo, 1y, 5y) and rounds up to the nearest one that
 # covers this; the other two providers take the count as written.
 history_days = 30
+
+# When brapi is asked for B3 prices and history at all. Outside this window
+# the panel keeps what it fetched after the last close -- Friday's close all
+# weekend -- and spends nothing, which is most of the month: three tickers at
+# 600s cost about 3,000 to 3,700 quote requests a month (December, with 23
+# weekdays in the winter window, is the top), against 12,960 around the clock.
+# History and cold starts are on top.
+#
+#   "auto"              B3's own session, weekdays, Sao Paulo time. It opens at
+#                       10:00 and closes at 17:00 while the US is on daylight
+#                       saving (second Sunday of March to first Sunday of
+#                       November) and at 18:00 the rest of the year -- B3
+#                       follows the US clock, not Brazil's. Plus 45 minutes,
+#                       because the free plan serves quotes ~30 minutes late.
+#   ["10:00", "18:45"]  a fixed window, weekdays, Sao Paulo time, all year.
+#                       For the after-market, or a paid plan with less delay.
+#   []                  never hold back: refresh every quotes_interval_s.
+#
+# Only an answer that is safe to hold is held: complete, not STALE, and
+# fetched after the latest close. So a cold start or a missing row is fetched
+# whatever the hour, a refresh that failed is retried, and a price from before
+# the close -- a long interval, a PC that slept -- is refreshed once more.
+#
+# **A ticker brapi always refuses switches this off.** Its row never arrives,
+# the answer is never complete, and every ticker is asked for around the clock
+# again. Remove the ticker, or give it the token it needs.
+#
+# Holidays are not known: a holiday costs an ordinary weekday, and the CLOSED
+# label beside the B3 title says the market is open on one. The label follows
+# the exchange's own session, whatever this says.
+b3_hours = "auto"
 
 
 # ---------------------------------------------------------------------------

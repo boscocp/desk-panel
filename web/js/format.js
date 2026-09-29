@@ -345,6 +345,8 @@ const LANGUAGES = {
         // market is called in Portuguese anyway, which is exactly what this
         // badge means.
         stale: 'DEFASADO',
+        // Beside the B3 title while the exchange is shut (server/market_hours.py).
+        marketClosed: 'FECHADO',
         // "na bateria" rather than "desconectado", which in Portuguese reads
         // first as a network having dropped -- the wrong alarm entirely on a
         // panel whose other states are about the PC being away.
@@ -435,6 +437,7 @@ const LANGUAGES = {
             'waning-crescent': 'Waning crescent',
         },
         stale: 'STALE',
+        marketClosed: 'CLOSED',
         unplugged: 'unplugged',
         // SCHEDULE, not AGENDA: in English an agenda is the list of items
         // for one meeting, and what this card will show is the next one.
@@ -1380,6 +1383,16 @@ function burnInSchedule() {
     };
 }
 
+// Whether to draw the CLOSED label beside the B3 title. The server decides
+// whether the exchange is open (server/market_hours.py -- the window follows
+// US daylight saving, which the page has no business knowing); this only
+// reads its answer, and only an explicit `false` counts. An older server
+// sends no `b3Open` at all, and a panel that called that "closed" would say
+// so all day.
+function marketClosed(payload) {
+    return !!payload && payload.b3Open === false;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         formatPrice, formatRate, formatPair, formatTemp, formatChange, changeClass,
@@ -1395,5 +1408,6 @@ if (typeof module !== 'undefined' && module.exports) {
         formatBattery, batteryFields, tempClass, BATTERY_WARN_C, BATTERY_HOT_C,
         shortcutsFor,
         nextEvent, untilText, agendaFields,
+        marketClosed,
     };
 }

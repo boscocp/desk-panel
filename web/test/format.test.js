@@ -13,7 +13,7 @@ const {
     SCROLL_SECONDS_PER_ROW, SCROLL_MIN_TRAVEL_PX, SCROLL_MIN_HIDDEN_ROWS,
     offsetFor, burnInSchedule,
     BURN_IN_OFFSETS, BURN_IN_STEP_MINUTES, BURN_IN_AMPLITUDE_PX,
-    shortcutsFor,
+    shortcutsFor, marketClosed,
 } = require('../js/format.js');
 
 test('formatPrice formats a BRL price with two decimals', () => {
@@ -1151,4 +1151,12 @@ test('the captions are short enough for a 56px button', () => {
             assert.ok(caption.length <= 6, `${tag} ${id} caption "${caption}" is too long`);
         }
     }
+});
+
+test('marketClosed only on an explicit false from the server', () => {
+    assert.equal(marketClosed({ b3Open: false }), true);
+    assert.equal(marketClosed({ b3Open: true }), false);
+    // An older server sends no key, and that is not a shut market.
+    assert.equal(marketClosed({}), false);
+    assert.equal(marketClosed(null), false);
 });

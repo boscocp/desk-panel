@@ -10,10 +10,12 @@ contents. The panel showing a slightly old price beats the panel showing
 nothing, and `stale` is how the page knows to say so.
 """
 import contextlib
+import datetime
 import io
+import threading
 import unittest
 
-from server import providers_openmeteo, providers_usno
+from server import market_hours, providers_openmeteo, providers_usno
 from server.server import App, TimedCache, action_id, route
 from server.upstream import UpstreamError
 
@@ -252,6 +254,10 @@ CONFIG = {
     "city": "Sao Paulo", "timezone": "America/Sao_Paulo",
     "quotes_interval_s": 300, "weather_interval_s": 900, "brapi_token": "",
     "history_interval_s": 21600, "history_days": 30,
+    # The market-hours gate off, so a TTL test means the same thing at 03:00
+    # on a Sunday as it does on a Tuesday afternoon. The gate has its own
+    # tests, with the wall clock pinned (MarketHoursGateTests).
+    "b3_hours": [],
 }
 
 
@@ -300,7 +306,7 @@ class AppPayloadTests(unittest.TestCase):
         )
         payload = self.app.quotes()
         self.assertEqual(set(payload), {"quotes", "fx", "crypto", "stale", "theme", "night",
-                                        "language", "actions", "agenda"})
+                                        "language", "actions", "agenda", "b3Open"})
         self.assertFalse(payload["stale"])
         self.assertEqual(payload["quotes"][0]["symbol"], "PETR4")
 
@@ -379,7 +385,7 @@ class AppPayloadTests(unittest.TestCase):
         self.assertTrue(payload["stale"])
         self.assertEqual(payload["quotes"], [])
         self.assertEqual(set(payload), {"quotes", "fx", "crypto", "stale", "theme", "night",
-                                        "language", "actions", "agenda"})
+                                        "language", "actions", "agenda", "b3Open"})
 
     def test_one_market_failing_does_not_empty_the_other_two(self):
         # Found on the desk, by changing a ticker to one that needs a token:
@@ -620,6 +626,226 @@ class AppPayloadTests(unittest.TestCase):
 
         self.assertEqual(counts["geocode"], 1, "the city was re-located after a forecast failure")
         self.assertEqual(counts["forecast"], 3)
+
+
+class MarketHoursGateTests(unittest.TestCase):
+    """brapi is asked for B3 prices only while B3 can have a new one.
+
+    The wall clock is pinned to instants in Sao Paulo, so each test is about
+    one side of the window and not about when the suite happened to run.
+    """
+
+    TUESDAY_14H = datetime.datetime(2026, 9, 29, 14, 0, tzinfo=market_hours.B3_TZ)
+    TUESDAY_22H = datetime.datetime(2026, 9, 29, 22, 0, tzinfo=market_hours.B3_TZ)
+    SATURDAY_14H = datetime.datetime(2026, 10, 3, 14, 0, tzinfo=market_hours.B3_TZ)
+
+    def setUp(self):
+        import server.server as server_module
+
+        self.clock = FakeClock()
+        self.when = self.TUESDAY_14H
+        self.calls = {"quotes": 0, "fx": 0, "crypto": 0, "history": 0}
+        self.rows = [{"symbol": "PETR4", "price": 48.5, "changePct": -0.23}]
+        stubs = {
+            ("providers_brapi", "load"): lambda *a, **k: self._count("quotes", self.rows),
+            ("providers_awesomeapi", "load"):
+                lambda *a, **k: self._count("fx", [{"pair": "USD/BRL", "rate": 5.1,
+                                                     "changePct": 0.1}]),
+            ("providers_binance", "load"):
+                lambda *a, **k: self._count("crypto", [{"symbol": "BTC", "price": 1.0,
+                                                         "changePct": 0.0}]),
+        }
+        for (name, attr), stub in stubs.items():
+            module = getattr(server_module, name)
+            self.addCleanup(setattr, module, attr, getattr(module, attr))
+            setattr(module, attr, stub)
+        for module in history_providers():
+            self.addCleanup(setattr, module, "load_history", module.load_history)
+            module.load_history = lambda *a, **k: {}
+
+    def _count(self, market, rows):
+        self.calls[market] += 1
+        return list(rows)
+
+    def _app(self, **overrides):
+        # Without CONFIG's `b3_hours: []`, so the default is what is tested.
+        config = {k: v for k, v in CONFIG.items() if k != "b3_hours"}
+        config.update(overrides)
+        return App(config, clock=self.clock, wall_clock=lambda: self.when)
+
+    def test_the_default_is_the_automatic_window(self):
+        self.assertEqual(self._app().b3_hours, "auto")
+
+    def test_inside_the_session_quotes_refresh_on_their_ttl(self):
+        app = self._app()
+        app.quotes()
+        self.clock.now = 301
+        app.quotes()
+        self.assertEqual(self.calls["quotes"], 2)
+
+    def test_after_the_close_the_rows_on_hand_are_served_and_brapi_is_not_asked(self):
+        # One refresh after the close -- the 14:00 price is intraday -- and
+        # then nothing until the open, however long the night.
+        app = self._app()
+        app.quotes()
+        self.when = self.TUESDAY_22H
+        for tick in (301, 3600, 36000):
+            self.clock.now = tick
+            payload = app.quotes()
+            self.assertEqual([r["symbol"] for r in payload["quotes"]], ["PETR4"])
+            self.assertFalse(payload["stale"])
+        self.assertEqual(self.calls["quotes"], 2)
+
+    def test_a_price_fetched_before_the_close_is_refreshed_once_after_it(self):
+        # quotes_interval_s = 3600 left the last in-window fetch at 16:50,
+        # which is 16:20's price on the free plan. Holding it would show an
+        # intraday number all weekend with no badge.
+        app = self._app(quotes_interval_s=3600)
+        self.when = datetime.datetime(2026, 10, 2, 16, 50, tzinfo=market_hours.B3_TZ)
+        app.quotes()
+        self.when = datetime.datetime(2026, 10, 2, 17, 50, tzinfo=market_hours.B3_TZ)
+        self.clock.now = 3600
+        app.quotes()
+        self.when = self.SATURDAY_14H
+        self.clock.now = 100000
+        app.quotes()
+        self.assertEqual(self.calls["quotes"], 2)
+
+    def test_a_failed_refresh_is_retried_rather_than_held(self):
+        # A timeout at 17:40 keeps the old rows with `stale` set. Those are
+        # not the close, and brapi coming back must be noticed before Monday.
+        import server.server as server_module
+
+        app = self._app()
+        self.when = datetime.datetime(2026, 9, 29, 17, 30, tzinfo=market_hours.B3_TZ)
+        app.quotes()
+        fails = {"on": True}
+        real = server_module.providers_brapi.load
+
+        def flaky(*a, **k):
+            if fails["on"]:
+                self.calls["quotes"] += 1
+                raise UpstreamError("timeout")
+            return real(*a, **k)
+
+        server_module.providers_brapi.load = flaky
+        self.when = datetime.datetime(2026, 9, 29, 17, 50, tzinfo=market_hours.B3_TZ)
+        self.clock.now = 301
+        self.assertTrue(app.quotes()["stale"])
+        fails["on"] = False
+        self.when = self.TUESDAY_22H
+        self.clock.now = 602
+        self.assertFalse(app.quotes()["stale"])
+        self.clock.now = 10 ** 5
+        app.quotes()
+        self.assertEqual(self.calls["quotes"], 3)
+
+    def test_fx_and_crypto_are_not_held(self):
+        app = self._app()
+        self.when = self.SATURDAY_14H
+        app.quotes()
+        self.clock.now = 301
+        app.quotes()
+        self.assertEqual((self.calls["fx"], self.calls["crypto"]), (2, 2))
+
+    def test_a_cold_start_outside_the_session_still_fetches_once(self):
+        # A PC that logs in on a Saturday must show Friday's close, not an
+        # empty card until Monday.
+        self.when = self.SATURDAY_14H
+        app = self._app()
+        payload = app.quotes()
+        self.assertEqual(len(payload["quotes"]), 1)
+        self.clock.now = 301
+        app.quotes()
+        self.assertEqual(self.calls["quotes"], 1)
+
+    def test_a_missing_ticker_is_retried_outside_the_session(self):
+        # A 429 that dropped one row must not leave it missing all night.
+        self.when = self.TUESDAY_22H
+        app = self._app(quotes=["PETR4", "VALE3"])
+        app.quotes()
+        self.clock.now = 301
+        app.quotes()
+        self.assertEqual(self.calls["quotes"], 2)
+
+    def test_an_empty_list_switches_the_gate_off(self):
+        self.when = self.TUESDAY_22H
+        app = self._app(b3_hours=[])
+        app.quotes()
+        self.clock.now = 301
+        app.quotes()
+        self.assertEqual(self.calls["quotes"], 2)
+
+    def test_the_history_is_held_too(self):
+        # History for the one ticker has to be complete for the gate to hold.
+        import server.server as server_module
+
+        module = server_module.providers_brapi
+
+        def history(*a, **k):
+            self.calls["history"] += 1
+            return {"PETR4": [1.0, 2.0]}
+
+        module.load_history = history
+        self.when = self.TUESDAY_22H
+        app = self._app()
+        app.warm_history()
+        for thread in threading.enumerate():
+            if thread.name.startswith("history-"):
+                thread.join()
+        self.clock.now = 10 ** 6
+        app.quotes()
+        for thread in threading.enumerate():
+            if thread.name.startswith("history-"):
+                thread.join()
+        self.assertEqual(self.calls["history"], 1)
+
+    def test_the_payload_says_whether_the_exchange_is_open(self):
+        app = self._app()
+        self.assertTrue(app.quotes()["b3Open"])
+        self.when = self.TUESDAY_22H
+        self.assertFalse(app.quotes()["b3Open"])
+
+    def test_the_label_is_the_exchanges_session_not_brapis_window(self):
+        # 17:30 in September: B3 shut at 17:00, brapi is still being asked
+        # for another quarter of an hour, and with the gate off it always is.
+        # The label follows the exchange in every case.
+        self.when = datetime.datetime(2026, 9, 29, 17, 30, tzinfo=market_hours.B3_TZ)
+        self.assertFalse(self._app().quotes()["b3Open"])
+        self.assertFalse(self._app(b3_hours=[]).quotes()["b3Open"])
+
+    def test_a_history_fetched_in_the_session_is_refreshed_after_the_close(self):
+        # Warmed at 11:00, the sparkline lacks the day's close; the six-hour
+        # TTL used to fetch it again in the evening and the gate must not
+        # stop that.
+        import server.server as server_module
+
+        def history(*a, **k):
+            self.calls["history"] += 1
+            return {"PETR4": [1.0, 2.0]}
+
+        server_module.providers_brapi.load_history = history
+        self.when = datetime.datetime(2026, 9, 29, 11, 0, tzinfo=market_hours.B3_TZ)
+        app = self._app()
+        app.warm_history()
+        self._join_history()
+        self.when = self.TUESDAY_22H
+        self.clock.now = 12 * 3600
+        app.quotes()
+        self._join_history()
+        self.clock.now = 30 * 3600
+        app.quotes()
+        self._join_history()
+        self.assertEqual(self.calls["history"], 2)
+
+    def _join_history(self):
+        for thread in threading.enumerate():
+            if thread.name.startswith("history-"):
+                thread.join()
+
+    def test_a_malformed_window_fails_startup(self):
+        with self.assertRaises(ValueError):
+            self._app(b3_hours=["18:00", "10:00"])
 
 
 class ActionIdTests(unittest.TestCase):

@@ -403,4 +403,25 @@ public class DataPayloadTest {
         assertFalse(folded.contains(" "));
         assertTrue(folded.contains("\\u2028"));
     }
+
+    @Test
+    public void theMarketFlagRidesQuotesThroughUntouched() throws Exception {
+        // Both values, because the key-set test in this class only proves the
+        // key survives: `put("b3Open", true)` would pass it and the phone
+        // would never say CLOSED.
+        for (boolean open : new boolean[] {true, false}) {
+            String folded = DataPayload.merge(Contract.quotesWith("b3Open", open),
+                    Contract.weather());
+            assertEquals(open, new JSONObject(folded).getBoolean("b3Open"));
+        }
+    }
+
+    @Test
+    public void anAbsentMarketFlagLeavesTheKeyOutAltogether() throws Exception {
+        // An older server. The page reads a missing key as "say nothing",
+        // and a default filled in here would decide for it.
+        assertFalse("no b3Open key in, no b3Open key out",
+                new JSONObject(DataPayload.merge(Contract.quotesWithout("b3Open"),
+                        Contract.weather())).has("b3Open"));
+    }
 }

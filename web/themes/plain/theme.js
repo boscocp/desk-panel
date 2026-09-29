@@ -430,6 +430,19 @@
         if (!payload) {
             return;
         }
+        // The CLOSED label beside the B3 heading, first so a column that
+        // throws further down cannot leave it stale. The loop above rewrote
+        // the heading's text and took any earlier label with it, so this only
+        // ever adds -- the word in a span of its own, so e2e/layout/measure.js,
+        // which measures leaves, still sees "B3" beside it.
+        const b3 = root.querySelector('#quotes .col-title');
+        if (b3 && marketClosed(payload)) {
+            const title = el('span');
+            title.textContent = b3.textContent;
+            const tag = el('span', null, 'market-closed');
+            tag.textContent = words.marketClosed;
+            b3.replaceChildren(title, ' ', tag);
+        }
         fill(els.quotes, payload.quotes || [], 'symbol', 'price', 'BRL', formatPrice);
         fill(els.fx, payload.fx || [], 'pair', 'rate', 'BRL', formatRate, formatPair);
         fill(els.crypto, payload.crypto || [], 'symbol', 'price', 'USD', formatPrice);

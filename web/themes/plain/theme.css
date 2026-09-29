@@ -124,6 +124,15 @@ body {
     color: #8F8F8F;
 }
 
+/* CLOSED, inside the B3 heading while the exchange is shut. Quieter than the
+ * heading: a shut market is most of the week, not an alarm. */
+.market-closed {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: #6A6A6A;
+}
+
 /* The window, and the box that moves inside it (T6.6). Undesigned like the
  * rest of this theme, and slower than neon's: six seconds a row rather than
  * four, to prove the number really is the theme's. The fraction has to match

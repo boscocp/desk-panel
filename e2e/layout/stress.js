@@ -59,6 +59,8 @@ window.onData({
     // corner line that grew out of its column and covered the CRYPTO card.
     battery: { level: 100, tempC: 42.5, charging: false },
     stale: true,
+    // The CLOSED label on, since it shares the B3 card's title strip.
+    b3Open: false,
     // Carried through, because window.onData selects the theme: without it
     // this pass would switch a --theme run back to the default and measure the
     // wrong panel while reporting the right name (T6.7).
