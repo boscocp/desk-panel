@@ -450,10 +450,12 @@ public final class PanelService extends Service implements PcPoller.Listener {
                 PowerManager.PARTIAL_WAKE_LOCK, "DeskPanel:probe");
         probeWakeLock.setReferenceCounted(false);
 
-        // R.string.pc_host carries the address the build baked in from .env.
-        String host = getString(R.string.pc_host);
-        poller = new PcPoller(host, this);
-        dataPoller = new DataPoller(host, this::onData);
+        // R.string.pc_host carries the addresses the build baked in from .env,
+        // comma-separated; one PcHosts is shared so the data poller follows
+        // whichever PC the PC poller last heard from (ADR 0016).
+        PcHosts hosts = PcHosts.parse(getString(R.string.pc_host));
+        poller = new PcPoller(hosts, this);
+        dataPoller = new DataPoller(hosts, this::onData);
 
         // RECEIVER_NOT_EXPORTED because nothing outside the system should be
         // able to tell this app what the battery is doing.

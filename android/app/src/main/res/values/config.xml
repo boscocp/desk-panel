@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The PC's LAN address, for the one piece of Java that opens a socket.
+  The PCs' LAN addresses, comma-separated (ADR 0016), for the Java that opens
+  sockets. One address is the usual case.
 
   It lives in res/ rather than in PcPoller.java so that it rides the existing
   substitution: build.gradle.kts copies src/main/res to a generated tree with

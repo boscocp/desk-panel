@@ -83,7 +83,15 @@ public final class PcPoller {
      */
     private static final int TIMEOUT_MS = 1500;
 
-    private final String pingUrl;
+    /**
+     * The PCs to ask, and which one answered last (ADR 0016). One cycle asks
+     * the active host first and stops at the first 200, so while a PC is up a
+     * cycle costs one probe however many are listed. Offline, a cycle asks
+     * every host in turn, and its worst case is that many times
+     * {@link #TIMEOUT_MS}'s 3000 ms -- which the {@link #generation} guard
+     * already copes with, for the same reason it copes with one slow probe.
+     */
+    private final PcHosts hosts;
 
     private final Listener listener;
 
@@ -136,13 +144,14 @@ public final class PcPoller {
     private volatile ScheduledExecutorService scheduler;
 
     /**
-     * @param host the PC's LAN address; {@code R.string.pc_host}, which the
-     *             build substitutes from {@code .env} (ADR 0013). It is the one
-     *             host {@code network_security_config.xml} allows in cleartext.
+     * @param hosts the PCs' LAN addresses, from {@code R.string.pc_host}, which
+     *              the build substitutes from {@code .env} (ADR 0013). They are
+     *              the hosts {@code network_security_config.xml} allows in
+     *              cleartext, one {@code domain-config} each (ADR 0016).
      * @param listener told about transitions, on the main thread
      */
-    public PcPoller(String host, Listener listener) {
-        this.pingUrl = "http://" + host + ":" + PORT + "/ping";
+    public PcPoller(PcHosts hosts, Listener listener) {
+        this.hosts = hosts;
         this.listener = listener;
     }
 
@@ -279,7 +288,7 @@ public final class PcPoller {
             return;
         }
 
-        String failure = probe();
+        String failure = probeAll(booked);
 
         // Checked again on the way out, and this one is not belt-and-braces: a
         // probe that outlived its generation must not touch PcState at all.
@@ -406,6 +415,38 @@ public final class PcPoller {
     }
 
     /**
+     * One {@code /ping} per host, in {@link PcHosts#probeOrder()}, stopping at
+     * the first that answers. Staleness is re-checked between hosts, so a
+     * stopped loop does not spend the rest of a long offline cycle dialling.
+     *
+     * @return null if some host answered, and otherwise every host's failure,
+     *         for the log line {@link #deliver} writes once per transition
+     */
+    private String probeAll(int booked) {
+        StringBuilder failures = new StringBuilder();
+        for (String host : hosts.probeOrder()) {
+            if (isStale(booked)) {
+                break;
+            }
+            String failure = probe("http://" + host + ":" + PORT + "/ping");
+            if (failure == null) {
+                if (hosts.answered(host) && hosts.all().size() > 1) {
+                    // Not a marker: the state did not change, only which PC
+                    // is serving it. Plain text, like "probe failed:", so it
+                    // can never be mistaken for one.
+                    Log.i(Markers.TAG, "pc answered at " + host);
+                }
+                return null;
+            }
+            if (failures.length() > 0) {
+                failures.append("; ");
+            }
+            failures.append(host).append(": ").append(failure);
+        }
+        return failures.length() > 0 ? failures.toString() : "not attempted";
+    }
+
+    /**
      * {@code GET /ping}, blocking, on the poller thread — never the main one,
      * where it would be a {@code NetworkOnMainThreadException}.
      *
@@ -415,7 +456,7 @@ public final class PcPoller {
      *         network, a 500, a truncated body are one answer, because the
      *         panel only ever needed one bit. The text is for the log.
      */
-    private String probe() {
+    private String probe(String pingUrl) {
         HttpURLConnection connection = null;
         String failure = "not attempted";
         try {
