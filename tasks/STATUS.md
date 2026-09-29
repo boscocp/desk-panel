@@ -191,13 +191,55 @@ argument behind all three.
 ## Phase 9 — Suggested, not scheduled
 
 Two improvements asked for on 2026-09-20, **after** every task above. Both are written down in
-full so the idea is not lost and neither is started by accident; neither is part of any wave,
-and the first line of each file says so.
+full so the idea is not lost and neither is started by accident. T9.1 was scheduled by the owner
+for wave 38; T9.2 is still part of no wave.
 
 | # | Task | State | Notes |
 |---|---|---|---|
-| T9.1 | **The next meeting, under the clock** | todo | Google Calendar and Microsoft Outlook merged, the soonest event under the clock in the `#shortcuts` strip, between T8.2's two buttons. Blocked behind T8.2 for a layout reason and behind **ADR 0016** for a bigger one: this is the first feature that puts *personal data* on a panel whose server has no authentication, and the refresh tokens it needs are credentials sitting on a desktop PC. OAuth stays on the PC and never reaches the APK — two acceptance lines exist for exactly that. The merge is where the design is: the two providers disagree about all-day events, about time zones and about the word for "declined" |
+| T9.1 | **The next meeting, on the AGENDA card** | blocked | 2026-09-29, wave 38, PR #56. **Built and green; blocked on the owner's credentials**, and nothing else. [ADR 0017](../docs/adr/0017-calendars-are-personal-data.md) came before the code, and three corrections to this file came before either. The ADR number was 0017, because 0016 had gone to T4.5. The card was `#agenda`, which T6.12 had reserved, not the button strip. And Google's device flow allows no Calendar scope at all, so Google is loopback + PKCE and Microsoft keeps its device code flow. **Read-only is enforced in code**: `check_scope` runs on every token response, and a guard test allowlists every scope named in `server/*.py`. Tokens live in `calendar-tokens.json` (0600, atomic, compare-and-swap on rotation), never in `config.toml`. **DNS rebinding was the finding nobody asked for**: with titles on `/quotes`, any web page could have read them. Every route now checks `Host` and answers 421. Seven fresh-context lenses reviewed it, and every finding was applied. The worst was an `OSError` on the Microsoft token rotation, which escaped `load`, froze the previous agenda and retried on every poll. **Premises still unmeasured**: the fixtures are written from the docs, and no live response has been captured. `check_layout.py` did not run, because this Mac has no Firefox; headless Chrome's `measure.js` did, and it is clean. Left: create the Google and Entra clients, run `calendar_login.py`, run the opt-in contract, rebuild the APK once (`DataPayload`), then the manual check on the phone |
 | T9.2 | **Spike: can the panel talk to an assistant for nothing?** | todo | A button to ask something out loud and hear an answer, with the whole pipeline on the PC — invariant 1 means the page cannot call anything. Time-boxed, produces `docs/spikes/2026-voice-assistant.md` and a throwaway prototype under `spikes/`, and is allowed to conclude *do not build this*. The unknown is whether offline STT, a small local model and offline TTS fit inside a latency a person will stand at a panel for; Claude and DeepSeek are the paid comparison, not the plan. Also has to answer the awkward ones: `RECORD_AUDIO` would be the app's first dangerous permission, and an unauthenticated LAN endpoint that runs a model and speaks in someone's room is not in ADR 0015's family |
+
+## Resuming after 2026-09-29 (wave 38)
+
+Wave 38 is **T9.1** on `wave/38-next-event`, PR #56. The owner asked for it over the recommended
+flip to public: the next meeting from Google and Outlook, read-only, "tudo bem seguro". The code,
+the ADR (0017), the docs and the review are done, and `make check` is green. **T9.1 is `blocked`
+on credentials only the owner can create.**
+
+**Next: the owner's half of T9.1**, in `docs/SERVER-SETUP.md` § Calendars. On the Windows PC:
+
+1. Create a Google Cloud project with a Desktop client, and publish its consent screen as
+   "In production". In Testing, the tokens expire every 7 days.
+2. Create an Entra app registration for "any org + personal accounts", with public client flows
+   on and `Calendars.ReadBasic`.
+3. Fill in `calendar_accounts` and the client ids in `config.toml`.
+4. Run `python server/calendar_login.py google --account personal`, and the same for each
+   Microsoft account.
+5. Run `RUN_CONTRACT_TESTS=1 python -m unittest discover -s server/tests -t . -p "contract_calendar*.py"`.
+   Its first run is the first measurement of the providers' shapes. If it is red, the fixtures
+   are wrong, not the tests.
+6. Rebuild and install the APK once (`DataPayload` passes `agenda` now).
+7. The manual check in the task file: a real event ten minutes out, then revoke access and
+   watch the card fail alone.
+
+The flip to public is still the owner's call, and nothing in this wave changes it.
+`calendar-tokens.json` is gitignored and in the secret sweep's forbidden names.
+
+### What is still only true on this desk
+
+- **Every provider shape is a premise.** The fixtures are hand-written from Google's and
+  Microsoft's references, and the contract test has never run against a live account.
+- **`check_layout.py` has not run for T9.1**, because this Mac has no Firefox. Headless Chrome's
+  `measure.js` is clean for both themes, both languages and three fixtures, with this Mac's fonts.
+- **A work tenant may refuse consent** to an unverified app. Whether an employer's calendar may
+  sit on a home panel is the employer's policy, and ADR 0017 says so.
+- **The review's security lens pressed `mute-audio` four times on this Mac.** It was testing the
+  Host check on a scratch server started from the example config, which ships with actions on.
+  Four toggles is an even number, so the audio state should be where it was.
+- The `make` targets call `python`, and this Mac has only `python3`. The wave ran through a
+  scratchpad symlink. The first command of `make wave-start` failed without it.
+- Everything carried from wave 37: the work email in `refs/pull/46..48/head`,
+  `~/Downloads/keystore.properties`, and T4.5's move between two live PCs.
 
 ## Resuming after 2026-09-29 (wave 37)
 
