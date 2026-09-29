@@ -160,8 +160,25 @@ if [ "$START" = yes ]; then
     step "Loading into $DOMAIN"
     # bootout first: bootstrap refuses a label that is already loaded, and a
     # re-install must pick up the new plist rather than keep the old one.
-    launchctl bootout "$DOMAIN/$LABEL" >/dev/null 2>&1 || true
-    launchctl bootstrap "$DOMAIN" "$PLIST"
+    #
+    # bootout returns before launchd has let go of the label, and a bootstrap
+    # that lands in that window fails with "Bootstrap failed: 5: Input/output
+    # error" -- after the old job is gone, so a re-install that loses the race
+    # leaves the panel with no server at all. Seen on the owner's first re-run
+    # (2026-09-29); every earlier run had won it by luck. So wait until the
+    # label is really gone, and give the bootstrap one more try.
+    if launchctl bootout "$DOMAIN/$LABEL" >/dev/null 2>&1; then
+        tries=0
+        while [ $tries -lt 20 ] && launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; do
+            sleep 0.5
+            tries=$((tries + 1))
+        done
+    fi
+    if ! launchctl bootstrap "$DOMAIN" "$PLIST" 2>/dev/null; then
+        sleep 2
+        launchctl bootstrap "$DOMAIN" "$PLIST" \
+            || die "launchctl bootstrap failed twice; the agent is NOT loaded. Retry: launchctl bootstrap $DOMAIN $PLIST"
+    fi
 else
     step "Written (not loaded; launchd loads it at your next graphical login)"
 fi
