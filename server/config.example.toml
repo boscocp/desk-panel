@@ -126,16 +126,21 @@ timezone = "America/Sao_Paulo"
 # against a 15,000 budget and the B3 card goes permanently stale around the
 # 17th; at 600s it is 12,960 with the PC logged in around the clock. More
 # tickers, or a shorter interval, and that arithmetic has to be redone: four
-# tickers at 600s is 17,280 around the clock, which only fits if this PC is
-# logged in less than about 87% of the month.
+# tickers at 600s is 17,280 around the clock.
 #
-# Quotes are fetched only when the panel asks: the cache fills on demand, so
-# with more than one PC (ADR 0016) only the one the phone is on spends quote
-# requests. **One exception**: at startup the server fetches every ticker's
-# history once, so the sparklines are there for the first payload -- one brapi
-# request per ticker, per login, on every PC that logs in, whether or not the
-# phone is looking at it. Small (four tickers is four requests), but it is
-# spent twice when two PCs share a token.
+# History is on top of that: one brapi request per ticker every
+# `history_interval_s` below, so four a day per ticker at the default -- 480 a
+# month for four tickers, and four tickers then fit only if this PC is logged
+# in less than about 84% of the month. **While any ticker's history is
+# missing** (a paid ticker without a token, a refresh that failed) the history
+# retries every `quotes_interval_s` instead, for every ticker, which roughly
+# doubles the spend: fix or remove the missing ticker rather than living with it.
+#
+# Quotes and history are fetched when the panel asks, so with more than one PC
+# (ADR 0016) only the one the phone is on spends them. The exception is
+# startup: every login fetches every ticker's history once, on every PC that
+# logs in, whether or not the phone is looking at it -- spent twice when two
+# PCs share a token.
 quotes_interval_s = 600
 
 # Open-Meteo allows 10,000 requests a day for non-commercial use, so this is
@@ -159,7 +164,8 @@ weather_interval_s = 900
 moon_interval_s = 21600
 
 # The sparkline's series: daily closes, which change once a day, so this is on
-# a clock measured in hours. Six hours costs four requests a day per provider.
+# a clock measured in hours. Six hours costs four requests a day per ticker,
+# pair or coin -- each series is its own request, on all three providers.
 history_interval_s = 21600
 
 # How many days of history the sparkline covers. brapi only accepts named
