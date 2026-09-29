@@ -9,6 +9,25 @@ That survives exactly as long as the next person understands it is the point. So
 style guide with an opinion about braces — the mechanical parts are automated below so nobody
 has to enforce them by hand. It is an argument about maintenance.
 
+## What this project accepts
+
+Thirty seconds, so you know whether your idea belongs here before you spend an evening on it:
+
+- **Device reports, from anybody.** Did the screen really sleep and wake on your phone, did it
+  survive a night on battery? The [device report](.github/ISSUE_TEMPLATE/device-report.yml)
+  template asks the right questions. This is the contribution the project needs most, because it
+  runs on one phone.
+- **Bug reports, from anybody**, with the four fields the bug template asks for.
+- **Themes and layouts.** `web/` is the natural place to contribute, and it runs in a browser with
+  nothing installed.
+- **New data providers**, behind the existing normaliser shape in `server/providers_*.py`.
+- **Anything touching the three invariants in the README needs an ADR first**, then a PR. An ADR
+  is not a hurdle; it is where the conversation happens. The `needs-adr` label marks those issues.
+
+What it does not accept: authentication, cloud services, a framework in `web/`, or a dependency
+in `server/`. Each is a decision recorded in `docs/adr/`, not an oversight. And this is one person
+with one device: a good PR that cannot be verified without hardware may wait for a device report.
+
 Start at [docs/RUNNING-LOCALLY.md](docs/RUNNING-LOCALLY.md) if you have not run anything yet. The
 first tier needs no Python, no Node, no Docker and no phone.
 

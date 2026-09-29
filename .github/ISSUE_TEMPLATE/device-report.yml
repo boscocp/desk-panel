@@ -1,0 +1,47 @@
+name: Device report
+description: It works, or it does not, on a phone this project has never seen
+labels: ["device-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Almost everything expensive in this project was a vendor behaviour found on one
+        phone. A report from another one, **working or not**, is worth more here than most
+        code. Every field below is something a past diagnosis needed.
+  - type: input
+    id: device
+    attributes:
+      label: Phone, Android version and skin
+      placeholder: Pixel 6a, Android 14, stock
+    validations:
+      required: true
+  - type: dropdown
+    id: sleeps
+    attributes:
+      label: With the PC off, did the screen really go off (not just black)?
+      options: ["yes", "no — it stayed lit", "no — it went black but stayed on", "did not test"]
+    validations:
+      required: true
+  - type: dropdown
+    id: wakes
+    attributes:
+      label: With the PC back, did the screen come back on by itself?
+      options: ["yes", "no", "only after touching it", "did not test"]
+    validations:
+      required: true
+  - type: dropdown
+    id: survives
+    attributes:
+      label: Did it survive a night on battery, and a reboot?
+      options: ["both", "night only", "reboot only", "neither", "did not test"]
+  - type: textarea
+    id: vendor
+    attributes:
+      label: What the phone had to be told
+      description: Autostart, battery exemption, anything vendor-specific you had to switch (see docs/PHONE-SETUP.md)
+  - type: textarea
+    id: log
+    attributes:
+      label: Markers from the log, if you have them
+      description: "`adb logcat -d -s DeskPanel` — the `state=` and `screen=` lines are the ones that matter"
+      render: text

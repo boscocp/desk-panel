@@ -3,9 +3,9 @@
 What GitHub does for this project, why it costs nothing, and the parts that are
 written down here because they are decided outside every file in the tree.
 
-Branch protection, labels, `CODEOWNERS` and `SECURITY.md` are **T7.7's** and are
-not here yet. This document covers the automation: CI, linting, dependency
-updates and code scanning.
+This document covers the automation (CI, linting, dependency updates, code
+scanning) and, at the end, the repository settings T7.7 applies, as commands
+that can be re-run.
 
 ## Everything here is free *because the repository is public*
 
@@ -129,3 +129,73 @@ No stale-issue bot, no auto-labeller, no "thanks for your contribution" action.
 This project expects a handful of contributors and device reports (T7.7).
 Automation that answers a human with a robot costs more goodwill than it saves
 time.
+
+## Repository settings (T7.7)
+
+Settings clicked in the web UI are lost the first time the repository is moved
+or recreated, so every one of them is a command here. Run from the repository
+root with an authenticated `gh` that has admin on it.
+
+### Labels
+
+One per area of the codebase, plus the three the contribution guide promises.
+`--force` makes each line idempotent.
+
+```bash
+gh label create device-report --color 1d76db --description "It works, or does not, on a phone we have not seen" --force
+gh label create needs-adr     --color d93f0b --description "Touches an invariant: an ADR comes before the PR" --force
+gh label create good-first-issue --color 7057ff --description "Small, real, and taken from the backlog" --force
+gh label create area:web      --color c5def5 --description "web/: the panel UI" --force
+gh label create area:server   --color c5def5 --description "server/: the PC half" --force
+gh label create area:android  --color c5def5 --description "android/: the phone half" --force
+gh label create area:harness  --color c5def5 --description "scripts/, tasks/, CI" --force
+```
+
+### Discussions
+
+For "will it run on my phone?", which is a question and not a bug. The issue
+template chooser links there.
+
+```bash
+gh api -X PATCH repos/{owner}/{repo} -F has_discussions=true
+```
+
+### Branch protection on `main`
+
+PRs only, CI green, no force-push, no deletion. **It applies only once the
+repository is public**: on GitHub Free, a private repository answers this call
+with 403, *"Upgrade to GitHub Pro or make this repository public"*, and that is
+why it is the first command to run after the visibility flip. No review is
+required, since the maintainer is one person, but a PR is.
+
+```bash
+gh api -X PUT repos/{owner}/{repo}/branches/main/protection --input - <<'JSON'
+{
+  "required_status_checks": {"strict": false, "contexts": ["server", "web", "android", "guards", "lint", "secrets"]},
+  "enforce_admins": false,
+  "required_pull_request_reviews": {"required_approving_review_count": 0},
+  "restrictions": null,
+  "allow_force_pushes": false,
+  "allow_deletions": false
+}
+JSON
+```
+
+`enforce_admins` is off on purpose. It is what would let the maintainer merge a
+fix while CI itself is broken, which is a real case for a one-person repo.
+
+### Review and ownership
+
+`CODEOWNERS` names the maintainer, so every PR requests a review automatically.
+The PR template asks what was verified on the device and what was only reasoned
+about; a PR is merged after its review is applied, not before.
+
+### What a PR needs before merge
+
+- CI green: the six checks above.
+- The PR template answered, especially "verified on the device, versus reasoned
+  about". Either answer is acceptable; mixing them up silently is not.
+- For anything touching an invariant, an ADR merged first or in the same PR.
+- A PR that is good but cannot be verified without the hardware is labelled
+  `device-report` and waits for one, rather than being merged on trust or closed.
+

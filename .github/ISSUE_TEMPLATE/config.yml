@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: "Will it run on my phone?"
+    url: https://github.com/boscocp/desk-panel/discussions
+    about: Questions are not bugs. Ask in Discussions; if you then try it, a device report is the most useful thing you can file.
+  - name: Security issue
+    url: https://github.com/boscocp/desk-panel/security/advisories/new
+    about: Report privately, never in a public issue. See SECURITY.md.
