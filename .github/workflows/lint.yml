@@ -119,3 +119,32 @@ jobs:
       # Not a list of scripts: `lint-selftests` discovers them by grep over a
       # glob, so the next one to grow a --self-test is covered by being written.
       - run: make lint-selftests
+      # The tree half, once. The history half is the `secrets` job below, which
+      # needs a checkout this one does not have and runs *only* that half: the
+      # first cut ran the tree scan in both places, which is a second green tick
+      # for a scan that already passed. Found by review.
+      - run: make lint-secrets
+
+  secrets:
+    # Its own job for one reason: `fetch-depth: 0`. The guards job fetches 30
+    # commits, which is right for the commit-message convention and wrong for
+    # a sweep of the history -- `git rev-list --all` over a shallow clone walks
+    # what was fetched and says "nothing found" about the other 130 commits.
+    # A green tick that means "we looked at the last thirty" under a label that
+    # says "we looked at the history" is worse than no tick, and this repository
+    # has paid for that shape of check twice already.
+    #
+    # The history half only. The tree half is `make lint-secrets` in the guards
+    # job, and running it here too would be a second tick for the same scan.
+    # The two halves are reported apart and exit differently -- a finding in the
+    # tree is fixed by deleting it, one in the history by rotating the credential
+    # -- and keeping them in separate jobs is what lets a red tick say which.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - run: python scripts/check_secrets.py --history

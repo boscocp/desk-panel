@@ -1,7 +1,7 @@
 # Entry point for humans, CI and agents alike. Every target exits non-zero on failure.
 DC := docker compose -f docker/compose.yml run --rm build
 
-.PHONY: help wave-start check hooks lint-tasks lint-notes lint-status lint-permissions lint-workflow lint-ci-hygiene lint-selftests lint-links lint-requirements lint-commits test-server test-web test-android connected build apk contract e2e clean
+.PHONY: help wave-start check hooks lint-tasks lint-notes lint-status lint-permissions lint-workflow lint-ci-hygiene lint-selftests lint-links lint-secrets lint-requirements lint-commits test-server test-web test-android connected build apk contract e2e clean
 
 help:
 	@echo "wave-start    fetch, prove main is current, cut BRANCH=wave/NN-slug"
@@ -21,6 +21,7 @@ help:
 	@echo "lint-ci-hygiene  permissions, SHA pins, concurrency, dependabot"
 	@echo "lint-selftests  every scripts/*.py that has a --self-test runs it"
 	@echo "lint-links    every Markdown link resolves (local half; CI does the remote one)"
+	@echo "lint-secrets  nothing credential-shaped in the tree (CI sweeps the history)"
 	@echo "lint-requirements  docs/REQUIREMENTS.md still matches what the build pins"
 	@echo "lint-commits  the last thirty commit subjects fit the convention"
 	@echo "hooks         install .githooks (commit-msg checks the message shape)"
@@ -51,7 +52,7 @@ wave-start:
 	@echo "Read this before writing anything -- it is the wave's prompt:"
 	@grep -n -m1 '^## Resuming after' tasks/STATUS.md
 
-check: lint-tasks lint-notes lint-status lint-permissions lint-workflow lint-ci-hygiene lint-selftests lint-links lint-requirements lint-commits test-server test-web test-android
+check: lint-tasks lint-notes lint-status lint-permissions lint-workflow lint-ci-hygiene lint-selftests lint-links lint-secrets lint-requirements lint-commits test-server test-web test-android
 
 lint-tasks:
 	python scripts/check_acceptance.py
@@ -136,6 +137,17 @@ MARKDOWN_PUBLIC := README.md CONTRIBUTING.md .github/PULL_REQUEST_TEMPLATE.md $(
 
 lint-links:
 	python scripts/check_links.py --skip-remote $(MARKDOWN)
+
+# The tree half only. The history half walks every blob that has ever been
+# committed -- 1,935 of them, about 2.5 seconds -- and the answer changes only
+# when a commit is made, so CI runs it on the push and a person runs it before
+# the repository goes public. The split is `lint-links`' split, for the same
+# reason: `make check` is the command that has to stay worth running.
+#
+# A finding in the tree exits 1 and a finding in the history exits 3, which is
+# the more serious of the two: history cannot be fixed by deleting anything.
+lint-secrets:
+	python scripts/check_secrets.py
 
 lint-requirements:
 	python scripts/check_requirements.py
