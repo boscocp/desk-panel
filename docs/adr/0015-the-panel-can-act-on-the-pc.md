@@ -222,7 +222,9 @@ not: it runs nothing either way, and ordering it first would only change what a 
 - **The endpoint is as trustworthy as the LAN, and only because of the browser check above.**
   `docs/SERVER-SETUP.md` already assumes a home network the owner controls; this makes that
   assumption load-bearing rather than incidental. On a shared or untrusted network,
-  `actions = []` is the correct configuration and is the default. Without the `Origin` /
+  `actions = []` is the correct configuration and is the server's default. The committed
+  examples enable both toggles since 2026-09-29, at the owner's request, and say beside the key
+  that `[]` is the setting for a network you do not control. Without the `Origin` /
   `Sec-Fetch-Site` refusal this sentence would be false: the reach would be every website the
   owner visits, not every machine on their network.
 - **`actions` changes shape.** It was a reserved empty table (`[actions]`); it is a list of names

@@ -26,5 +26,5 @@
   "night_end": "07:00",
   "theme": "neon",
   "language": "pt-BR",
-  "actions": []
+  "actions": ["mute-audio", "mute-mic"]
 }
