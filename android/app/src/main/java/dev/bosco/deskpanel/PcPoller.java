@@ -87,9 +87,10 @@ public final class PcPoller {
      * The PCs to ask, and which one answered last (ADR 0016). One cycle asks
      * the active host first and stops at the first 200, so while a PC is up a
      * cycle costs one probe however many are listed. Offline, a cycle asks
-     * every host in turn, and its worst case is that many times
-     * {@link #TIMEOUT_MS}'s 3000 ms -- which the {@link #generation} guard
-     * already copes with, for the same reason it copes with one slow probe.
+     * every host in turn, and its worst case is that many times 3000 ms --
+     * {@link #TIMEOUT_MS} twice, connect and read -- which is why
+     * {@link PcHosts#MAX_HOSTS} exists and why the {@link #generation} guard
+     * matters more here than it did with one host.
      */
     private final PcHosts hosts;
 
@@ -147,7 +148,8 @@ public final class PcPoller {
      * @param hosts the PCs' LAN addresses, from {@code R.string.pc_host}, which
      *              the build substitutes from {@code .env} (ADR 0013). They are
      *              the hosts {@code network_security_config.xml} allows in
-     *              cleartext, one {@code domain-config} each (ADR 0016).
+     *              cleartext, one {@code <domain>} each inside a single
+     *              {@code domain-config} (ADR 0016).
      * @param listener told about transitions, on the main thread
      */
     public PcPoller(PcHosts hosts, Listener listener) {
@@ -423,27 +425,16 @@ public final class PcPoller {
      *         for the log line {@link #deliver} writes once per transition
      */
     private String probeAll(int booked) {
-        StringBuilder failures = new StringBuilder();
-        for (String host : hosts.probeOrder()) {
-            if (isStale(booked)) {
-                break;
-            }
-            String failure = probe("http://" + host + ":" + PORT + "/ping");
-            if (failure == null) {
-                if (hosts.answered(host) && hosts.all().size() > 1) {
-                    // Not a marker: the state did not change, only which PC
-                    // is serving it. Plain text, like "probe failed:", so it
-                    // can never be mistaken for one.
-                    Log.i(Markers.TAG, "pc answered at " + host);
-                }
-                return null;
-            }
-            if (failures.length() > 0) {
-                failures.append("; ");
-            }
-            failures.append(host).append(": ").append(failure);
+        PcHosts.Cycle cycle = hosts.cycle(
+                host -> probe("http://" + host + ":" + PORT + "/ping"),
+                () -> isStale(booked));
+        if (cycle.moved) {
+            // Not a marker: the state did not change, only which PC is
+            // serving it. Plain text, like "probe failed:", so it can never be
+            // mistaken for one.
+            Log.i(Markers.TAG, "pc answered at " + cycle.host);
         }
-        return failures.length() > 0 ? failures.toString() : "not attempted";
+        return cycle.failure;
     }
 
     /**

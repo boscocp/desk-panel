@@ -168,7 +168,9 @@ public final class PanelService extends Service implements PcPoller.Listener {
      * exists to save. The platform drops it either way.
      *
      * <p>10s against a probe whose worst case is the connect and read timeouts
-     * back to back, 3s (see {@code PcPoller.TIMEOUT_MS}).
+     * back to back, 3s (see {@code PcPoller.TIMEOUT_MS}), per host -- and an
+     * offline cycle asks every host, so {@link PcHosts#MAX_HOSTS} is 3 to keep
+     * the whole cycle, 9s, inside this window (ADR 0016).
      */
     private static final long PROBE_WINDOW_MS = 10_000L;
 

@@ -5,15 +5,79 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 import org.junit.Test;
 
 /** ADR 0016: more than one PC, on the JVM. */
 public class PcHostsTest {
 
-    private static final String WIN = "192.168.1.100";
-    private static final String MAC = "192.168.1.101";
+    private static final String WIN = "pc-windows";
+    private static final String MAC = "pc-mac";
+    private static final String THIRD = "pc-third";
+
+    /** Records every host dialled, answering only for {@code up}. */
+    private static PcHosts.Prober answering(List<String> dialled, String... up) {
+        List<String> live = Arrays.asList(up);
+        return host -> {
+            dialled.add(host);
+            return live.contains(host) ? null : "java.net.ConnectException";
+        };
+    }
+
+    private static final PcHosts.Stopped RUNNING = () -> false;
+
+    @Test
+    public void aCycleAsksTheActiveHostFirstAndStopsAtTheFirstAnswer() {
+        PcHosts hosts = PcHosts.parse(WIN + "," + MAC);
+        hosts.answered(MAC);
+        List<String> dialled = new ArrayList<>();
+        PcHosts.Cycle cycle = hosts.cycle(answering(dialled, WIN, MAC), RUNNING);
+        assertEquals(Arrays.asList(MAC), dialled);
+        assertEquals(null, cycle.failure);
+        assertFalse(cycle.moved);
+    }
+
+    @Test
+    public void whenTheActiveHostGoesTheNextOneThatAnswersTakesOver() {
+        PcHosts hosts = PcHosts.parse(WIN + "," + MAC);
+        List<String> dialled = new ArrayList<>();
+        PcHosts.Cycle cycle = hosts.cycle(answering(dialled, MAC), RUNNING);
+        assertEquals(Arrays.asList(WIN, MAC), dialled);
+        assertTrue(cycle.moved);
+        assertEquals(MAC, cycle.host);
+        assertEquals(MAC, hosts.active());
+    }
+
+    @Test
+    public void noAnswerAnywhereNamesEveryHostAndMovesNothing() {
+        PcHosts hosts = PcHosts.parse(WIN + "," + MAC);
+        List<String> dialled = new ArrayList<>();
+        PcHosts.Cycle cycle = hosts.cycle(answering(dialled), RUNNING);
+        assertEquals(Arrays.asList(WIN, MAC), dialled);
+        assertTrue(cycle.failure.contains(WIN) && cycle.failure.contains(MAC));
+        assertEquals(WIN, hosts.active());
+    }
+
+    @Test
+    public void aStoppedLoopDialsNothingMore() {
+        PcHosts hosts = PcHosts.parse(WIN + "," + MAC);
+        List<String> dialled = new ArrayList<>();
+        int[] asked = {0};
+        PcHosts.Cycle cycle = hosts.cycle(answering(dialled, MAC), () -> asked[0]++ > 0);
+        assertEquals(Arrays.asList(WIN), dialled);
+        assertEquals(WIN, hosts.active());
+        assertTrue(cycle.failure != null);
+    }
+
+    @Test
+    public void moreHostsThanTheWakeLockCoversAreRefused() {
+        PcHosts.parse(WIN + "," + MAC + "," + THIRD);
+        assertThrows(IllegalArgumentException.class,
+                () -> PcHosts.parse(WIN + "," + MAC + "," + THIRD + ",pc-fourth"));
+    }
 
     @Test
     public void oneHostIsTheOldBehaviourExactly() {
@@ -56,13 +120,13 @@ public class PcHostsTest {
     @Test
     public void aHostOutsideThePinIsRefused() {
         PcHosts hosts = PcHosts.parse(WIN);
-        assertThrows(IllegalArgumentException.class, () -> hosts.answered("10.0.0.1"));
+        assertThrows(IllegalArgumentException.class, () -> hosts.answered("pc-unlisted"));
         assertEquals(WIN, hosts.active());
     }
 
     @Test
     public void theListCannotBeChangedFromOutside() {
         PcHosts hosts = PcHosts.parse(WIN + "," + MAC);
-        assertThrows(UnsupportedOperationException.class, () -> hosts.all().add("10.0.0.1"));
+        assertThrows(UnsupportedOperationException.class, () -> hosts.all().add("pc-unlisted"));
     }
 }
