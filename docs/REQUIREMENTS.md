@@ -45,6 +45,12 @@ Depends entirely on which tier of [RUNNING-LOCALLY.md](RUNNING-LOCALLY.md) you w
 phone. Without Docker, the two suites that matter most to a web or server contributor still run:
 `make test-web` and `make test-server`.
 
+**On macOS, `python` is a name you may not have.** Every command here spells it `python`, the
+Makefile included, and CI runs those exact strings. Homebrew installs `python3` only; its
+`/opt/homebrew/opt/python@3.13/libexec/bin` (or the equivalent for your version) holds a `python`,
+and putting that directory on your `PATH` is the whole fix. `/usr/bin/python3` is 3.9, below the
+floor.
+
 ## The dependency inventory, in full
 
 Because it is short enough to list, and a list that fits on a screen is a list somebody will
