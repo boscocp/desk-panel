@@ -188,7 +188,10 @@ fw=$(/usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate 2>/dev/nul
 # of this script asked immediately, caught the process before its re-exec, and
 # named /opt/homebrew/bin/python3 anyway.
 listener=
-pid=$(launchctl print "$DOMAIN/$LABEL" 2>/dev/null | sed -n 's/^	pid = //p' | head -n 1)
+# Only when this run loaded it: with --no-start whatever is loaded is the
+# previous install, and naming its binary would describe the wrong plist.
+pid=
+[ "$START" != yes ] || pid=$(launchctl print "$DOMAIN/$LABEL" 2>/dev/null | sed -n 's/^	pid = //p' | head -n 1)
 if [ -n "$pid" ]; then
     tries=0
     while [ $tries -lt 20 ] && ! lsof -a -p "$pid" -iTCP -sTCP:LISTEN >/dev/null 2>&1; do

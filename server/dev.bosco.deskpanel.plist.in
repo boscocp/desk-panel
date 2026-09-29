@@ -43,10 +43,11 @@
 	</dict>
 
 	<!--
-	  **The invariant.** Unset, an agent also loads in the LoginWindow and
-	  Background sessions (the login screen and SSH), and
-	  the panel lights up for an empty room. Aqua is the logged-in GUI session
-	  and nothing else.
+	  **The invariant.** Aqua is the logged-in GUI session and nothing else:
+	  not LoginWindow (the login screen), not Background (SSH and the like).
+	  launchd.plist(5) documents no default for this key, so it is written
+	  out rather than left to one: the scope is then a fact in this file that
+	  verify_login_scope.py can read, not an undocumented behaviour.
 	-->
 	<key>LimitLoadToSessionType</key>
 	<string>Aqua</string>

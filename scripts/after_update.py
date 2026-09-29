@@ -41,7 +41,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import plistlib
 import re
 import socket
 import subprocess
@@ -174,11 +173,6 @@ def parse_program_arguments(plist):
     if server_py is None:
         return None
     return {"python": args[0], "server_py": server_py, "config": config}
-
-
-def agent_plist_path():
-    """Where `install_agent.sh` writes the agent."""
-    return Path.home() / "Library" / "LaunchAgents" / f"{AGENT_LABEL}.plist"
 
 
 def unit_file_path():
@@ -477,20 +471,47 @@ def restart_linux(port, timeout, dry_run):
     return Step("restart", PASS, f"unit restarted, answering on :{port}")
 
 
+def kickstart_command(uid):
+    """Pure: the restart. `-k` is the whole point -- without it kickstart
+    leaves a running job alone, the port is already open, and the step would
+    report a restart that never happened (found by review)."""
+    return ["launchctl", "kickstart", "-k", f"gui/{uid}/{AGENT_LABEL}"]
+
+
+def loaded_agent():
+    """The parsed `launchctl print` of the agent, or an error string."""
+    sys.path.insert(0, str(REPO_ROOT))
+    from server.verify_login_scope import ParseError, parse_launchctl_print
+
+    code, output = run(["launchctl", "print", f"gui/{os.getuid()}/{AGENT_LABEL}"], timeout=30)
+    if code is None:
+        return output
+    try:
+        return parse_launchctl_print(output)
+    except ParseError as exc:
+        return f"launchctl print: {exc}"
+
+
 def restart_macos(port, timeout, dry_run):
-    target = f"gui/{os.getuid()}/{AGENT_LABEL}"
+    command = kickstart_command(os.getuid())
     if dry_run:
-        return Step("restart", SKIP, f"would run: launchctl kickstart -k {target}")
-    # -k kills the running instance and starts it again, through launchd --
-    # "ask the launcher", never spawn the server from here (invariant 2).
-    code, output = run(["launchctl", "kickstart", "-k", target], timeout=60)
+        return Step("restart", SKIP, f"would run: {' '.join(command)}")
+    before = loaded_agent()
+    before_pid = before.get("pid") if isinstance(before, dict) else None
+    # Through launchd -- "ask the launcher", never spawn the server from here
+    # (invariant 2).
+    code, output = run(command, timeout=60)
     if code is None:
         return Step("restart", UNKNOWN, output)
     if code != 0:
         return Step("restart", FAIL, f"launchctl kickstart failed: {output.strip()[:200]}")
     if not wait_for_port(port, listening=True, timeout=timeout):
         return Step("restart", FAIL, f"agent restarted but nothing answers on :{port}")
-    return Step("restart", PASS, f"agent restarted, answering on :{port}")
+    after = loaded_agent()
+    after_pid = after.get("pid") if isinstance(after, dict) else None
+    if before_pid and after_pid == before_pid:
+        return Step("restart", FAIL, f"kickstart returned 0 and pid {before_pid} is still the one serving")
+    return Step("restart", PASS, f"agent restarted (pid {before_pid} -> {after_pid}), answering on :{port}")
 
 
 # --------------------------------------------------------------------------
@@ -743,31 +764,25 @@ def main(argv=None):
                 config_path, server_py = parsed["config"], parsed["server_py"]
                 python_exe = parsed["python"]
     elif platform == "darwin":
-        # The launcher is whatever launchd has loaded in this user's gui
-        # domain, and the paths come out of the plist it loaded -- the same
-        # rule as the other two branches: the launcher's own record, never
-        # the repo's idea of where things are.
-        code, output = run(["launchctl", "print", f"gui/{os.getuid()}/{AGENT_LABEL}"], timeout=30)
-        plist_path = agent_plist_path()
-        if code is None:
-            steps.append(Step("launcher", UNKNOWN, output))
-        elif code != 0:
+        # The paths come out of the job launchd has **loaded**, not the plist
+        # on disk: `install_agent.sh --no-start` rewrites the file without
+        # reloading, and reading the file then would check config B while
+        # `kickstart` restarts the job still running config A. Found by review.
+        printed = loaded_agent()
+        if printed is None or isinstance(printed, str):
+            steps.append(Step("launcher", UNKNOWN, printed or "launchctl print failed"))
+        elif not printed.get("found"):
             steps.append(
                 Step("launcher", FAIL, f"{AGENT_LABEL} is not loaded (run server/install_agent.sh)")
             )
         else:
-            steps.append(Step("launcher", PASS, f"LaunchAgent {AGENT_LABEL}, loaded in gui/{os.getuid()}"))
-            try:
-                parsed = parse_program_arguments(plistlib.loads(plist_path.read_bytes()))
-            except (OSError, plistlib.InvalidFileException, ValueError) as exc:
-                parsed = None
-                steps.append(Step("agent plist", UNKNOWN, f"could not read {plist_path}: {exc}"))
+            steps.append(Step("launcher", PASS, f"LaunchAgent {AGENT_LABEL}, loaded in {printed.get('domain')}"))
+            parsed = parse_program_arguments({"ProgramArguments": printed.get("arguments")})
+            if parsed is None:
+                steps.append(
+                    Step("launcher args", UNKNOWN, "the loaded job's arguments carry no --config")
+                )
             else:
-                if parsed is None:
-                    steps.append(
-                        Step("agent plist", UNKNOWN, f"no --config in {plist_path}'s ProgramArguments")
-                    )
-            if parsed is not None:
                 config_path, server_py = parsed["config"], parsed["server_py"]
                 python_exe = parsed["python"]
     else:
@@ -922,6 +937,7 @@ def self_test_cases():
             lambda: parse_program_arguments({"ProgramArguments": ["/p", "server.py", "--config"]}) is None,
         ),
         ("ProgramArguments: a plist without them is None", lambda: parse_program_arguments({}) is None),
+        ("kickstart: -k, or a running job is left alone", lambda: "-k" in kickstart_command(501)),
         (
             "ExecStart: the three quoted paths come back",
             lambda: parse_exec_start(UNIT_SAMPLE)["config"].endswith("config.toml"),
