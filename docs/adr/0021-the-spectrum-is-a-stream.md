@@ -32,15 +32,28 @@ number when asked. This one listens continuously to whatever the machine is play
   captured.
 - **Off by default.** `spectrum = false` in `config.toml`. Turning it on is the owner's decision,
   on a machine they own, and on macOS the system asks as well.
-- **One source per platform, one hub for all of them.** A source hands over mono 16-bit PCM
-  after a `rate=<hz>` line; everything after that is shared. macOS is the one implemented:
-  `server/mac/spectrum_tap.swift`, a Core Audio process tap (macOS 14.2+) on the global output
-  mix, excluding nothing, feeding a private aggregate device that includes no speaker. With no
-  speaker in it, switching outputs does not stop it. Swift rather than Python because the tap
-  API is not reachable from the standard library. The Python server stays standard-library
-  only; the helper is built once by `install_agent.sh` and gitignored. Windows (WASAPI loopback
-  through `ctypes`) and Linux (`parec` on a `.monitor` source) are follow-ups that plug into the
-  same hub.
+- **One source per platform, one hub for all of them.** A source hands over mono 16-bit PCM,
+  after a `rate=<hz>` line unless its arguments fix the rate. Everything after that is shared.
+  - **macOS**: `server/mac/spectrum_tap.swift`, a Core Audio process tap (macOS 14.2+) on the
+    global output mix, excluding nothing, feeding a private aggregate device that includes no
+    speaker. With no speaker in it, switching outputs does not stop it. Swift because the tap
+    API is not reachable from the standard library. Built by `install_agent.sh`.
+  - **Windows**: `server/win/spectrum_tap.cs`, WASAPI loopback on the default output, compiled
+    by `install_task.ps1` with the `csc.exe` every Windows ships (so C# 5). No permission is
+    involved. It follows Microsoft's "Loopback Recording" and `IAudioClient::Initialize`
+    pages:
+    - an event-driven shared stream (Windows 10 1703+), with a 100 ms wait as the fallback;
+    - `[STAThread]`, as the IAudioClient page asks;
+    - `IMMNotificationClient` to notice a new default output, then exit so the hub restarts
+      it on that output.
+
+    The vtables were checked against Microsoft's own `windows-rs` bindings, because the
+    reference pages list methods alphabetically. It is started with `CREATE_NO_WINDOW`,
+    because under `pythonw` a console child opens a window.
+  - **Linux**: `parec --device=@DEFAULT_MONITOR@` at a fixed 24 kHz mono, which PulseAudio and
+    PipeWire's pulse layer both serve. No helper.
+
+  The Python server stays standard-library only. Both helper binaries are gitignored.
 - **It is a data route.** `/spectrum` sits beside `/quotes` and `/weather` in ADR 0018's check:
   over TLS with `X-Panel-Key` when the panel is private, 401 otherwise. It is 404 when the bars
   are off or this platform cannot capture, and the phone then asks again once a minute.
@@ -58,5 +71,6 @@ number when asked. This one listens continuously to whatever the machine is play
   ADR 0016's three PCs are three servers.
 - The phone's radio carries a steady trickle while the panel is lit and the PC plays something.
   Silence sends only the five-second keepalive.
-- **Not yet measured:** Windows and Linux capture (not implemented), and private mode end to end
-  on the device. It has unit coverage only.
+- **Not yet measured:** the Windows helper on a Windows PC (it compiles as C# 5, and nothing
+  more is known), `parec` against PipeWire on CachyOS (measured against PulseAudio only), and
+  private mode end to end on the device, which has unit coverage only.

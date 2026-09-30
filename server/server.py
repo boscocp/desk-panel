@@ -159,7 +159,8 @@ DEFAULT_CONFIG = {
     "follow_display": True,
     # The spectrum bars over the buttons (T8.5, ADR 0021): what this PC is
     # playing, streamed on /spectrum. Off by default, because turning it on
-    # means capturing the system's audio (macOS asks once); macOS only so far.
+    # means capturing the system's audio (macOS asks once). macOS, Windows
+    # and Linux each have a source; see spectrum.source_for.
     "spectrum": False,
     # The meeting alerts on the AGENDA card (T9.5): a visual cue this many
     # minutes before a meeting, a soft chime this many before it, at this

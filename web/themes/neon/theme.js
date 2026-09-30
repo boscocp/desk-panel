@@ -194,7 +194,7 @@
 
     // A frame older than this is silence: the bars fall rather than freeze on
     // the last one when a stream stalls.
-    const SPECTRUM_FRESH_MS = 250;
+    const SPECTRUM_FRESH_MS = 400;
     // No frame for this long and the bars are hidden again. Longer than the
     // server's five-second keepalive, so a quiet song never blinks them out.
     const SPECTRUM_GONE_MS = 15000;

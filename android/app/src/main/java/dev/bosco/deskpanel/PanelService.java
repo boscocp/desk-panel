@@ -981,7 +981,7 @@ public final class PanelService extends Service implements PcPoller.Listener {
             bringPanelToFront();
         } else {
             dataPoller.stop();
-        spectrumStream.stop();
+            spectrumStream.stop();
             // Dropped, not kept. It is only ever written by a successful
             // fetch, so holding it would mean the wake after a night offline
             // replays last night's prices and weather -- with stale:false,

@@ -38,5 +38,6 @@ Thumbs.db
 # --- the PC's TLS key and certificate (T9.4, ADR 0018) ---
 server/tls/
 
-# --- the spectrum helper, built by install_agent.sh (T8.5) ---
+# --- the spectrum helpers, built by install_agent.sh / install_task.ps1 (T8.5) ---
 server/mac/spectrum-tap
+server/win/spectrum-tap.exe

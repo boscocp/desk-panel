@@ -135,11 +135,10 @@ class HelperSourceTests(unittest.TestCase):
 
 
 class SourceForTests(unittest.TestCase):
-    def test_other_platforms_say_why(self):
-        for platform in ("win32", "linux"):
-            factory, reason = spectrum.source_for(platform)
-            self.assertIsNone(factory)
-            self.assertIn(platform, reason)
+    def test_an_unknown_platform_says_why(self):
+        factory, reason = spectrum.source_for("sunos5")
+        self.assertIsNone(factory)
+        self.assertIn("sunos5", reason)
 
     def test_macos_without_the_helper_names_the_build(self):
         factory, reason = spectrum.source_for("darwin", helper="/nonexistent/spectrum-tap")
@@ -151,6 +150,48 @@ class SourceForTests(unittest.TestCase):
             factory, reason = spectrum.source_for("darwin", helper="/x/spectrum-tap")
         self.assertIsNone(reason)
         self.assertEqual(factory().argv, ["/x/spectrum-tap"])
+        self.assertIsNone(factory().rate)
+
+    def test_windows_without_the_helper_names_the_compiler(self):
+        factory, reason = spectrum.source_for("win32", helper="/nonexistent/spectrum-tap.exe")
+        self.assertIsNone(factory)
+        self.assertIn("csc.exe", reason)
+
+    def test_windows_with_the_helper(self):
+        with mock.patch("os.path.isfile", return_value=True):
+            factory, reason = spectrum.source_for("win32", helper="C:/x/spectrum-tap.exe")
+        self.assertIsNone(reason)
+        self.assertEqual(factory().argv, ["C:/x/spectrum-tap.exe"])
+
+    def test_linux_without_parec_names_the_package(self):
+        factory, reason = spectrum.source_for("linux", which=lambda name: None)
+        self.assertIsNone(factory)
+        self.assertIn("libpulse", reason)
+
+    def test_linux_records_the_default_monitor_at_a_fixed_rate(self):
+        factory, reason = spectrum.source_for("linux", which=lambda name: "/usr/bin/" + name)
+        self.assertIsNone(reason)
+        source = factory()
+        self.assertEqual(source.rate, spectrum.LINUX_RATE)
+        self.assertEqual(source.argv[0], "parec")
+        for argument in ("--device=@DEFAULT_MONITOR@", "--format=s16le",
+                         f"--rate={spectrum.LINUX_RATE}", "--channels=1"):
+            self.assertIn(argument, source.argv)
+
+
+class FixedRateSourceTests(unittest.TestCase):
+    def test_no_header_is_read_when_the_rate_is_fixed(self):
+        process = _Process(b"\x01\x00\x02\x00")
+        calls = []
+
+        def popen(argv, **kwargs):
+            calls.append(kwargs)
+            return process
+
+        rate, read = spectrum.HelperSource(["parec"], rate=24000, popen=popen).open()
+        self.assertEqual(rate, 24000)
+        self.assertEqual(read(4096), b"\x01\x00\x02\x00")
+        self.assertIn("creationflags", calls[0])
 
 
 class _FakeSource:
@@ -214,18 +255,49 @@ class HubTests(unittest.TestCase):
         self.assertEqual(_FakeSource.closed, 0)
         b.close()
 
-    def test_an_unchanged_frame_is_not_resent_until_the_keepalive(self):
-        clock = [0.0]
+    def _manual(self, clock):
         hub = spectrum.Spectrum(lambda: None, clock=lambda: clock[0], log=lambda m: None)
         hub._running = True  # no capture thread: frames are published by hand
+        return hub
+
+    def test_an_unchanged_silent_frame_waits_for_the_keepalive(self):
+        clock = [0.0]
+        hub = self._manual(clock)
         frames = hub.frames()
-        self.assertEqual(next(frames), spectrum.frame_line([0] * spectrum.BARS))
+        self.assertEqual(next(frames), spectrum.SILENT_FRAME)
+        results = []
+        reader = threading.Thread(target=lambda: results.append(next(frames)), daemon=True)
+        reader.start()
+        hub._publish([0] * spectrum.BARS)  # the same frame: not sent
+        clock[0] = spectrum.KEEPALIVE_S - 0.1
         hub._publish([0] * spectrum.BARS)
-        hub._publish([7] * spectrum.BARS)
-        self.assertEqual(next(frames), spectrum.frame_line([7] * spectrum.BARS))
-        hub._publish([7] * spectrum.BARS)
+        time.sleep(0.05)
+        self.assertEqual(results, [])
         clock[0] = spectrum.KEEPALIVE_S
+        hub._publish([0] * spectrum.BARS)
+        reader.join(2)
+        self.assertEqual(results, [spectrum.SILENT_FRAME])
+        frames.close()
+
+    def test_an_unchanged_frame_with_sound_is_resent_often(self):
+        # A sustained note makes identical frames; the page counts a frame
+        # older than 400 ms as silence, so the stream must repeat it.
+        clock = [0.0]
+        hub = self._manual(clock)
+        frames = hub.frames()
+        next(frames)
+        hub._publish([7] * spectrum.BARS)
         self.assertEqual(next(frames), spectrum.frame_line([7] * spectrum.BARS))
+        results = []
+        reader = threading.Thread(target=lambda: results.append(next(frames)), daemon=True)
+        reader.start()
+        hub._publish([7] * spectrum.BARS)
+        time.sleep(0.05)
+        self.assertEqual(results, [])
+        clock[0] = spectrum.RESEND_S
+        hub._publish([7] * spectrum.BARS)
+        reader.join(2)
+        self.assertEqual(results, [spectrum.frame_line([7] * spectrum.BARS)])
         frames.close()
 
     def test_a_stream_ends_at_its_time_limit(self):
@@ -237,6 +309,113 @@ class HubTests(unittest.TestCase):
         clock[0] = spectrum.MAX_STREAM_S
         self.assertEqual(list(frames), [])
         self.assertEqual(hub._watchers, 0)
+
+    def test_the_stop_is_final_even_if_a_watcher_arrives_right_after(self):
+        # The race: the pump sees nobody watching and stops; before the
+        # capture thread is gone, a new watcher arrives (and would start a
+        # thread of its own). The old thread must not see it and carry on.
+        hub = spectrum.Spectrum(_FakeSource, log=lambda m: None)
+        hub._running = True
+        hub._watchers = 1
+        opened = []
+
+        class Once(_FakeSource):
+            def open(self):
+                opened.append(1)
+
+                def read(n):
+                    with hub._cond:
+                        hub._watchers = 0
+                        hub._last_watcher_left = -1e9
+                    return b"\x00\x00" * 64
+
+                return RATE, read
+
+        real_publish = hub._publish
+
+        arrived = []
+
+        def publish(bars):
+            real_publish(bars)
+            if not arrived:
+                arrived.append(1)
+                with hub._cond:
+                    hub._watchers = 1
+
+        hub.source_factory = Once
+        hub._publish = publish
+        with mock.patch.object(spectrum.time, "sleep"):
+            hub._capture()
+        self.assertEqual(opened, [1])
+
+    def test_a_blocked_source_is_closed_after_the_linger(self):
+        # A silent tap blocks in read(); only the timer can end it.
+        class Blocking(_FakeSource):
+            def open(self):
+                type(self).opened += 1
+                return RATE, lambda n: (self.done.wait(), b"")[1]
+
+        hub = spectrum.Spectrum(Blocking, log=lambda m: None)
+        frames = hub.frames()
+        next(frames)
+        frames.close()
+        deadline = time.monotonic() + 3
+        while Blocking.closed == 0 and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertEqual(Blocking.closed, 1)
+
+    def test_a_reconnect_inside_the_linger_keeps_the_source(self):
+        hub = spectrum.Spectrum(_FakeSource, log=lambda m: None)
+        first = hub.frames()
+        next(first)
+        next(first)
+        first.close()
+        time.sleep(spectrum.LINGER_S / 4)
+        second = hub.frames()
+        next(second)
+        time.sleep(spectrum.LINGER_S + 0.7)  # past the first departure's timer
+        next(second)
+        self.assertEqual((_FakeSource.opened, _FakeSource.closed), (1, 0))
+        second.close()
+
+    def test_an_old_timer_does_not_close_a_later_linger(self):
+        clock = [0.0]
+        hub = spectrum.Spectrum(lambda: None, clock=lambda: clock[0], log=lambda m: None)
+        source = _FakeSource()
+        hub._source = source
+        # The first departure's timer fires at 10, just after a watcher came
+        # back and left again at 10 - LINGER_S/2: that linger is still running.
+        clock[0] = 10.0
+        hub._last_watcher_left = 10.0 - spectrum.LINGER_S / 2
+        hub._close_if_unwatched()
+        self.assertFalse(source.done.is_set())
+        clock[0] = 10.0 + spectrum.LINGER_S
+        hub._close_if_unwatched()
+        self.assertTrue(source.done.is_set())
+
+    def test_any_failure_restarts_with_backoff_and_logs_once(self):
+        logged, sleeps, opened = [], [], []
+        hub = spectrum.Spectrum(None, log=logged.append)
+        hub._running = True
+        hub._watchers = 1
+
+        class Broken(_FakeSource):
+            def open(self):
+                opened.append(1)
+                if len(opened) == 4:
+                    with hub._cond:
+                        hub._watchers = 0
+                        hub._last_watcher_left = -1e9
+                raise AttributeError("not an OSError")
+
+        hub.source_factory = Broken
+        with mock.patch.object(spectrum.time, "sleep", sleeps.append):
+            hub._capture()
+        self.assertEqual(len(opened), 4)
+        self.assertEqual(sleeps, [spectrum.RESTART_S, 2 * spectrum.RESTART_S,
+                                  4 * spectrum.RESTART_S, 8 * spectrum.RESTART_S])
+        self.assertEqual(len([m for m in logged if "source failed" in m]), 1)
+        self.assertFalse(hub._running)
 
     def test_a_silent_source_is_reported_once(self):
         logged = []
@@ -296,13 +475,35 @@ class RouteTests(unittest.TestCase):
 
 
 class StreamOverSocketTests(unittest.TestCase):
-    def test_frames_arrive_and_the_generator_is_closed(self):
-        hub = _Hub()
+    def _serve(self, hub):
         server = Server(("127.0.0.1", 0), partial(Handler, app=_app(hub)))
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         self.addCleanup(lambda: (server.shutdown(), server.server_close(), thread.join()))
-        conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
+        return http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
+
+    def test_head_sends_no_frames_and_counts_no_watcher(self):
+        started = []
+
+        class Hub(_Hub):
+            def frames(self):
+                started.append(1)
+                return super().frames()
+
+        hub = Hub()
+        conn = self._serve(hub)
+        conn.request("HEAD", "/spectrum")
+        resp = conn.getresponse()
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(resp.read(), b"")
+        conn.close()
+        # route() builds the generator, but HEAD must never start it: an
+        # unstarted generator has not run a line, so no watcher was counted.
+        self.assertTrue(hub.closed.wait(0.3) is False)
+
+    def test_frames_arrive_and_the_generator_is_closed(self):
+        hub = _Hub()
+        conn = self._serve(hub)
         conn.request("GET", "/spectrum")
         resp = conn.getresponse()
         self.assertEqual(resp.status, 200)

@@ -250,10 +250,13 @@ follow_display = true
 # times a second (ADR 0021). Only 16 levels leave the PC, never the audio, and
 # capture runs only while the panel is lit and watching.
 #   false  the default: nothing is captured and the space stays empty.
-#   true   macOS 14.2 or newer only, for now. It needs the helper built once
-#          (install_agent.sh does it) and asks once for "System Audio
-#          Recording" in System Settings > Privacy & Security. Windows and
-#          Linux say at startup that they cannot capture yet.
+#   true   macOS 14.2 or newer: a Swift helper, built by install_agent.sh,
+#          and macOS asks once for "System Audio Recording" for python3.
+#          Windows: a C# helper (WASAPI loopback), compiled by
+#          install_task.ps1 with the csc.exe Windows ships; no permission.
+#          Linux: `parec` on the default output's monitor (libpulse on Arch
+#          and CachyOS, pulseaudio-utils elsewhere), PipeWire or PulseAudio.
+#          A PC that cannot capture says why at startup.
 spectrum = false
 
 # Which theme renders the panel — the name of a directory in the APK's
