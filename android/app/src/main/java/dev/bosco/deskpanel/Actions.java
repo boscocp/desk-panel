@@ -68,15 +68,16 @@ public final class Actions {
     }
 
     /**
-     * {@code http://host:port/action/<id>}, or null if the id is not allowed.
+     * {@code <link base>/action/<id>}, or null if the id is not allowed.
      *
-     * @param id an id straight off the JavaScript bridge, untrusted
+     * @param link scheme and port, open or private (ADR 0018)
+     * @param id   an id straight off the JavaScript bridge, untrusted
      */
-    public static String urlFor(String host, int port, String id) {
+    public static String urlFor(PanelLink link, String host, String id) {
         String resolved = resolve(id);
         if (resolved == null || host == null || host.isEmpty()) {
             return null;
         }
-        return "http://" + host + ":" + port + "/action/" + resolved;
+        return link.base(host) + "/action/" + resolved;
     }
 }

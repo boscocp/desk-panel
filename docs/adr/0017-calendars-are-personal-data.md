@@ -4,6 +4,7 @@ Status: accepted · 2026-09-29 (T9.1) · Google's scope and "primary calendar on
 [ADR 0019](0019-every-google-calendar-the-owner-shows.md)
 Amends [ADR 0004](0004-server-is-login-signal-and-proxy.md), whose proxy so far carried only
 public data, and extends the threat model of [ADR 0015](0015-the-panel-can-act-on-the-pc.md).
+Amended 2026-09-30 by [ADR 0018](0018-the-panel-traffic-is-private.md): with a panel key, data and presses need it and go over TLS.
 
 ## Context
 

@@ -5,6 +5,9 @@ import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+
 /**
  * The PCs this panel follows, and which of them answered last (ADR 0016).
  *
@@ -35,9 +38,38 @@ public final class PcHosts {
      */
     public static final int MAX_HOSTS = 3;
 
-    /** One {@code /ping} against one host: null for a 200, else why not. */
+    /**
+     * What a prober returns for a PC that answered and said its display is off
+     * (ADR 0020). Compared by {@code equals}, and no failure text can collide
+     * with it: failures are exception strings and {@code "HTTP <code>"}.
+     */
+    public static final String DISPLAY_OFF = "display off";
+
+    /**
+     * One {@code /ping} against one host: null for a 200 from a PC whose
+     * display is on or unknown, {@link #DISPLAY_OFF} for a 200 from one whose
+     * display is off, and anything else is why it failed.
+     */
     public interface Prober {
         String probe(String host);
+    }
+
+    /**
+     * Pure: whether a {@code /ping} body says the display is off. Only the
+     * literal {@code "off"} counts. A server from before T4.6 sends no
+     * {@code display} at all, one that cannot tell sends {@code "unknown"},
+     * and a body that does not parse is not evidence of anything — all three
+     * are "on", which is the panel as it behaved before (ADR 0020).
+     */
+    public static boolean displayOff(String body) {
+        if (body == null) {
+            return false;
+        }
+        try {
+            return "off".equals(new JSONObject(body).optString("display"));
+        } catch (JSONException malformed) {
+            return false;
+        }
     }
 
     /** Asked between hosts, so a stopped loop does not keep dialling. */
@@ -53,11 +85,17 @@ public final class PcHosts {
         public final boolean moved;
         /** The host that answered, or null. */
         public final String host;
+        /**
+         * Whether the host that answered said its display is off. True only
+         * when no listed PC answered with its display on (ADR 0020).
+         */
+        public final boolean idle;
 
-        Cycle(String failure, boolean moved, String host) {
+        Cycle(String failure, boolean moved, String host, boolean idle) {
             this.failure = failure;
             this.moved = moved;
             this.host = host;
+            this.idle = idle;
         }
     }
 
@@ -124,26 +162,42 @@ public final class PcHosts {
 
     /**
      * One poll cycle: each host in {@link #probeOrder()}, stopping at the first
-     * that answers and making it the active one. The loop lives here rather
-     * than in {@code PcPoller} so the order and the move are covered on the
-     * JVM; the poller only supplies the socket.
+     * that answers with its display on and making it the active one. The loop
+     * lives here rather than in {@code PcPoller} so the order and the move are
+     * covered on the JVM; the poller only supplies the socket.
+     *
+     * <p>A PC that answers with its display off does not end the cycle: another
+     * listed PC may have somebody at it, and that one should win (ADR 0020).
+     * Only when none does is the cycle idle, on the first idle host found —
+     * the active one, if it is idle, so two dark PCs do not flap either.
      */
     public Cycle cycle(Prober prober, Stopped stopped) {
         StringBuilder failures = new StringBuilder();
+        String idleHost = null;
         for (String host : probeOrder()) {
             if (stopped.now()) {
                 break;
             }
             String failure = prober.probe(host);
             if (failure == null) {
-                return new Cycle(null, answered(host), host);
+                return new Cycle(null, answered(host), host, false);
+            }
+            if (DISPLAY_OFF.equals(failure)) {
+                if (idleHost == null) {
+                    idleHost = host;
+                }
+                continue;
             }
             if (failures.length() > 0) {
                 failures.append("; ");
             }
             failures.append(host).append(": ").append(failure);
         }
-        return new Cycle(failures.length() > 0 ? failures.toString() : "not attempted", false, null);
+        if (idleHost != null) {
+            return new Cycle(null, answered(idleHost), idleHost, true);
+        }
+        return new Cycle(failures.length() > 0 ? failures.toString() : "not attempted",
+                false, null, false);
     }
 
     /**

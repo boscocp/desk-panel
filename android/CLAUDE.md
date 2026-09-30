@@ -25,7 +25,7 @@ and what has to change if that stops being true, is in
   machine, backoff timing, JSON shaping — goes in a plain class like `PcState.java` with no
   Android imports, so `./gradlew test` covers it on the JVM without a device.
 - **Emit logcat markers on every state transition**, and take every marker string from
-  `Markers.java` — never write one inline. `state=online`, `state=offline`, `screen=sleep`,
+  `Markers.java` — never write one inline. `state=online`, `state=offline`, `state=idle` (ADR 0020), `screen=sleep`,
   `screen=wake` and the rest live there once, and the TT.6 acceptance greps that no copy exists
   anywhere else under `main/java`, because a duplicated marker is how the E2E suite starts
   passing against a stale string. The suite asserts on these because Android exposes no

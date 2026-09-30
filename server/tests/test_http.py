@@ -22,6 +22,7 @@ import json
 import os
 import tempfile
 import threading
+import types
 import unittest
 from functools import partial
 from pathlib import Path
@@ -31,6 +32,10 @@ from server import providers_awesomeapi, providers_binance, providers_brapi
 from server import server as server_module
 from server.server import APK_CONTENT_TYPE, App, Handler, Server
 
+
+
+# An app with nothing in it but the one switch /app reads.
+APK_ON = types.SimpleNamespace(config={"serve_apk": True})
 
 class HttpIntegrationTests(unittest.TestCase):
     @classmethod
@@ -179,7 +184,9 @@ class DataRouteTests(unittest.TestCase):
     def test_ping_still_works_on_a_server_that_has_an_app(self):
         resp, body = self._request("/ping")
         self.assertEqual(resp.status, 200)
-        self.assertEqual(json.loads(body.decode("utf-8")), {"ok": True})
+        # "unknown": this App was given no display reader (T4.6), and unknown
+        # is what leaves the phone following the login alone.
+        self.assertEqual(json.loads(body.decode("utf-8")), {"ok": True, "display": "unknown"})
 
 
 
@@ -202,7 +209,11 @@ class ApkOverRealHttpTests(unittest.TestCase):
         cls.patch = mock.patch.object(server_module, "APK_DIR", cls.directory)
         cls.patch.start()
 
-        cls.server = Server(("127.0.0.1", 0), Handler)
+        # serve_apk on: /app is off by default since T9.4 (ADR 0018), and
+        # these tests are about what it serves when the owner turns it on.
+        # serve_apk on: /app is off by default since T9.4 (ADR 0018), and
+        # these tests are about what it serves when the owner turns it on.
+        cls.server = Server(("127.0.0.1", 0), partial(Handler, app=APK_ON))
         cls.port = cls.server.server_address[1]
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
@@ -251,7 +262,9 @@ class ApkOverRealHttpTests(unittest.TestCase):
         resp, body = self._request("/ping", method="HEAD")
         self.assertEqual(resp.status, 200)
         self.assertEqual(body, b"")
-        self.assertEqual(resp.getheader("Content-Length"), str(len(b'{"ok": true}')))
+        # The stub app has no display reader, so the body says "unknown".
+        self.assertEqual(resp.getheader("Content-Length"),
+                         str(len(b'{"ok": true, "display": "unknown"}')))
 
     def test_index_is_html_and_links_to_app(self):
         resp, body = self._request("/")
@@ -268,7 +281,11 @@ class ApkMissingOverRealHttpTests(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         cls.patch = mock.patch.object(server_module, "APK_DIR", Path(cls.tmp.name))
         cls.patch.start()
-        cls.server = Server(("127.0.0.1", 0), Handler)
+        # serve_apk on: /app is off by default since T9.4 (ADR 0018), and
+        # these tests are about what it serves when the owner turns it on.
+        # serve_apk on: /app is off by default since T9.4 (ADR 0018), and
+        # these tests are about what it serves when the owner turns it on.
+        cls.server = Server(("127.0.0.1", 0), partial(Handler, app=APK_ON))
         cls.port = cls.server.server_address[1]
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()

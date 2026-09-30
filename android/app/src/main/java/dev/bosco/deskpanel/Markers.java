@@ -51,6 +51,24 @@ public final class Markers {
     }
 
     /**
+     * The same marker from the state machine's own value, which is the only
+     * way to say {@code state=idle}: the PC answered and its display is off
+     * (ADR 0020). The screen sleeps as it does on {@code state=offline}; the
+     * two are kept apart because "the PC is gone" and "nobody is looking at
+     * it" are different mornings to debug.
+     */
+    public static String state(PcState.State state) {
+        switch (state) {
+            case ONLINE:
+                return state(true);
+            case IDLE:
+                return "state=idle";
+            default:
+                return state(false);
+        }
+    }
+
+    /**
      * What the app asked the screen to do. It records the decision, not the
      * panel's actual brightness: proving the display really went dark is
      * eyes-only work and lives in T4.4's manual check.

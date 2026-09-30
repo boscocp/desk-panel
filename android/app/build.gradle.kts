@@ -108,6 +108,64 @@ logger.lifecycle(
     }
 )
 
+// ---------------------------------------------------------------------------
+// Private traffic (T9.4, ADR 0018)
+//
+// PANEL_KEY and PC_CERTS, both or neither. With both, data and presses go over
+// https to each PC's TLS port with the key in a header, and the PCs'
+// certificates are the only trust anchors for those hosts. With neither, the
+// APK behaves exactly as it did before, over plain http. One without the other
+// is a build error: a key with no pinned certificate would be sent in clear, and
+// a pinned certificate with no key would talk TLS to a server that answers 401.
+//
+// PC_CERTS is a comma-separated list of paths relative to the repository root,
+// one certificate per PC, as server/make_cert.py writes them. Relative because
+// the build runs in a container that mounts the checkout, and an absolute path
+// from the host does not exist in there.
+// ---------------------------------------------------------------------------
+val panelKey = dotenvValue("PANEL_KEY") ?: ""
+val pcCertFiles = dotenvValue("PC_CERTS")
+    ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
+    ?.map {
+        if (File(it).isAbsolute) {
+            throw GradleException(
+                "PC_CERTS: $it is absolute; list paths relative to the repository root, " +
+                    "because the build runs in a container that mounts the checkout")
+        }
+        rootProject.file("../$it")
+    }
+    ?: emptyList()
+if (panelKey.isNotEmpty() != pcCertFiles.isNotEmpty()) {
+    throw GradleException(
+        "PANEL_KEY and PC_CERTS in .env go together (ADR 0018); one is set without the other")
+}
+if (panelKey.isNotEmpty()) {
+    if (panelKey.length < 32 || !Regex("[A-Za-z0-9_-]+").matches(panelKey)) {
+        throw GradleException(
+            "PANEL_KEY must be at least 32 URL-safe characters; server/make_cert.py --key prints one")
+    }
+    pcCertFiles.forEach {
+        if (!it.isFile || !it.readText().contains("BEGIN CERTIFICATE")) {
+            throw GradleException("PC_CERTS: $it is not a PEM certificate")
+        }
+        if (it.readText().contains("PRIVATE KEY")) {
+            throw GradleException("PC_CERTS: $it holds a private key; it must never enter the APK")
+        }
+    }
+}
+logger.lifecycle(
+    if (panelKey.isNotEmpty()) {
+        "desk-panel: private traffic, ${pcCertFiles.size} pinned certificate(s)"
+    } else {
+        "desk-panel: open traffic (no PANEL_KEY), data over plain http"
+    }
+)
+
+// The trust anchors, spliced into the cleartext domain-config where the
+// placeholder comment sits. Without certificates the comment stays a comment.
+val trustAnchorsPlaceholder = "<!-- pc-trust-anchors -->"
+val trustAnchors = "<trust-anchors><certificates src=\"@raw/pc_certs\"/></trust-anchors>"
+
 val generatedResDir = layout.buildDirectory.dir("generated/netsec/res").get().asFile
 
 // The generated tree replaces src/main/res as the module's only res source dir,
@@ -132,7 +190,9 @@ val generateNetsecRes = tasks.register<Sync>("generateNetsecRes") {
         // so each PC is pinned by name and nothing else is (ADR 0016). Any
         // other line -- pc_host, a comment -- gets the comma-separated list.
         filter { line ->
-            if (line.contains(cleartextPlaceholder) && line.trimStart().startsWith("<domain ")) {
+            if (line.contains(trustAnchorsPlaceholder)) {
+                if (pcCertFiles.isEmpty()) line else line.replace(trustAnchorsPlaceholder, trustAnchors)
+            } else if (line.contains(cleartextPlaceholder) && line.trimStart().startsWith("<domain ")) {
                 cleartextHosts.joinToString("\n") { line.replace(cleartextPlaceholder, it) }
             } else {
                 line.replace(cleartextPlaceholder, cleartextHost)
@@ -140,6 +200,16 @@ val generateNetsecRes = tasks.register<Sync>("generateNetsecRes") {
         }
     }
     inputs.property("cleartextHost", cleartextHost)
+    inputs.property("pcCerts", pcCertFiles.joinToString(",") { it.path })
+    inputs.files(pcCertFiles)
+    // One file for every PC: <certificates src> takes one resource, and
+    // Android reads every certificate in it.
+    doLast {
+        if (pcCertFiles.isNotEmpty()) {
+            val raw = File(generatedResDir, "raw").apply { mkdirs() }
+            File(raw, "pc_certs.pem").writeText(pcCertFiles.joinToString("\n") { it.readText().trim() } + "\n")
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -245,6 +315,15 @@ android {
         // screenOrientation is a manifest attribute and takes an enum, not a
         // string resource.
         manifestPlaceholders["panelOrientation"] = panelOrientation
+
+        // The panel key, when there is one (ADR 0018). In BuildConfig, which
+        // is to say in the APK: whoever has the APK has the key, which is why
+        // the server's /app is off by default.
+        buildConfigField("String", "PANEL_KEY", "\"$panelKey\"")
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     compileOptions {

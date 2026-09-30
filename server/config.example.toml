@@ -235,6 +235,16 @@ b3_hours = "auto"
 night_start = "22:00"
 night_end = "07:00"
 
+# Whether the panel also sleeps while this PC's display is off — the monitor
+# gone dark on the power plan's timer, or put to sleep by hand — and not only
+# while nobody is logged in (ADR 0020). It wakes with the monitor, within the
+# phone's two-second poll.
+#   true   the default. Read on Windows (the console display state), macOS
+#          (every display asleep) and GNOME or X11 on Linux. Anywhere else the
+#          server answers "unknown" and the panel follows the login alone.
+#   false  the panel follows the login alone, as it did before.
+follow_display = true
+
 # Which theme renders the panel — the name of a directory in the APK's
 # web/themes/. Every theme is packaged, so switching one is a restart of this
 # server and not a reinstall of the app.
@@ -374,3 +384,35 @@ calendar_show_titles = true
 # uses the IP, so this stays empty unless you browse to the PC by name, e.g.
 # ["mypc.local"].
 allowed_hosts = []
+
+
+# ---------------------------------------------------------------------------
+# Private traffic — nobody else on the Wi-Fi reads the panel (T9.4)
+# ---------------------------------------------------------------------------
+
+# Read docs/adr/0018-the-panel-traffic-is-private.md first. With all three of
+# panel_key, tls_cert and tls_key set, the phone fetches data and sends presses
+# over TLS on tls_port, with the key in a header. Without the key, or on the
+# plain port, the answer is 401. /ping stays on `port`, open and in cleartext:
+# it is the login signal, and a certificate problem must never look like a
+# logout.
+#
+# All three, or none. None is the server as it always was: anyone on this
+# network can read /quotes (calendar titles included) and press the enabled
+# actions, and the server says so at every start.
+#
+# `python server/make_cert.py --ip <this PC's LAN address>` writes the
+# certificate and key under server/tls/ (gitignored) and prints a key. The same
+# key goes in PANEL_KEY in .env, and the certificate path in PC_CERTS, and then
+# the APK is rebuilt: the phone pins the certificate at build time.
+#
+# Paths are relative to this file. The private key must be 0600.
+panel_key = ""
+tls_cert = ""
+tls_key = ""
+tls_port = 8778
+
+# Whether GET /app hands out the APK. Off by default: once the APK carries
+# panel_key, whoever downloads it has the key. Turn it on for an install, and
+# off again after it.
+serve_apk = false

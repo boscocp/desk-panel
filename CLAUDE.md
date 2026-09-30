@@ -24,7 +24,9 @@
 3. **Screen state is driven by PC state, never by a timeout.** Online: hold
    `FLAG_KEEP_SCREEN_ON`. Offline: clear it and let Android sleep, then wake with
    `setTurnScreenOn(true)` + `setShowWhenLocked(true)`. Fallback if MIUI misbehaves:
-   `screenBrightness = 0f` plus a black render (see ADR 0005).
+   `screenBrightness = 0f` plus a black render (see ADR 0005). The PC's display is part of its
+   state: a PC that answers with `"display": "off"` is `IDLE`, and the screen sleeps as it does
+   offline. The PC's power plan decides when its monitor sleeps; the phone only follows (ADR 0020).
 
 ## Layout
 - `web/` — the panel UI. Plain HTML/CSS/JS, no framework, no build step. Packaged as APK

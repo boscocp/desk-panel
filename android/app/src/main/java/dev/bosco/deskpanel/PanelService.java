@@ -457,7 +457,7 @@ public final class PanelService extends Service implements PcPoller.Listener {
         // whichever PC the PC poller last heard from (ADR 0016).
         PcHosts hosts = PcHosts.parse(getString(R.string.pc_host));
         poller = new PcPoller(hosts, this);
-        dataPoller = new DataPoller(hosts, this::onData);
+        dataPoller = new DataPoller(hosts, new PanelLink(BuildConfig.PANEL_KEY), this::onData);
 
         // RECEIVER_NOT_EXPORTED because nothing outside the system should be
         // able to tell this app what the battery is doing.
@@ -871,8 +871,19 @@ public final class PanelService extends Service implements PcPoller.Listener {
      * {@link #panelVisible()}.
      */
     @Override
-    public void onPcState(boolean online) {
-        Log.i(Markers.TAG, Markers.state(online));
+    public void onPcState(PcState.State state) {
+        Log.i(Markers.TAG, Markers.state(state));
+        // IDLE -- the PC is up and its display is off -- takes the offline
+        // path below whole: the screen sleeps, the data poll stops, the wake
+        // lock goes on mains (ADR 0020). Only the marker tells them apart,
+        // and PcState keeps the cadence at 2s so the monitor coming back is
+        // noticed within one poll.
+        boolean online = state == PcState.State.ONLINE;
+        // IDLE -> OFFLINE (the PC sleeping after its monitor) is a real edge
+        // for the marker, but the screen is already dark: telling the window
+        // again would log a second screen=sleep for one dark stretch (found
+        // by review).
+        boolean stillDark = !online && Boolean.FALSE.equals(lastOnline);
         lastOnline = online;
 
         // On mains only. Offline on battery the device is *supposed* to
@@ -911,7 +922,9 @@ public final class PanelService extends Service implements PcPoller.Listener {
         }
 
         Panel target = panel;
-        if (target != null) {
+        if (stillDark) {
+            // Nothing for the window to do; the rest below is idempotent.
+        } else if (target != null) {
             target.onPcState(online, true);
         } else {
             // No window to act on it. Whoever registers next owns this

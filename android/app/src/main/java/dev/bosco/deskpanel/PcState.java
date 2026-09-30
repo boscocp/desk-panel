@@ -23,7 +23,14 @@ public final class PcState {
         /** The PC answered: a human is logged in. */
         ONLINE,
         /** The PC did not answer: the session is gone, let the screen sleep. */
-        OFFLINE
+        OFFLINE,
+        /**
+         * The PC answered and said its display is off: a human is logged in and
+         * nobody is looking (ADR 0020). The screen sleeps as it does offline;
+         * the cadence stays the online one, so the panel is back within one
+         * poll of the monitor.
+         */
+        IDLE
     }
 
     /** Cadence while the PC answers. */
@@ -82,6 +89,24 @@ public final class PcState {
      *         which a marker should be logged and the screen retoggled
      */
     public boolean record(boolean reachable, long nowMs) {
+        return record(reachable, false, nowMs);
+    }
+
+    /**
+     * Feeds one probe result in, with what the PC said about its display.
+     *
+     * <p>{@code displayOff} counts only when the PC answered: an unreachable PC
+     * has no display to report, and OFFLINE says more than IDLE would. An idle
+     * answer is still an answer, so it resets the backoff like any other — the
+     * PC is up, and the monitor coming back has to be noticed at the online
+     * cadence, not after a ladder climbed to fifteen seconds.
+     *
+     * @param reachable  whether the PC server answered
+     * @param displayOff whether it said its display is off
+     * @param nowMs      the time of the probe, on any monotonic scale
+     * @return true if this result changed the state
+     */
+    public boolean record(boolean reachable, boolean displayOff, long nowMs) {
         probed = true;
         lastProbeAtMs = nowMs;
 
@@ -91,7 +116,7 @@ public final class PcState {
             consecutiveFailures++;
         }
 
-        State next = reachable ? State.ONLINE : State.OFFLINE;
+        State next = !reachable ? State.OFFLINE : displayOff ? State.IDLE : State.ONLINE;
         transitioned = next != state;
         state = next;
         return transitioned;
@@ -102,7 +127,10 @@ public final class PcState {
         return state;
     }
 
-    /** Whether the PC answered the last probe. */
+    /**
+     * Whether the panel should be lit: the PC answered and its display is not
+     * off. IDLE is not online, which is what puts the screen to sleep.
+     */
     public boolean isOnline() {
         return state == State.ONLINE;
     }
@@ -141,7 +169,7 @@ public final class PcState {
     /**
      * Whether the poll schedule should leave this process altogether (T5.6).
      *
-     * <p>Dormant is one state and one only: <b>offline and on battery</b>.
+     * <p>Dormant is <b>dark and on battery</b>: offline, or idle (below).
      * Offline on mains is the ADR 0014 arrangement and stays exactly as it was
      * — a wake lock and the ladder above, which costs a little heat on a phone
      * that is charging anyway. Offline on battery is the state that ADR 0014
@@ -158,12 +186,19 @@ public final class PcState {
      * takes: this class holds what it learned from probes, and power is not
      * something a probe can tell it.
      *
+     * <p><b>IDLE on battery is dormant too</b> (ADR 0020). A PC left logged in
+     * with its monitor off overnight would otherwise hold a 2s probe under a
+     * wake lock until morning, on a phone that is not charging — the overnight
+     * drain T5.6 exists to prevent. The cost is the one offline already pays:
+     * recovery waits for the sparse alarm or for the charger. On a phone the
+     * PC powers, which is the rig this project is built for, it never arises.
+     *
      * @param onMains whether the charger is connected — {@code EXTRA_PLUGGED},
      *                never {@code EXTRA_STATUS}, which reports
      *                {@code NOT_CHARGING} for a paused charge on a live cable
      */
     public boolean isDormant(boolean onMains) {
-        return state == State.OFFLINE && !onMains;
+        return (state == State.OFFLINE || state == State.IDLE) && !onMains;
     }
 
     /**

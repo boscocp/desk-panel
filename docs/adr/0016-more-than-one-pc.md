@@ -3,7 +3,8 @@
 Status: accepted · 2026-09-29 (T4.5)
 Amends [ADR 0004](0004-server-is-login-signal-and-proxy.md) and
 [ADR 0013](0013-local-configuration-boundaries.md), which assume exactly one PC and one
-`PC_IP`.
+`PC_IP`. Amended by [ADR 0020](0020-the-panel-sleeps-with-the-display.md): a host that answers
+with its display off does not end a cycle.
 
 ## Context
 
