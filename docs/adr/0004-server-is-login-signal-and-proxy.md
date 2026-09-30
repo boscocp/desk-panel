@@ -2,7 +2,8 @@
 
 Status: accepted · 2026-09-13 · Amended by [0010](0010-login-signal-is-session-scoped.md),
 which restates the login-signal rule for Linux and macOS, and by
-[0016](0016-more-than-one-pc.md), which lets the panel follow more than one PC
+[0016](0016-more-than-one-pc.md), which lets the panel follow more than one PC, and by
+[0020](0020-the-panel-sleeps-with-the-display.md), which lets `/ping` say the display is off
 
 ## Context
 

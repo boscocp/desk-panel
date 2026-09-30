@@ -35,6 +35,7 @@ from pathlib import Path
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from server import display as display_module  # noqa: E402
 from server import (market_hours, oauth, providers_awesomeapi,  # noqa: E402
                     providers_binance, providers_brapi, providers_calendar,
                     providers_openmeteo, providers_usno)
@@ -149,6 +150,11 @@ DEFAULT_CONFIG = {
     # right default and the right setting on a network the owner does not
     # control -- see ADR 0015.
     "actions": [],
+    # Whether the panel also sleeps while this PC's display is off, and not
+    # only while nobody is logged in (T4.6, ADR 0020). On by default: it is
+    # what the owner asked for, and a platform the server cannot read answers
+    # "unknown", which leaves the panel following the login alone.
+    "follow_display": True,
     # The owner's calendars (T9.1, ADR 0017). Empty is the default and costs
     # nothing: no account, no request, and the AGENDA card stays reserved.
     "calendar_accounts": [],
@@ -470,8 +476,14 @@ class App:
     """
 
     def __init__(self, config, clock=time.monotonic, tokens_path=None,
-                 wall_clock=None, oauth_post=oauth.post_form):
+                 wall_clock=None, oauth_post=oauth.post_form, display=None):
         self.config = config
+        # Whether this session's display is on (T4.6, ADR 0020). Injected,
+        # not built here: on Windows the reader is a thread with a window of
+        # its own, and a test constructing an App must not start one. `main`
+        # passes the platform's reader; everything else gets "unknown", which
+        # the phone reads as "follow the login alone".
+        self.display = display or display_module.Fixed()
         self.clock = clock
         # One cache per market, not one for the three together. They come from
         # three unrelated upstreams, and sharing a cache meant the first one to
@@ -1169,7 +1181,13 @@ def route(method, path, app=None, request_headers=None):
             return _json(421, {"error": "unknown host"})
 
     if method == "GET" and path == "/ping":
-        return _json(200, {"ok": True})
+        # Still one fact first: answering is the login (invariant 2). The
+        # display rides along so the phone can also sleep when nobody is
+        # looking (ADR 0020); without an app there is nobody to ask, and the
+        # body stays what it always was.
+        if app is None:
+            return _json(200, {"ok": True})
+        return _json(200, {"ok": True, "display": app.display.state()})
 
     if method == "GET" and path == "/app":
         return apk_download(APK_DIR)
@@ -1563,7 +1581,8 @@ def main(argv=None):
     # functools.partial rather than a class attribute: the app is per-server
     # state, and a class attribute would be shared by every server in a test
     # process that starts more than one.
-    app = App(config, tokens_path=tokens_path)
+    app = App(config, tokens_path=tokens_path,
+              display=display_module.watcher(config))
     # Before the socket is bound rather than after: the first poll lands within
     # seconds of a login, and the series should already be on its way.
     app.warm_history()

@@ -294,4 +294,53 @@ public class PcStateTest {
         assertTrue("an allow-while-idle alarm below ~9 minutes is not honoured",
                 PcState.DORMANT_ALARM_MS >= 9 * 60 * 1000L);
     }
+
+    // --- the display (ADR 0020) --------------------------------------------
+
+    @Test
+    public void anAnswerWithTheDisplayOffIsIdleAndNotOnline() {
+        PcState s = new PcState();
+        s.record(true, T0);
+        assertTrue(s.record(true, true, T0 + 2000));
+        assertEquals(PcState.State.IDLE, s.state());
+        assertFalse(s.isOnline());
+    }
+
+    @Test
+    public void idleKeepsTheOnlineCadenceSoTheMonitorIsNoticedWithinOnePoll() {
+        PcState s = new PcState();
+        s.record(false, T0);
+        s.record(false, T0 + 2000);
+        s.record(true, true, T0 + 6000);
+        assertEquals(0, s.consecutiveFailures());
+        assertEquals(PcState.ONLINE_INTERVAL_MS, s.nextIntervalMs());
+        for (int i = 1; i <= 20; i++) {
+            s.record(true, true, T0 + 6000 + i * 2000L);
+        }
+        assertEquals(PcState.ONLINE_INTERVAL_MS, s.nextIntervalMs());
+    }
+
+    @Test
+    public void theDisplayComingBackIsATransitionToOnline() {
+        PcState s = new PcState();
+        s.record(true, true, T0);
+        assertTrue(s.record(true, false, T0 + 2000));
+        assertEquals(PcState.State.ONLINE, s.state());
+        assertFalse(s.record(true, false, T0 + 4000));
+    }
+
+    @Test
+    public void anUnreachablePcIsOfflineWhateverItsDisplaySaid() {
+        PcState s = new PcState();
+        s.record(false, true, T0);
+        assertEquals(PcState.State.OFFLINE, s.state());
+    }
+
+    @Test
+    public void idleOnBatteryIsDormantAndOnMainsIsNot() {
+        PcState s = new PcState();
+        s.record(true, true, T0);
+        assertTrue(s.isDormant(false));
+        assertFalse(s.isDormant(true));
+    }
 }

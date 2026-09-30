@@ -27,6 +27,7 @@
   "b3_hours": "auto",
   "night_start": "22:00",
   "night_end": "07:00",
+  "follow_display": true,
   "theme": "neon",
   "language": "pt-BR",
   "actions": [

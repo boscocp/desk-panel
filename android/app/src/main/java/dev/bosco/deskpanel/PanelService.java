@@ -871,8 +871,14 @@ public final class PanelService extends Service implements PcPoller.Listener {
      * {@link #panelVisible()}.
      */
     @Override
-    public void onPcState(boolean online) {
-        Log.i(Markers.TAG, Markers.state(online));
+    public void onPcState(PcState.State state) {
+        Log.i(Markers.TAG, Markers.state(state));
+        // IDLE -- the PC is up and its display is off -- takes the offline
+        // path below whole: the screen sleeps, the data poll stops, the wake
+        // lock goes on mains (ADR 0020). Only the marker tells them apart,
+        // and PcState keeps the cadence at 2s so the monitor coming back is
+        // noticed within one poll.
+        boolean online = state == PcState.State.ONLINE;
         lastOnline = online;
 
         // On mains only. Offline on battery the device is *supposed* to

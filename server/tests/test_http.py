@@ -179,7 +179,9 @@ class DataRouteTests(unittest.TestCase):
     def test_ping_still_works_on_a_server_that_has_an_app(self):
         resp, body = self._request("/ping")
         self.assertEqual(resp.status, 200)
-        self.assertEqual(json.loads(body.decode("utf-8")), {"ok": True})
+        # "unknown": this App was given no display reader (T4.6), and unknown
+        # is what leaves the phone following the login alone.
+        self.assertEqual(json.loads(body.decode("utf-8")), {"ok": True, "display": "unknown"})
 
 
 

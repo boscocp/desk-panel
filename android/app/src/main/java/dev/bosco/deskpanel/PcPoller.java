@@ -41,8 +41,12 @@ public final class PcPoller {
      * state itself.
      */
     public interface Listener {
-        /** @param online whether the PC answered, i.e. whether a human is logged in */
-        void onPcState(boolean online);
+        /**
+         * @param state ONLINE when a PC answered with its display on, IDLE when
+         *              one answered with it off, OFFLINE when none answered.
+         *              Only ONLINE lights the panel.
+         */
+        void onPcState(PcState.State state);
 
         /**
          * Called on the main thread when this poller has deliberately booked
@@ -82,6 +86,9 @@ public final class PcPoller {
      * have followed it; {@link #generation} is what keeps that from mattering.
      */
     private static final int TIMEOUT_MS = 1500;
+
+    /** Far above {@code {"ok": true, "display": "unknown"}}, far below harm. */
+    private static final int MAX_PING_BYTES = 1024;
 
     /**
      * The PCs to ask, and which one answered last (ADR 0016). One cycle asks
@@ -290,7 +297,8 @@ public final class PcPoller {
             return;
         }
 
-        String failure = probeAll(booked);
+        PcHosts.Cycle cycle = probeAll(booked);
+        String failure = cycle.failure;
 
         // Checked again on the way out, and this one is not belt-and-braces: a
         // probe that outlived its generation must not touch PcState at all.
@@ -305,7 +313,7 @@ public final class PcPoller {
         // elapsedRealtime, not currentTimeMillis: the schedule must not jump
         // when the clock is corrected. PcState takes whatever monotonic scale
         // it is given.
-        state.record(failure == null, SystemClock.elapsedRealtime());
+        state.record(failure == null, cycle.idle, SystemClock.elapsedRealtime());
 
         // One line per probe, which is what makes the backoff assertable (T5.3):
         // "at most four polls a minute while the PC is off" cannot be read off a
@@ -314,7 +322,7 @@ public final class PcPoller {
         // in deliver(), which fires on edges only, and after the staleness check
         // above so a straggler from a replaced generation cannot inflate the
         // count with polls that are no longer anybody's cadence.
-        Log.i(Markers.TAG, Markers.ping(failure == null ? "ok" : "err"));
+        Log.i(Markers.TAG, Markers.ping(failure != null ? "err" : cycle.idle ? "idle" : "ok"));
 
         // Posted on the difference from what was last *delivered*, not on
         // record()'s boolean. In the steady state the two agree and nothing is
@@ -402,7 +410,7 @@ public final class PcPoller {
             return;
         }
         delivered = observed;
-        listener.onPcState(observed == PcState.State.ONLINE);
+        listener.onPcState(observed);
         if (failure != null) {
             // The reason, once per transition rather than once per poll, and on
             // its own line so it can never be mistaken for a state marker. A
@@ -421,10 +429,11 @@ public final class PcPoller {
      * the first that answers. Staleness is re-checked between hosts, so a
      * stopped loop does not spend the rest of a long offline cycle dialling.
      *
-     * @return null if some host answered, and otherwise every host's failure,
-     *         for the log line {@link #deliver} writes once per transition
+     * @return the cycle: its failure is null if some host answered, and
+     *         otherwise every host's failure, for the log line {@link #deliver}
+     *         writes once per transition
      */
-    private String probeAll(int booked) {
+    private PcHosts.Cycle probeAll(int booked) {
         PcHosts.Cycle cycle = hosts.cycle(
                 host -> probe("http://" + host + ":" + PORT + "/ping"),
                 () -> isStale(booked));
@@ -434,18 +443,19 @@ public final class PcPoller {
             // mistaken for one.
             Log.i(Markers.TAG, "pc answered at " + cycle.host);
         }
-        return cycle.failure;
+        return cycle;
     }
 
     /**
      * {@code GET /ping}, blocking, on the poller thread — never the main one,
      * where it would be a {@code NetworkOnMainThreadException}.
      *
-     * @return null for a 200, and otherwise a short description of what went
-     *         wrong. Every non-null value means exactly the same thing to
-     *         {@link PcState} — timeout, connection refused, unreachable
-     *         network, a 500, a truncated body are one answer, because the
-     *         panel only ever needed one bit. The text is for the log.
+     * @return null for a 200, {@link PcHosts#DISPLAY_OFF} for a 200 whose
+     *         body says the display is off (ADR 0020), and otherwise a short
+     *         description of what went wrong. Every other value means exactly
+     *         the same thing to {@link PcState} — timeout, connection refused,
+     *         unreachable network, a 500, a truncated body are one answer. The
+     *         text is for the log.
      */
     private String probe(String pingUrl) {
         HttpURLConnection connection = null;
@@ -458,8 +468,13 @@ public final class PcPoller {
             connection.setUseCaches(false);
             int code = connection.getResponseCode();
             boolean ok = code == HttpURLConnection.HTTP_OK;
-            drain(ok ? connection.getInputStream() : connection.getErrorStream());
-            failure = ok ? null : "HTTP " + code;
+            if (ok) {
+                failure = PcHosts.displayOff(read(connection.getInputStream()))
+                        ? PcHosts.DISPLAY_OFF : null;
+            } else {
+                drain(connection.getErrorStream());
+                failure = "HTTP " + code;
+            }
         } catch (IOException | RuntimeException thrown) {
             // Swallowed rather than rethrown: an exception escaping here would
             // kill the scheduled task silently and the panel would freeze on
@@ -475,11 +490,34 @@ public final class PcPoller {
             // asymmetry is kept anyway — it costs nothing, and it is the half
             // that would start paying the moment the server sets
             // protocol_version. A failed connection has nothing worth keeping.
-            if (failure != null && connection != null) {
+            if (failure != null && !PcHosts.DISPLAY_OFF.equals(failure) && connection != null) {
                 connection.disconnect();
             }
         }
         return failure;
+    }
+
+    /**
+     * Reads a {@code /ping} body, which is a few dozen bytes, and closes it.
+     * Capped, so a peer that is not the desk-panel server cannot make the
+     * poller hold an unbounded string: past the cap the body is not a ping.
+     */
+    private static String read(InputStream body) throws IOException {
+        if (body == null) {
+            return null;
+        }
+        try (InputStream in = body) {
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            byte[] buffer = new byte[256];
+            int n;
+            while ((n = in.read(buffer)) >= 0) {
+                if (out.size() + n > MAX_PING_BYTES) {
+                    return null;
+                }
+                out.write(buffer, 0, n);
+            }
+            return out.toString("UTF-8");
+        }
     }
 
     /** Reads the body to the end and closes it, so the socket can be reused. */

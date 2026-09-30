@@ -235,6 +235,16 @@ b3_hours = "auto"
 night_start = "22:00"
 night_end = "07:00"
 
+# Whether the panel also sleeps while this PC's display is off — the monitor
+# gone dark on the power plan's timer, or put to sleep by hand — and not only
+# while nobody is logged in (ADR 0020). It wakes with the monitor, within the
+# phone's two-second poll.
+#   true   the default. Read on Windows (the console display state), macOS
+#          (every display asleep) and GNOME or X11 on Linux. Anywhere else the
+#          server answers "unknown" and the panel follows the login alone.
+#   false  the panel follows the login alone, as it did before.
+follow_display = true
+
 # Which theme renders the panel — the name of a directory in the APK's
 # web/themes/. Every theme is packaged, so switching one is a restart of this
 # server and not a reinstall of the app.

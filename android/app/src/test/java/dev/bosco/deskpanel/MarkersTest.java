@@ -26,6 +26,9 @@ public class MarkersTest {
     public void stateMarkers() {
         assertEquals("state=online", Markers.state(true));
         assertEquals("state=offline", Markers.state(false));
+        assertEquals("state=online", Markers.state(PcState.State.ONLINE));
+        assertEquals("state=offline", Markers.state(PcState.State.OFFLINE));
+        assertEquals("state=idle", Markers.state(PcState.State.IDLE));
     }
 
     @Test
@@ -57,7 +60,8 @@ public class MarkersTest {
         // The suite matches these against whole logcat lines, so a space would
         // make an anchored grep silently stop matching.
         for (String marker : new String[] {
-                Markers.state(true), Markers.screen(true), Markers.thermal(true),
+                Markers.state(true), Markers.state(PcState.State.IDLE),
+                Markers.screen(true), Markers.thermal(true),
                 Markers.thermal(false), Markers.night(true), Markers.dormant(true),
                 Markers.ping("ok"), Markers.data(true), Markers.battery(87),
                 Markers.tick(1758240000L)}) {

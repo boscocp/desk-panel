@@ -129,4 +129,62 @@ public class PcHostsTest {
         PcHosts hosts = PcHosts.parse(WIN + "," + MAC);
         assertThrows(UnsupportedOperationException.class, () -> hosts.all().add("pc-unlisted"));
     }
+
+    // --- the display (ADR 0020) --------------------------------------------
+
+    /** Answers as {@code answering} does, but idle for the hosts in {@code dark}. */
+    private static PcHosts.Prober withDark(List<String> dialled, List<String> up, String... dark) {
+        List<String> idle = Arrays.asList(dark);
+        return host -> {
+            dialled.add(host);
+            if (idle.contains(host)) {
+                return PcHosts.DISPLAY_OFF;
+            }
+            return up.contains(host) ? null : "java.net.ConnectException";
+        };
+    }
+
+    @Test
+    public void aDarkPcDoesNotEndTheCycleWhenAnotherHasSomebodyAtIt() {
+        PcHosts hosts = PcHosts.parse(WIN + "," + MAC);
+        List<String> dialled = new ArrayList<>();
+        PcHosts.Cycle cycle = hosts.cycle(withDark(dialled, Arrays.asList(MAC), WIN), RUNNING);
+        assertEquals(Arrays.asList(WIN, MAC), dialled);
+        assertFalse(cycle.idle);
+        assertEquals(null, cycle.failure);
+        assertEquals(MAC, hosts.active());
+    }
+
+    @Test
+    public void everyAnsweringPcDarkIsIdleOnTheActiveOne() {
+        PcHosts hosts = PcHosts.parse(WIN + "," + MAC);
+        hosts.answered(MAC);
+        List<String> dialled = new ArrayList<>();
+        PcHosts.Cycle cycle = hosts.cycle(
+                withDark(dialled, Arrays.<String>asList(), WIN, MAC), RUNNING);
+        assertTrue(cycle.idle);
+        assertEquals(null, cycle.failure);
+        assertEquals(MAC, cycle.host);
+        assertFalse(cycle.moved);
+    }
+
+    @Test
+    public void oneDarkPcAndOneGoneIsIdleNotOffline() {
+        PcHosts hosts = PcHosts.parse(WIN + "," + MAC);
+        PcHosts.Cycle cycle = hosts.cycle(
+                withDark(new ArrayList<>(), Arrays.<String>asList(), MAC), RUNNING);
+        assertTrue(cycle.idle);
+        assertEquals(MAC, cycle.host);
+        assertTrue(cycle.moved);
+    }
+
+    @Test
+    public void onlyTheLiteralOffIsDisplayOff() {
+        assertTrue(PcHosts.displayOff("{\"ok\": true, \"display\": \"off\"}"));
+        assertFalse(PcHosts.displayOff("{\"ok\": true, \"display\": \"on\"}"));
+        assertFalse(PcHosts.displayOff("{\"ok\": true, \"display\": \"unknown\"}"));
+        assertFalse(PcHosts.displayOff("{\"ok\": true}"));
+        assertFalse(PcHosts.displayOff("not json"));
+        assertFalse(PcHosts.displayOff(null));
+    }
 }
