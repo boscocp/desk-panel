@@ -179,12 +179,12 @@ body {
      * which is a 144px-wide box holding one 22px icon -- a target far past
      * what a finger needs and a picture far under what a desk's distance
      * wants. Fixed columns instead, with the icon taking the space back. */
-    justify-self: start;
-    display: grid;
-    grid-auto-flow: column;
-    /* Content width, with the buttons fixed at 104px below: the volume bar
-     * (T8.4) is a narrower third column, and 3 x 104 + gaps would not fit. */
-    grid-auto-columns: max-content;
+    /* The whole sidebar's width, as a row: the buttons at their fixed 104px
+     * from the left, and the volume bar (T8.4) centred in whatever is left
+     * between MIC and the cards -- asked for from the chair. */
+    justify-self: stretch;
+    display: flex;
+    align-items: flex-end;
     gap: 10px;
     /* **The clipped corner.** #sidebar is `overflow: hidden`, and with the
      * strip flush against its bottom the button's own 1px border landed
@@ -293,7 +293,7 @@ body {
     transition: none;
 }
 
-/* The volume bar (T8.4): twice a button's height, growing upwards from the
+/* The volume bar (T8.4): well over twice a button's height, growing upwards from the
  * strip's baseline -- asked for from the chair: at one button's height the
  * steps were too short to place a finger on. A speaker on top says what it
  * is. Ten segments fill from the bottom; the whole box is the touch target. */
@@ -302,8 +302,11 @@ body {
 }
 
 .volume {
-    height: 152px;
+    /* 200px: 152 was still short to place a finger on (from the chair). */
+    height: 200px;
     width: 48px;
+    flex: 0 0 auto;
+    margin: 0 auto;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
