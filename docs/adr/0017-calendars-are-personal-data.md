@@ -31,7 +31,7 @@ and what a stranger on the LAN, or a web page the owner visits, can get.
 
 | Provider | Scope requested | Why this one |
 |---|---|---|
-| Google | `https://www.googleapis.com/auth/calendar.events.owned.readonly` | Reads events on calendars the owner owns. Cannot write, cannot list other people's calendars, cannot see free/busy of anyone else. |
+| Google | `https://www.googleapis.com/auth/calendar.events.owned.readonly` (superseded by [ADR 0019](0019-every-google-calendar-the-owner-shows.md)) | Reads events on calendars the owner owns. Cannot write, cannot list other people's calendars, cannot see free/busy of anyone else. |
 | Microsoft | `Calendars.ReadBasic offline_access` | Reads events without body, attachments or extensions. No admin consent required. `offline_access` is what returns a refresh token. |
 
 Only the **primary** calendar is read (`calendars/primary`, `/me/calendar/calendarView`).

@@ -37,8 +37,12 @@ The rules ADR 0017 wrote into the code are unchanged, and apply to the new pair:
   Both scopes are now **required**, so unticking either on the consent screen fails the login.
 - `calendar.events.owned.readonly` stays on the allowlist and is no longer required. Google may
   hand back a scope an account granted the same client before, beside the new ones. A grant of
-  that scope alone, a token from before this record, fails the check, and the card says
-  "reconectar" until the owner logs in again.
+  that scope alone, a token from before this record, fails the check at its first refresh: the
+  refresh token is deleted from this PC's store (not revoked; the old grant stays on the Google
+  account until the owner removes it there), the log says "scope" once and "not connected"
+  after, and the card says "reconectar" until the owner logs in again.
+- A 403 `insufficientPermissions` from the API is read as "reconectar" too. It is how an old
+  token would surface if a refresh ever left `scope` out, which RFC 6749 allows.
 - The guard test still fails the build over any scope outside the allowlist and over any
   calendar request that is not a `GET`. It now also asserts that the write twin of each new
   scope (`calendar.events`, `calendar.calendarlist`) and `calendar` are off it.
@@ -54,13 +58,23 @@ unticks leaves the panel at the next refresh without a config change.
 
 ### Failure
 
-The primary failing fails the account, as before. Any other calendar that fails is skipped and
-the rest still answer: a calendar somebody else shared can be unshared between the list and the
-read. A 401 on any calendar is the token, not the calendar, and fails the account. The log
-never names a calendar, because a calendar's id is often somebody's e-mail address.
+The primary failing fails the account, as before. If the calendar list fails, the primary is
+still read, alone. Any other calendar that fails is skipped and the rest still answer: a
+calendar somebody else shared can be unshared between the list and the read. So is every
+calendar left when the account's 60-second budget runs out, since ten calendars of three pages
+at a ten-second timeout would outlast `calendar_interval_s`. A 401 anywhere is the token, not
+the calendar, and fails the account.
+
+The log never names a calendar, because a calendar's id is often somebody's e-mail address. An
+error's message carries its URL, and the id is in the path, so a 401 from a calendar other than
+the primary is re-raised with a message of the server's own. Skips are counted, not named.
+They reach only the log: a partial agenda is not marked on the card, which is the one thing
+this record leaves as it found it.
 
 An event on two calendars (an invitation that is also on a shared team calendar) is kept once,
-by its `iCalUID` and start. The `iCalUID` is read for that and never leaves the server.
+by its `iCalUID` and the instant it starts. The instant, not the text: events.list writes each
+calendar's times in that calendar's zone. The primary is read first, so a copy the owner
+declined there hides the other copies too. The `iCalUID` never leaves the server.
 
 ## Consequences
 

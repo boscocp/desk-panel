@@ -544,7 +544,7 @@ class SelectAndLoadTests(unittest.TestCase):
              "microsoft/home": Creds(),
              "google/broken": Creds(PermissionError("locked"))},
             NOW, 24, True,
-            google=lambda *a: GOOGLE,
+            google=lambda *a, **k: GOOGLE,
             graph=lambda *a: (_ for _ in ()).throw(UpstreamError("HTTP 503 from graph")),
             log=logged.append)
         self.assertEqual(result["accounts"], 4)
@@ -848,6 +848,12 @@ class ReadOnlyGuardTests(unittest.TestCase):
                        "https://www.googleapis.com/auth/calendar.calendarlist",
                        "https://www.googleapis.com/auth/calendar"):
             self.assertNotIn(google, self.GOOGLE_READ_ONLY)
+            # And the code, not only this test's own set: the runtime check
+            # would refuse it, and nothing asks for it.
+            self.assertNotIn(google, oauth.ALLOWED_SCOPES["google"])
+            self.assertNotIn(google, oauth.REQUESTED_SCOPES["google"].split())
+        for scope in oauth.REQUESTED_SCOPES["google"].split():
+            self.assertIn(scope, self.GOOGLE_READ_ONLY)
         self.assertNotIn("Calendars.ReadWrite", self.GRAPH_READ_ONLY)
 
     def test_the_calendar_calls_are_gets(self):
@@ -889,6 +895,8 @@ class OtherCalendarsTests(unittest.TestCase):
                    {"id": "family@group.calendar.google.com", "selected": True},
                    {"id": "pt.brazilian#holiday@group.v.calendar.google.com", "selected": True},
                    {"id": "unticked@group.calendar.google.com", "selected": False},
+                   # Only a real true: a string is not the checkbox.
+                   {"id": "stringy@group.calendar.google.com", "selected": "false"},
                    {"id": "no-flag@group.calendar.google.com"}]
         ids = providers_calendar.fetch_google_calendars("t", get=self._get(listing, {})[0])
         self.assertEqual(ids, ["primary", "family@group.calendar.google.com",
@@ -945,6 +953,115 @@ class OtherCalendarsTests(unittest.TestCase):
                            fail={"team": "HTTP 401 from google"})
         with self.assertRaises(UpstreamError):
             providers_calendar.fetch_google("t", NOW, NOW, get=get, log=lambda line: None)
+
+
+class OtherCalendarsReviewTests(unittest.TestCase):
+    """What PR #64's review found, each pinned."""
+
+    get_for = OtherCalendarsTests._get
+    LIST_URL = OtherCalendarsTests.LIST_URL
+
+    def test_the_same_instant_in_two_zones_is_one_event(self):
+        # events.list writes each calendar's times in its own zone.
+        listing = [{"id": "lisbon", "selected": True}]
+        here = {"summary": "Standup", "iCalUID": "u1",
+                "start": {"dateTime": "2026-09-22T07:00:00-03:00"}}
+        there = dict(here, start={"dateTime": "2026-09-22T11:00:00+01:00"})
+        raw = providers_calendar.fetch_google(
+            "t", NOW, NOW, get=self.get_for(listing, {"primary": [here], "lisbon": [there]})[0])
+        self.assertEqual(len(raw["items"]), 1)
+
+    def test_a_copy_declined_on_the_primary_hides_the_other_copies(self):
+        listing = [{"id": "colleague", "selected": True}]
+        declined = {"summary": "Standup", "iCalUID": "u1",
+                    "start": {"dateTime": "2026-09-22T07:00:00-03:00"},
+                    "end": {"dateTime": "2026-09-22T07:30:00-03:00"},
+                    "attendees": [{"self": True, "responseStatus": "declined"}]}
+        theirs = dict(declined, start={"dateTime": "2026-09-22T11:00:00+01:00"},
+                      end={"dateTime": "2026-09-22T11:30:00+01:00"},
+                      attendees=[{"self": True, "responseStatus": "accepted"}])
+        raw = providers_calendar.fetch_google(
+            "t", NOW, NOW, get=self.get_for(listing, {"primary": [declined],
+                                                      "colleague": [theirs]})[0])
+        self.assertEqual(providers_calendar.normalise_google(raw, "google/me"), [])
+
+    def test_a_401_on_a_shared_calendar_never_names_it(self):
+        get, _ = self.get_for([{"id": "friend@example.com", "selected": True}], {"primary": []},
+                              fail={"friend@example.com":
+                                    "HTTP 401 from https://.../calendars/friend%40example.com/events"})
+        with self.assertRaises(UpstreamError) as caught:
+            providers_calendar.fetch_google("t", NOW, NOW, get=get, log=lambda line: None)
+        self.assertNotIn("friend", str(caught.exception))
+        self.assertIn(" 401 ", f" {caught.exception} ")
+
+    def test_the_list_failing_still_reads_the_primary(self):
+        logged = []
+
+        def get(url, headers=None):
+            if url.startswith(self.LIST_URL):
+                raise UpstreamError("HTTP 503 from google")
+            return {"items": [{"summary": "mine"}]}
+
+        raw = providers_calendar.fetch_google("t", NOW, NOW, get=get, log=logged.append)
+        self.assertEqual([i["summary"] for i in raw["items"]], ["mine"])
+        self.assertEqual(len(logged), 1)
+
+    def test_the_list_answering_401_fails_the_account(self):
+        def get(url, headers=None):
+            raise UpstreamError("HTTP 401 from google")
+
+        with self.assertRaises(UpstreamError):
+            providers_calendar.fetch_google("t", NOW, NOW, get=get, log=lambda line: None)
+
+    def test_past_the_budget_the_rest_are_left_unread_and_counted(self):
+        listing = [{"id": f"c{i}", "selected": True} for i in range(3)]
+        # The deadline, then one tick per calendar after the primary.
+        ticks = iter([0, 0, 100, 100])
+        logged = []
+        get, calls = self.get_for(listing, {"primary": [{"summary": "mine"}],
+                                            "c0": [{"summary": "first"}]})
+        raw = providers_calendar.fetch_google("t", NOW, NOW, get=get, log=logged.append,
+                                              clock=lambda: next(ticks), budget_s=60)
+        self.assertEqual([i["summary"] for i in raw["items"]], ["mine", "first"])
+        self.assertTrue(any("2 calendars left unread" in line for line in logged))
+
+    def test_the_cap_says_so(self):
+        listing = [{"id": f"c{i}", "selected": True} for i in range(30)]
+        logged = []
+        providers_calendar.fetch_google_calendars("t", get=self.get_for(listing, {})[0],
+                                                  log=logged.append)
+        self.assertEqual(len(logged), 1)
+        self.assertIn(str(providers_calendar.MAX_CALENDARS), logged[0])
+
+    def test_load_hands_its_log_to_the_fetch(self):
+        seen = {}
+
+        def google(token, time_min, time_max, log=None):
+            seen["log"] = log
+            return {"items": []}
+
+        def log(line):
+            pass
+
+        class Creds:
+            def access_token(self):
+                return "at"
+
+        providers_calendar.load([("google", "me")], {"google/me": Creds()}, NOW, 24, True,
+                                google=google, log=log)
+        self.assertIs(seen["log"], log)
+
+    def test_a_403_insufficient_permissions_asks_for_a_reconnect(self):
+        class Creds:
+            def access_token(self):
+                return "at"
+
+        def google(*a, **k):
+            raise UpstreamError('HTTP 403 from google: {"reason": "insufficientPermissions"}')
+
+        result = providers_calendar.load([("google", "me")], {"google/me": Creds()}, NOW, 24,
+                                         True, google=google, log=lambda line: None)
+        self.assertEqual(result["failed"], [{"source": "google/me", "reason": "reconnect"}])
 
 
 if __name__ == "__main__":

@@ -682,8 +682,9 @@ class App:
         """`{accounts, events, failed}`, served from cache and never blocking.
 
         Refreshed off the request path, like the moon and the histories: one
-        account is a token refresh plus an events call, each with a ten
-        second timeout, against a phone that gives the whole request five.
+        Google account is a token refresh, the calendar list and one events
+        call per shown calendar (ADR 0019), each with a ten second timeout,
+        against a phone that gives the whole request five.
         A cold start therefore serves no events for one cycle.
 
         The cached value is what the last refresh returned, whole, and

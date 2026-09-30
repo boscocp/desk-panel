@@ -231,7 +231,12 @@ def main(argv):
         return 2
 
     if args[0] == "-":
-        problems = check_subjects(sys.stdin.read().splitlines())
+        # UTF-8 whatever the locale says: `git log` writes UTF-8, and on
+        # Windows stdin defaults to the ANSI code page, which turns an accent
+        # into two characters -- a subject 82 long reads as 85, and an entry
+        # in PUBLISHED_EXCEPTIONS stops matching its own text.
+        text = sys.stdin.buffer.read().decode("utf-8", errors="replace")
+        problems = check_subjects(text.splitlines())
         what = "subject(s)"
     else:
         # Read it rather than stat it. The hook is handed a real file, but

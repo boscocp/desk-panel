@@ -538,7 +538,11 @@ class Credentials:
     **A refused token is not sent again.** Once a refresh comes back with an
     auth error, that token is remembered as dead, and every later cycle fails
     at once, without a request, until the store holds a different token,
-    which is what `calendar_login.py` writes. A grant broader than read-only
+    which is what `calendar_login.py` writes. A grant that fails the scope
+    check -- broader than read-only, or, since ADR 0019, a Google grant from
+    before it that is too narrow to read the other calendars -- is deleted
+    from the store here and never revoked, so the log says "scope" once and
+    "not connected" after. A grant broader than read-only
     is worse than dead, and it is deleted from the store on the spot
     (ADR 0017).
     `clock` is wall-clock seconds and is passed in, so the tests move time
