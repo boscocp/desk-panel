@@ -571,7 +571,8 @@ next event):
 const card = agendaRows(payload.agenda, new Date(), words.tag);
 // null: as above
 // { rows: [{ title, icon, live, when, aside, progress }], none, failed }
-//   at most two rows, with or without a failure line under them;
+//   at most three rows, with or without a failure line under them -- how
+//   many to draw is the theme's call (neon: three, or two beside a failure);
 //   icon is 'live' | 'clock' | 'calendar', a name and never markup;
 //   progress is 0..1 through a meeting in progress, else null
 const lit = agendaSegments(row.progress, 10);   // floor: full means over

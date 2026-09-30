@@ -1301,9 +1301,10 @@ body {
  * the second is one line under a dashed rule. Two events fit because every
  * line is a single line -- each one ellipsises rather than wraps.
  *
- * Height, measured at 872x392: head, title, bar and the next line are 89px of
- * the ~142 under the title, and a two-line failure under both rows still fits
- * (~128). */
+ * Height, measured at a true 872x392 viewport with e2e/layout/agenda.js: the
+ * lead with its bar, the second event stacked on two lines and the third on
+ * one fill the ~142px under the title without clipping. With a failure line
+ * the card draws two events, both on one line. */
 .a-head,
 .a-next {
     display: flex;
@@ -1396,14 +1397,46 @@ body {
 }
 
 .a-next {
-    margin-top: 4px;
-    padding-top: 4px;
+    margin-top: 3px;
+    padding-top: 3px;
     border-top: 1px dashed var(--rule-faint);
+    font-size: 17px;
+}
+
+/* The second event on two lines: the mark and when, then the title across
+ * the whole card. Block rather than the one-line flex row. */
+.a-next.a-stacked {
+    display: block;
+}
+
+.a-sub {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+    line-height: 1.25;
+}
+
+.a-stacked > .a-title {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
+    color: var(--accent-dim);
+}
+
+/* No separator dot on the stacked row: the title has its own line. */
+.a-next.a-stacked > .a-title::before {
+    content: none;
 }
 
 .a-next .a-when {
     flex: 0 0 auto;
     color: var(--accent);
+}
+
+.a-next .a-chip {
+    font-size: 13px;
 }
 
 /* Two meetings at once: the second row is in progress too, and takes the

@@ -6,7 +6,9 @@
 // today, no time-left beside that -- which is what keeps the time on screen.
 // This pass is what says it fits.
 //
-// Everything else is deliberately ordinary. This pass is about one card.
+// Two more events behind it make it the tallest card too: three rows, the
+// second stacked on two lines. Everything else is deliberately ordinary.
+// This pass is about one card.
 
 window.onData({
     quotes: [
@@ -30,11 +32,24 @@ window.onData({
         const end = new window.Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 10, 0);
         return {
             accounts: 1,
+            // Three, the most the card draws, with long titles on the two
+            // behind it: the tallest the card can be -- chip, bar, a stacked
+            // second row and a compact third.
             events: [{
                 start: new window.Date(now.getTime() - 2 * 3600000).toISOString(),
                 end: end.toISOString(),
                 allDay: false, source: 'microsoft/work',
                 title: 'Offsite de planejamento com todas as equipes de produto',
+            }, {
+                start: new window.Date(now.getTime() + 40 * 60000).toISOString(),
+                end: new window.Date(now.getTime() + 70 * 60000).toISOString(),
+                allDay: false, source: 'google/personal',
+                title: 'Exame de sangue no laboratório do centro',
+            }, {
+                start: new window.Date(now.getTime() + 90 * 60000).toISOString(),
+                end: new window.Date(now.getTime() + 120 * 60000).toISOString(),
+                allDay: false, source: 'google/personal',
+                title: 'Revisão trimestral do orçamento da casa',
             }],
             failed: [],
         };

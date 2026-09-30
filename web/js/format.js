@@ -923,10 +923,10 @@ function agendaRow(event, now, language, primary) {
 
 /**
  * The AGENDA card as rows, for a theme that shows more than the next event:
- * up to two, best first by nextEvent's ranking, or null when there is no card
+ * up to three, best first by nextEvent's ranking, or null when there is no card
  * to draw (the same two cases as agendaFields).
  *
- *   rows     [{ title, icon, live, when, aside, progress }], at most two:
+ *   rows     [{ title, icon, live, when, aside, progress }], at most three:
  *              icon      'live' (in progress), 'clock' (timed), 'calendar'
  *                        (all day) -- a name, never markup
  *              when      "até 23:30" in progress, "em 25 min", "amanhã
@@ -944,16 +944,17 @@ function agendaRow(event, now, language, primary) {
  * @param now      Date, the phone's clock
  * @param language the payload's `language`
  */
+const AGENDA_MAX_ROWS = 3;
+
 function agendaRows(agenda, now, language) {
     if (!agenda || typeof agenda !== 'object' || !(Number(agenda.accounts) > 0)) {
         return null;
     }
     const w = strings(language).agenda;
     const failed = failedLine(agenda.failed, w);
-    // Two rows even with a failure line under them: 2 x 30 + 27 + 12 + a
-    // two-line failure is ~128px of the ~142 the neon card has under its
-    // title, measured at 872x392.
-    const events = rankedEvents(agenda.events, now).slice(0, 2);
+    // Up to three, and how many of them fit is the theme's call: neon draws
+    // three, or two when a failure line needs the room.
+    const events = rankedEvents(agenda.events, now).slice(0, AGENDA_MAX_ROWS);
     return {
         rows: events.map((event, i) => agendaRow(event, now, language, i === 0)),
         none: events.length || failed ? null : w.none,
