@@ -386,13 +386,14 @@ test('agendaRows: a meeting in progress carries its end, what is left and how fa
     assert.equal(out.none, null);
 });
 
-test('agendaRows: two events, the second on one compact line', () => {
+test('agendaRows: up to three events, best first', () => {
     const out = agendaRows(card([
         timed(at(2026, 9, 29, 17, 0), at(2026, 9, 29, 17, 30), 'google/personal', '1:1'),
         timed(at(2026, 9, 29, 13, 50), at(2026, 9, 29, 14, 20)),
         timed(at(2026, 9, 30, 9, 0), at(2026, 9, 30, 9, 30), 'google/personal', 'third'),
     ]), NOW, 'pt-BR');
-    assert.deepEqual(out.rows.map((r) => r.title), ['Standup', '1:1']);
+    assert.deepEqual(out.rows.map((r) => r.title), ['Standup', '1:1', 'third']);
+    assert.equal(out.rows[2].when, 'amanhã 09:00');
     // First row: the countdown, with the clock time beside it.
     assert.equal(out.rows[0].when, 'em 15 min');
     assert.equal(out.rows[0].aside, '13:50');
@@ -412,13 +413,14 @@ test('agendaRows: tomorrow keeps its day, and an all-day event is a calendar', (
         [['calendar', 'all day'], ['clock', 'tomorrow 09:00']]);
 });
 
-test('agendaRows: a failure is a line under both rows, not instead of one', () => {
+test('agendaRows: a failure is a line under the rows, not instead of them', () => {
     const out = agendaRows(card([
         timed(at(2026, 9, 29, 14, 0), at(2026, 9, 29, 15, 0)),
         timed(at(2026, 9, 29, 16, 0), at(2026, 9, 29, 17, 0)),
         timed(at(2026, 9, 29, 18, 0), at(2026, 9, 29, 19, 0)),
     ], [{ source: 'microsoft/work', reason: 'reconnect' }]), NOW, 'pt-BR');
-    assert.equal(out.rows.length, 2);
+    // All three: how many fit beside the failure line is the theme's call.
+    assert.equal(out.rows.length, 3);
     assert.equal(out.failed, 'microsoft/work: reconectar');
 });
 
@@ -493,4 +495,13 @@ test('agendaSegments: floor, so a full bar means the meeting is over', () => {
     assert.equal(agendaSegments(0, 10), 0);
     assert.equal(agendaSegments(null, 10), 0);
     assert.equal(agendaSegments(1.5, 10), 10);
+});
+
+test('agendaRows: never more than three, however many the server sent', () => {
+    const events = [];
+    for (let h = 14; h < 20; h += 1) {
+        events.push(timed(at(2026, 9, 29, h, 0), at(2026, 9, 29, h, 30), 'a', `m${h}`));
+    }
+    assert.deepEqual(agendaRows(card(events), NOW, 'pt-BR').rows.map((r) => r.title),
+        ['m14', 'm15', 'm16']);
 });

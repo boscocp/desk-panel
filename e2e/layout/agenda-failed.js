@@ -1,14 +1,10 @@
-// A meeting in progress that ends on another day (T9.1).
+// agenda.js's three events with a two-line failure line under them.
 //
-// The one AGENDA line stress.js cannot carry, because stress.js spends the
-// first row on the widest countdown. In progress, neon's head line draws the
-// AGORA chip beside "até amanhã 10:00" and, because the meeting does not end
-// today, no time-left beside that -- which is what keeps the time on screen.
-// This pass is what says it fits.
-//
-// Two more events behind it make it the tallest card too: three rows, the
-// second stacked on two lines. Everything else is deliberately ordinary.
-// This pass is about one card.
+// The case the neon card answers by drawing two events, both compact: three
+// rows and a failure are ~42px taller than the card. That cap lives in
+// theme.js, which no node test loads, so this pass is the only thing that
+// notices if it goes -- the failure line would be drawn off the bottom of the
+// screen.
 
 window.onData({
     quotes: [
@@ -31,7 +27,7 @@ window.onData({
         const now = new window.Date();
         const end = new window.Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 10, 0);
         return {
-            accounts: 1,
+            accounts: 3,
             // Three, the most the card draws, with long titles on the two
             // behind it: the tallest the card can be -- chip, bar, a stacked
             // second row and a compact third.
@@ -51,7 +47,8 @@ window.onData({
                 allDay: false, source: 'google/personal',
                 title: 'Revisão trimestral do orçamento da casa',
             }],
-            failed: [],
+            failed: [{ source: 'microsoft/work', reason: 'reconnect' },
+                     { source: 'google/work', reason: 'unavailable' }],
         };
     })(),
 });

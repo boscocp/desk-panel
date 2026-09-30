@@ -1084,7 +1084,8 @@
 
     // The AGENDA card (T9.1), a quest tracker since the redesign: the first
     // event is read from the chair -- a head line, its title and, while it
-    // runs, a segmented bar -- and the second is one line under it. No
+    // runs, a segmented bar -- and up to two more under it: the second on two
+    // lines, the third on one, or both on one beside a failure line. No
     // payload agenda, or a PC with no calendar connected, puts the card back
     // to reserved: empty, titled, and marked for e2e/layout/measure.js. A
     // failed account costs its own line and nothing else.
@@ -1118,7 +1119,28 @@
         return lead;
     }
 
-    // The second row: one line, icon, when, title.
+    // The second row, when there is room for it to be two lines: the mark and
+    // when, then the title on a line of its own -- the full width of the
+    // card, which is what a title needs and a single shared line never gave
+    // it ("amanhã 09:00 · exame ...").
+    function agendaStacked(row) {
+        const next = el('div', null, 'a-next a-stacked' + (row.live ? ' a-live' : ''));
+        const head = el('div', null, 'a-sub');
+        const mark = agendaMark(row);
+        if (mark) {
+            head.appendChild(mark);
+        }
+        const when = el('span', null, 'a-when');
+        when.textContent = row.when;
+        head.appendChild(when);
+        const title = el('div', null, 'a-title');
+        title.textContent = row.title;
+        title.title = row.title;
+        next.append(head, title);
+        return next;
+    }
+
+    // A later row: one line, icon, when, title.
     function agendaNext(row) {
         const next = el('div', null, 'a-next' + (row.live ? ' a-live' : ''));
         const mark = agendaMark(row);
@@ -1144,8 +1166,19 @@
         }
         els.agenda.removeAttribute('data-reserved');
         const body = el('div', null, 'a-body');
-        card.rows.forEach((row, i) => {
-            body.appendChild(i === 0 ? agendaLead(row) : agendaNext(row));
+        // Three events: the first in full, the second on two lines, the third
+        // on one. A failure line takes two lines of its own, so with one the
+        // card keeps two events, both compact -- measured, the three rows and
+        // a failure do not fit the ~142px under the title.
+        const rows = card.failed ? card.rows.slice(0, 2) : card.rows;
+        rows.forEach((row, i) => {
+            if (i === 0) {
+                body.appendChild(agendaLead(row));
+            } else if (i === 1 && !card.failed) {
+                body.appendChild(agendaStacked(row));
+            } else {
+                body.appendChild(agendaNext(row));
+            }
         });
         if (card.none) {
             const none = el('div', null, 'a-none');

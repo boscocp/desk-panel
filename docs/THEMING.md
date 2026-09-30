@@ -564,14 +564,15 @@ const fields = agendaFields(payload.agenda, new Date(), words.tag);
 ```
 
 A theme with room for more than one line can ask for rows instead. Neon does,
-and draws them as a quest tracker (a chip, a segmented bar, one line for the
-next event):
+and draws them as a quest tracker (a chip and a segmented bar on the first
+event, the second on two lines, the third on one):
 
 ```js
 const card = agendaRows(payload.agenda, new Date(), words.tag);
 // null: as above
 // { rows: [{ title, icon, live, when, aside, progress }], none, failed }
-//   at most two rows, with or without a failure line under them;
+//   at most three rows, with or without a failure line under them -- how
+//   many to draw is the theme's call (neon: three, or two beside a failure);
 //   icon is 'live' | 'clock' | 'calendar', a name and never markup;
 //   progress is 0..1 through a meeting in progress, else null
 const lit = agendaSegments(row.progress, 10);   // floor: full means over
@@ -606,7 +607,9 @@ first meeting 35 minutes ago, for the chip and the bar.
   one from the other. `e2e/layout/stress.js` carries the widest countdown at full
   size ("amanhã 09:00"), a very long title and the longest failure line;
   `e2e/layout/agenda.js` carries a meeting in progress that ends tomorrow,
-  which `agendaRows` gives no time-left so that "até amanhã 10:00" fits.
+  which `agendaRows` gives no time-left so that "até amanhã 10:00" fits, and
+  two events behind it: the tallest the card gets. `agenda-failed.js` is the
+  same three with a failure line, the case neon draws with two compact rows.
 
 ## Whether the market is open is the PC's answer
 

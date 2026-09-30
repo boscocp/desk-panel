@@ -904,8 +904,10 @@ function agendaRow(event, now, language, primary) {
         const minutes = Math.ceil((event.start - now) / 60000);
         const today = localDay(event.start) === localDay(now);
         if (!primary && today && minutes >= 60) {
-            // The second row has room for a time or a title, not both at the
-            // countdown's length: "14:30" says what "em 3 h 10" does.
+            // A later row says a clock time rather than a long countdown:
+            // "14:30" says what "em 3 h 10" does, in fewer characters, and
+            // the same on every row after the first however the theme lays
+            // them out.
             row.when = hhmm(event.start);
         } else {
             row.when = untilText(event.start, now, language);
@@ -921,17 +923,21 @@ function agendaRow(event, now, language, primary) {
     return row;
 }
 
+// The most rows agendaRows returns; how many of them to draw is the theme's.
+const AGENDA_MAX_ROWS = 3;
+
 /**
  * The AGENDA card as rows, for a theme that shows more than the next event:
- * up to two, best first by nextEvent's ranking, or null when there is no card
+ * up to three, best first by nextEvent's ranking, or null when there is no card
  * to draw (the same two cases as agendaFields).
  *
- *   rows     [{ title, icon, live, when, aside, progress }], at most two:
+ *   rows     [{ title, icon, live, when, aside, progress }], at most three:
  *              icon      'live' (in progress), 'clock' (timed), 'calendar'
  *                        (all day) -- a name, never markup
  *              when      "até 23:30" in progress, "em 25 min", "amanhã
- *                        09:00", "o dia todo"; on the second row a timed
- *                        event today and an hour or more away is "14:30"
+ *                        09:00", "o dia todo"; on any row after the first
+ *                        a timed event today and an hour or more away is
+ *                        "14:30"
  *              aside     the right-hand end of the row: what is left of a
  *                        meeting in progress that ends today ("58 min"), or
  *                        the start time beside a countdown on the first row,
@@ -950,10 +956,9 @@ function agendaRows(agenda, now, language) {
     }
     const w = strings(language).agenda;
     const failed = failedLine(agenda.failed, w);
-    // Two rows even with a failure line under them: 2 x 30 + 27 + 12 + a
-    // two-line failure is ~128px of the ~142 the neon card has under its
-    // title, measured at 872x392.
-    const events = rankedEvents(agenda.events, now).slice(0, 2);
+    // Up to three, and how many of them fit is the theme's call: neon draws
+    // three, or two when a failure line needs the room.
+    const events = rankedEvents(agenda.events, now).slice(0, AGENDA_MAX_ROWS);
     return {
         rows: events.map((event, i) => agendaRow(event, now, language, i === 0)),
         none: events.length || failed ? null : w.none,
