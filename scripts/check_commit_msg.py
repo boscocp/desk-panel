@@ -147,6 +147,9 @@ PUBLISHED_EXCEPTIONS = {
     'feat(web): AGENDA do neon com até três eventos e o título do segundo inteiro (#63)':
         "squash-merged as #63 on 2026-09-30 with the PR's title, which is 82 characters; "
         "the branch's own commits were short, so the PR's lint passed",
+    'feat: alerta de reunião, barra de volume do PC e umidade no TEMPO (wave 40) (#66)':
+        "squash-merged as #66 on 2026-09-30; the PR title was 74 characters and GitHub's "
+        "' (#66)' took it to 81, after every check that could have seen it",
 }
 
 
