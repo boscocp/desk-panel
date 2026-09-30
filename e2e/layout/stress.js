@@ -70,9 +70,8 @@ window.onData({
     // report the right tag while measuring the wrong words (T6.11).
     language: new URLSearchParams(location.search).get('lang') || undefined,
     // The widest AGENDA the card can be asked to draw (T9.1): the widest
-    // countdown at the card's full size -- "amanhã 09:00" here, "tomorrow
-    // 09:00" under --lang en, fourteen characters and the most neon's 32px
-    // line holds (the in-progress case, which steps down a size instead, is
+    // countdown on the first row -- "amanhã 09:00" here, "tomorrow 09:00"
+    // under --lang en (the in-progress case that ends tomorrow is
     // e2e/layout/agenda.js) -- under a title far longer
     // than any line the card has, and the longest failure line: one account
     // to reconnect and one unavailable. The meeting is the third account's,

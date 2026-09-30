@@ -54,6 +54,7 @@
      * on the way past, not a fault. 11.7:1 on black, so it is legible across
      * the desk at the smallest size the panel uses. */
     --warn: #FFB03F;        /* caution: the battery above its temperature floor */
+    --warn-glow: rgba(255, 176, 63, 0.6);  /* the AGENDA bar's lit segments */
 
     /* Derived, all from --accent. */
     --rule: rgba(213, 63, 167, 0.38);
@@ -1260,6 +1261,9 @@ body {
 :root[data-night] {
     --glow: rgba(213, 63, 167, 0.22);
     --glow-dim: rgba(187, 129, 170, 0.16);
+    /* The bar's segments stay lit -- they are the reading, not the
+     * decoration -- and lose their halo like everything else. */
+    --warn-glow: transparent;
 
     /* Not dimmed, and this is the one deliberate exception. STALE is the only
      * thing on this panel that says something is wrong, and the reason it
@@ -1272,82 +1276,156 @@ body {
 /* --- The AGENDA card (T9.1) ------------------------------------------------
  *
  * The same box as #weather -- the two share #side's 1fr/1fr -- so the same
- * budget: 143px of content under a 27px title. Three lines at most, and the
- * worst case is all three with the failure line at its two: 35 + 30 + 52 =
- * 117px. The countdown and the title never wrap. The countdown is short by
- * construction, a title can be anything a person typed into a calendar, and a
- * wrapped title is how this card would grow into the one under it -- so every
- * line ellipsises and the card's own clip is the backstop.
- *
- * The countdown is the largest thing here and the only thing in the accent,
- * because it is what the card is read for: the title is something the owner
- * already knows once they see the time.
+ * budget: ~142px of content under a 27px title. Two events and a failure
+ * line at most, and nothing wraps: a title can be anything a person typed
+ * into a calendar, and a wrapped title is how this card would grow into the
+ * one under it -- so every line ellipsises and the card's own clip is the
+ * backstop. The title is the largest thing here; the countdown shares the
+ * first row's head with the chip and what is left. See .a-body below.
  */
 #agenda {
     color: var(--accent);
 }
 
-.a-body {
+/* Top, not centred like the other cards' single line (.card > div): this is
+ * a list, and a list that floats in the middle of its box reads as one item
+ * with a gap above it. */
+#agenda > .a-body {
     min-width: 0;
+    margin-top: 2px;
+    margin-bottom: auto;
 }
 
-.a-when,
-.a-title {
+/* The quest tracker (Cyberpunk 2077's mission HUD was the reference): the
+ * first event is a head line, its title and, while it runs, a segmented bar;
+ * the second is one line under a dashed rule. Two events fit because every
+ * line is a single line -- each one ellipsises rather than wraps.
+ *
+ * Height, measured at 872x392: head, title, bar and the next line are 89px of
+ * the ~142 under the title, and a two-line failure under both rows still fits
+ * (~128). */
+.a-head,
+.a-next {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
     white-space: nowrap;
+    font-size: 18px;
+    line-height: 1.25;
+}
+
+.a-head .a-when,
+.a-next .a-title {
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-.a-when {
-    font-size: 32px;
-    line-height: 1.1;
-    letter-spacing: 0.01em;
+.a-head .a-when {
+    color: var(--accent);
+}
+
+.a-aside {
+    margin-left: auto;
+    flex: 0 0 auto;
+    color: var(--accent-dim);
+}
+
+.a-lead > .a-title,
+.a-none {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 22px;
+    line-height: 1.2;
     text-shadow: 0 0 6px var(--glow-dim);
 }
 
-/* A countdown longer than the fourteen characters 32px holds -- an
- * in-progress meeting that ends on another day, "até amanhã 10:00". Same
- * line box as .a-when (24 x 1.45 = 34.8px against 32 x 1.1 = 35.2), so the
- * card does not change height when the line changes size. */
-.a-long {
-    font-size: 24px;
-    line-height: 1.45;
-}
-
-/* Read aloud and never drawn: the "agora" an in-progress line says in colour.
- * The standard clip pattern, so it takes no space and no ink. */
-.sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    padding: 0;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-    border: 0;
-}
-
-/* In progress: the meeting has started. The colour is --warn, the panel's
- * "look at this" that is not an alarm -- --down is a loss and a meeting you
- * are in is not one. */
-.a-live {
+/* In progress: --warn, the panel's "look at this" that is not an alarm --
+ * --down is a loss and a meeting you are in is not one. The chip, the time
+ * and what is left take it; the title stays in the accent. */
+.a-live .a-when,
+.a-live .a-aside {
     color: var(--warn);
 }
 
-.a-title {
-    margin-top: 2px;
-    font-size: 24px;
-    line-height: 1.25;
+.a-chip {
+    flex: 0 0 auto;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    line-height: 1.3;
+    padding: 0 3px;
+    color: var(--warn);
+    border: 1px solid var(--warn);
+    border-radius: 2px;
+}
+
+.a-icon {
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: var(--accent-dim);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.a-live .a-icon-live {
+    fill: var(--warn);
+    stroke: var(--warn);
+}
+
+.a-bar {
+    display: flex;
+    gap: 2px;
+    height: 6px;
+    margin: 3px 0 3px;
+}
+
+.a-bar i {
+    flex: 1 1 0;
+    background: var(--rule-faint);
+}
+
+.a-bar i.on {
+    background: var(--warn);
+    box-shadow: 0 0 4px var(--warn-glow);
+}
+
+.a-next {
+    margin-top: 4px;
+    padding-top: 4px;
+    border-top: 1px dashed var(--rule-faint);
+}
+
+.a-next .a-when {
+    flex: 0 0 auto;
+    color: var(--accent);
+}
+
+/* Two meetings at once: the second row is in progress too, and takes the
+ * same colour. Needs the extra class, since .a-next .a-when above is as
+ * specific as .a-live .a-when and comes later. */
+.a-next.a-live .a-when {
+    color: var(--warn);
+}
+
+.a-next .a-title {
+    color: var(--accent-dim);
+}
+
+/* "o dia todo · Aniversário": without it the when and the title run together
+ * into one phrase. */
+.a-next .a-title::before {
+    content: '· ';
 }
 
 /* Which account needs its login run again, or is down. Dim, small and last:
  * it is the owner's to fix on the PC, not something to read from the chair.
- *
- * Two lines, clamped, where the other two ellipsise. One line held
- * "microsoft/work: reconect..." and dropped the second account entirely --
- * the one line on the card that is a list. Two fit: 35 + 30 + 2 x 26 = 117px
- * of the 143 the card has, measured with the stress fixture's two failures. */
+ * Two clamped lines where the others ellipsise, because it is a list. */
 .a-failed {
     display: -webkit-box;
     -webkit-box-orient: vertical;
@@ -1355,7 +1433,7 @@ body {
     overflow: hidden;
     overflow-wrap: anywhere;
     margin-top: 4px;
-    font-size: 20px;
+    font-size: 17px;
     line-height: 1.3;
     color: var(--accent-dim);
 }

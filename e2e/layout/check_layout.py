@@ -542,9 +542,8 @@ def main():
     # a panel in Sao Paulo.
     #
     # agenda.js measures one card too (T9.1): a meeting in progress that ends
-    # tomorrow, "até amanhã 10:00", longer than neon's 32px countdown holds,
-    # so the line steps down a size. stress.js carries the other widest case,
-    # "amanhã 09:00" at full size, and the card shows one event at a time.
+    # tomorrow, "até amanhã 10:00" beside the AGORA chip on neon's first row.
+    # stress.js carries the other widest case, "amanhã 09:00" as a countdown.
     #
     # night.js is the next. A clear sky after dark draws stars rather than a
     # sun -- which is the bug T6.13 came from -- and it draws the moon at

@@ -1,10 +1,10 @@
 // A meeting in progress that ends on another day (T9.1).
 //
-// The one AGENDA line stress.js cannot carry, because the card shows one event
-// and stress.js spends it on the widest countdown at full size. In progress,
-// neon draws "até amanhã 10:00" -- sixteen characters, four more than its 32px
-// line holds -- so the line steps down a size rather than cutting off the time
-// the owner is reading it for. This pass is what says the smaller size fits.
+// The one AGENDA line stress.js cannot carry, because stress.js spends the
+// first row on the widest countdown. In progress, neon's head line draws the
+// AGORA chip beside "até amanhã 10:00" and, because the meeting does not end
+// today, no time-left beside that -- which is what keeps the time on screen.
+// This pass is what says it fits.
 //
 // Everything else is deliberately ordinary. This pass is about one card.
 
