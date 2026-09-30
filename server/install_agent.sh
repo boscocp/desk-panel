@@ -125,6 +125,24 @@ fi
 step "Checking the config"
 "$PYTHON" "$SERVER_PY" --config "$CONFIG" --check-only || die "the config does not load; fix it before installing"
 
+# --- The spectrum helper (T8.5, ADR 0021) ------------------------------------
+#
+# Built on every install, whether `spectrum` is on or not, so turning it on
+# later is a config edit and a restart. A Mac without the Command Line Tools
+# still installs: the server says at startup that the bars stay off, and why.
+TAP_SOURCE="$SCRIPT_DIR/mac/spectrum_tap.swift"
+TAP="$SCRIPT_DIR/mac/spectrum-tap"
+if command -v swiftc >/dev/null 2>&1; then
+    step "Building the spectrum helper"
+    if swiftc -O "$TAP_SOURCE" -o "$TAP" 2>/dev/null; then
+        note "built $TAP"
+    else
+        note "swiftc failed (the tap needs the macOS 14.2 SDK or newer); the bars stay off"
+    fi
+else
+    note "no swiftc (xcode-select --install); the spectrum bars stay off"
+fi
+
 # --- Render and install ----------------------------------------------------
 #
 # Rendered by Python rather than sed, because a plist is XML: a path with `&`

@@ -121,6 +121,16 @@ public final class Markers {
         return "ping=" + outcome;
     }
 
+    /**
+     * The spectrum stream opening or ending (T8.5): {@code spectrum=open},
+     * {@code spectrum=off} for a PC that answered 404, {@code spectrum=err},
+     * {@code spectrum=end}. Per connection, never per frame -- twenty lines a
+     * second would drown every other marker.
+     */
+    public static String spectrum(String outcome) {
+        return "spectrum=" + outcome;
+    }
+
     /** One data cycle (T5.1). */
     public static String data(boolean ok) {
         return ok ? "data=ok" : "data=err";

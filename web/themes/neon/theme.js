@@ -93,8 +93,15 @@
         // reserved the server route for).
         const shortcuts = el('div', 'shortcuts');
 
+        // The spectrum bars (T8.5), over the two buttons. Hidden until the
+        // first frame arrives, so a PC with `spectrum` off leaves the space
+        // exactly as empty as it was.
+        const spectrumCanvas = el('canvas', 'spectrum');
+        spectrumCanvas.hidden = true;
+        spectrumCanvas.setAttribute('aria-hidden', 'true');
+
         const sidebar = el('div', 'sidebar');
-        sidebar.append(clockContainer, shortcuts);
+        sidebar.append(clockContainer, spectrumCanvas, shortcuts);
 
         const quotes = el('section', 'quotes', 'card-list');
         const fx = el('section', 'fx', 'card-list');
@@ -165,7 +172,9 @@
         panel.append(quotes, fx, crypto, side, stale);
 
         root.append(sidebar, panel);
-        els = { root, clock, date, lists, weather, agenda, battery, stale, shortcuts, closed };
+        els = { root, clock, date, lists, weather, agenda, battery, stale, shortcuts, closed,
+                spectrum: { canvas: spectrumCanvas, state: spectrumState(), target: null,
+                            frameAt: 0, last: 0, raf: 0, colors: null } };
         // The signature renderShortcuts compares against describes markup that
         // has just been thrown away. mount() runs again whenever host.js empties
         // the root -- a theme switch away and back is the ordinary case -- and a
@@ -173,6 +182,106 @@
         // early, leaving the strip empty on a panel that had buttons a minute
         // ago.
         drawnActions = null;
+    }
+
+    // --- The spectrum bars (T8.5) ------------------------------------------
+    //
+    // Sixteen columns of segments, like the volume bar beside them, with a cap
+    // on each column's recent peak. The frames arrive twenty a second; the
+    // canvas is drawn on animation frames in between, through spectrumStep's
+    // physics (js/format.js), and the loop stops once everything has fallen
+    // to the floor, so silence costs nothing.
+
+    // A frame older than this is silence: the bars fall rather than freeze on
+    // the last one when a stream stalls.
+    const SPECTRUM_FRESH_MS = 250;
+    // No frame for this long and the bars are hidden again. Longer than the
+    // server's five-second keepalive, so a quiet song never blinks them out.
+    const SPECTRUM_GONE_MS = 15000;
+    const SEGMENT_PX = 4;
+    const SEGMENT_GAP_PX = 2;
+    const COLUMN_GAP_PX = 3;
+
+    function spectrum(bars, root) {
+        ensure(root);
+        const s = els.spectrum;
+        s.target = bars;
+        s.frameAt = performance.now();
+        s.canvas.hidden = false;
+        if (!s.raf) {
+            s.last = s.frameAt;
+            s.raf = requestAnimationFrame(drawSpectrum);
+        }
+    }
+
+    function drawSpectrum(now) {
+        const s = els.spectrum;
+        s.raf = 0;
+        if (!s.canvas.isConnected || s.canvas.hidden) {
+            return;
+        }
+        const dt = Math.min(100, now - s.last);
+        s.last = now;
+        const target = now - s.frameAt < SPECTRUM_FRESH_MS ? s.target : null;
+        s.state = spectrumStep(s.state, target, dt);
+        paintSpectrum(s);
+        if (target || !spectrumAtRest(s.state)) {
+            s.raf = requestAnimationFrame(drawSpectrum);
+        }
+    }
+
+    // From tick(), once a second: a stream that has gone takes the bars with it.
+    function expireSpectrum(now) {
+        const s = els.spectrum;
+        if (!s.canvas.hidden && now - s.frameAt > SPECTRUM_GONE_MS) {
+            s.canvas.hidden = true;
+            s.state = spectrumState();
+        }
+    }
+
+    function paintSpectrum(s) {
+        const canvas = s.canvas;
+        const ratio = window.devicePixelRatio || 1;
+        const width = canvas.clientWidth;
+        const height = canvas.clientHeight;
+        if (!width || !height) {
+            return;
+        }
+        if (canvas.width !== Math.round(width * ratio)
+                || canvas.height !== Math.round(height * ratio)) {
+            canvas.width = Math.round(width * ratio);
+            canvas.height = Math.round(height * ratio);
+            s.colors = null;
+        }
+        if (!s.colors) {
+            // Read from the stylesheet, so the night profile's dimmer glow and
+            // any change to the palette reach the canvas the way they reach
+            // every other element. Re-read whenever the canvas is resized.
+            const style = getComputedStyle(canvas);
+            s.colors = {
+                lit: style.getPropertyValue('--accent').trim() || '#D53FA7',
+                unlit: style.getPropertyValue('--rule-faint').trim() || 'rgba(213,63,167,0.12)',
+                cap: style.getPropertyValue('--accent-dim').trim() || '#BB81AA',
+            };
+        }
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+        ctx.clearRect(0, 0, width, height);
+        const bars = s.state.levels.length;
+        const column = (width - COLUMN_GAP_PX * (bars - 1)) / bars;
+        const pitch = SEGMENT_PX + SEGMENT_GAP_PX;
+        const segments = Math.max(1, Math.floor((height + SEGMENT_GAP_PX) / pitch));
+        for (let i = 0; i < bars; i++) {
+            const x = i * (column + COLUMN_GAP_PX);
+            const lit = Math.round(s.state.levels[i] * segments);
+            const cap = Math.ceil(s.state.peaks[i] * segments) - 1;
+            for (let k = 0; k < segments; k++) {
+                const y = height - (k + 1) * pitch + SEGMENT_GAP_PX;
+                ctx.fillStyle = k < lit ? s.colors.lit
+                    : k === cap ? s.colors.cap : s.colors.unlit;
+                ctx.fillRect(x, y, column, SEGMENT_PX);
+            }
+        }
     }
 
     // --- The shortcut buttons (T8.2) ---------------------------------------
@@ -1477,6 +1586,8 @@
             renderAgenda(now);
         }
 
+        expireSpectrum(performance.now());
+
         // The language the PC asked for, not the host's (T6.11). `undefined`
         // means "whatever this runtime thinks", which on the device is the
         // phone's system locale and in a browser is the developer's -- so the
@@ -1491,5 +1602,5 @@
         });
     }
 
-    window.DeskPanel.defineTheme('neon', { render, tick });
+    window.DeskPanel.defineTheme('neon', { render, tick, spectrum });
 })();

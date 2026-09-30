@@ -136,6 +136,15 @@ public final class PanelService extends Service implements PcPoller.Listener {
          * @param json a JSON object literal, already safe to interpolate
          */
         void onData(String json);
+
+        /**
+         * One spectrum frame for the page (T8.5), twenty a second while the
+         * PC streams them. Not replayed to a window that registers late: a
+         * frame is stale a twentieth of a second after it arrives.
+         *
+         * @param frame 32 lowercase hex digits, checked by {@link SpectrumFrame}
+         */
+        void onSpectrum(String frame);
     }
 
     private static final String CHANNEL_ID = "panel";
@@ -344,6 +353,9 @@ public final class PanelService extends Service implements PcPoller.Listener {
      */
     private DataPoller dataPoller;
 
+    /** The spectrum bars' stream (T8.5), on the data poller's schedule. */
+    private SpectrumStream spectrumStream;
+
     /**
      * Held while the PC is offline, and only then. Online, {@code
      * FLAG_KEEP_SCREEN_ON} already keeps the device up and this would be a
@@ -458,6 +470,8 @@ public final class PanelService extends Service implements PcPoller.Listener {
         PcHosts hosts = PcHosts.parse(getString(R.string.pc_host));
         poller = new PcPoller(hosts, this);
         dataPoller = new DataPoller(hosts, new PanelLink(BuildConfig.PANEL_KEY), this::onData);
+        spectrumStream = new SpectrumStream(hosts, new PanelLink(BuildConfig.PANEL_KEY),
+                this::onSpectrum);
 
         // RECEIVER_NOT_EXPORTED because nothing outside the system should be
         // able to tell this app what the battery is doing.
@@ -499,6 +513,17 @@ public final class PanelService extends Service implements PcPoller.Listener {
         nightWindow = NightWindow.parse(json);
         updateNight();
         publish();
+    }
+
+    /**
+     * One spectrum frame, on the main thread, from {@link SpectrumStream}.
+     * Forwarded and never held: see {@link Panel#onSpectrum}.
+     */
+    private void onSpectrum(String frame) {
+        Panel target = panel;
+        if (target != null) {
+            target.onSpectrum(frame);
+        }
     }
 
     /**
@@ -822,6 +847,7 @@ public final class PanelService extends Service implements PcPoller.Listener {
     public void onDestroy() {
         poller.stop();
         dataPoller.stop();
+        spectrumStream.stop();
         unregisterReceiver(batteryReceiver);
         unregisterReceiver(wakeReceiver);
         // Before the lock, and not optional: an alarm outliving the service it
@@ -949,9 +975,13 @@ public final class PanelService extends Service implements PcPoller.Listener {
             // keep a visible panel current, and there is no visible panel
             // while the PC is away (T5.1 step 4).
             dataPoller.start();
+            // Beside the data poll and for the same reason: the bars exist to
+            // move on a lit panel, and the PC captures only while this reads.
+            spectrumStream.start();
             bringPanelToFront();
         } else {
             dataPoller.stop();
+        spectrumStream.stop();
             // Dropped, not kept. It is only ever written by a successful
             // fetch, so holding it would mean the wake after a night offline
             // replays last night's prices and weather -- with stale:false,

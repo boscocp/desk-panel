@@ -554,6 +554,20 @@ Verified on macOS 26.5 (Apple Silicon) on 2026-09-29: `verify_login_scope.py` ex
 and `POST /action/*` answer from the agent. **Not yet verified: that nothing answers at the
 login window**, which needs a logout and a second machine (T3.10's behaviour block).
 
+### The spectrum bars (macOS)
+
+`spectrum = true` in `config.toml` puts Winamp-style bars over the panel's buttons, following
+what this Mac is playing (T8.5, [ADR 0021](adr/0021-the-spectrum-is-a-stream.md)). It needs
+macOS 14.2 or newer and the Command Line Tools (`xcode-select --install`), because
+`install_agent.sh` builds the small Swift helper `server/mac/spectrum-tap`. To build it by hand:
+`swiftc -O server/mac/spectrum_tap.swift -o server/mac/spectrum-tap`.
+
+The first time the panel watches, macOS asks to let **python3** record system audio. Allow it,
+or turn it on later in System Settings → Privacy & Security → Screen & System Audio Recording →
+System Audio Recording Only. Until then the bars stay flat and the log says
+`the source has sent no audio`. Capture runs only while the panel is lit and connected, and only
+the sixteen levels leave the Mac.
+
 ## Verifying the login scope
 
 `probe.py` proves the server answers. It cannot prove *why* it answers, and a Windows Service

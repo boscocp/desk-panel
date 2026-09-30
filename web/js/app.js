@@ -227,6 +227,18 @@
         paintData();
     };
 
+    // MainActivity.onSpectrum (T8.5): one frame of the spectrum bars, twenty a
+    // second while the PC streams them. Dropped while the panel is dark, and
+    // not held like a payload: a frame is out of date a twentieth of a second
+    // after it arrives.
+    window.onSpectrum = (hex) => {
+        const bars = parseSpectrum(hex);
+        if (!bars || !visible()) {
+            return;
+        }
+        host.spectrum(bars);
+    };
+
     // --- The shortcut buttons (T8.2) ---------------------------------------
     // The page cannot make the request. `web/` has no network code at all --
     // the WebView is served from a virtual https origin, so reaching the PC's

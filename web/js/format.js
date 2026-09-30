@@ -1624,6 +1624,73 @@ function marketClosed(payload) {
     return !!payload && payload.b3Open === false;
 }
 
+// --- The spectrum bars (T8.5, ADR 0021) -----------------------------------
+//
+// A frame arrives from native as 32 hex digits: sixteen bars, bass to treble,
+// each 0..255. What the page draws is not the frame itself but the frame run
+// through a little physics, the way Winamp's analyser moved: a bar jumps up
+// at once and falls at a fixed rate, and a cap sits on each bar's recent
+// peak, holds there for a moment, then drops. Without the fall, twenty
+// frames a second read as flicker; with it they read as music.
+
+const SPECTRUM_BARS = 16;
+// Full height to nothing in about 0.6 s.
+const SPECTRUM_FALL_PER_S = 1.6;
+// The cap holds this long at a new peak, then falls slower than the bar.
+const SPECTRUM_PEAK_HOLD_MS = 400;
+const SPECTRUM_PEAK_FALL_PER_S = 0.9;
+
+// The frame's bars as numbers from 0 to 1, or null for anything that is not
+// exactly a frame. Native has already checked it (SpectrumFrame.java); this
+// is the page not trusting that.
+function parseSpectrum(hex) {
+    if (typeof hex !== 'string' || !/^[0-9a-f]{32}$/.test(hex)) {
+        return null;
+    }
+    const bars = [];
+    for (let i = 0; i < SPECTRUM_BARS; i++) {
+        bars.push(parseInt(hex.substr(i * 2, 2), 16) / 255);
+    }
+    return bars;
+}
+
+// A fresh state: every bar and cap at the floor.
+function spectrumState() {
+    const zero = () => new Array(SPECTRUM_BARS).fill(0);
+    return { levels: zero(), peaks: zero(), held: zero() };
+}
+
+// The state `dtMs` later, with `target` the latest frame (from
+// parseSpectrum). Pure: returns a new state and leaves the old one alone.
+// `held` is how long each cap has sat at its peak, in ms.
+function spectrumStep(state, target, dtMs) {
+    const dt = Math.max(0, dtMs) / 1000;
+    const next = spectrumState();
+    for (let i = 0; i < SPECTRUM_BARS; i++) {
+        const wanted = target ? target[i] : 0;
+        const level = Math.max(wanted, state.levels[i] - SPECTRUM_FALL_PER_S * dt);
+        let peak = state.peaks[i];
+        let held = state.held[i] + dtMs;
+        if (level >= peak) {
+            peak = level;
+            held = 0;
+        } else if (held > SPECTRUM_PEAK_HOLD_MS) {
+            peak = Math.max(level, peak - SPECTRUM_PEAK_FALL_PER_S * dt);
+        }
+        next.levels[i] = level;
+        next.peaks[i] = peak;
+        next.held[i] = held;
+    }
+    return next;
+}
+
+// Whether nothing is left to animate: every bar and cap on the floor, so the
+// drawing loop can stop until the next frame instead of running at 60 fps
+// to draw the same empty picture.
+function spectrumAtRest(state) {
+    return state.levels.every((v) => v <= 0) && state.peaks.every((v) => v <= 0);
+}
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         formatPrice, formatRate, formatPair, formatTemp, formatChange, changeClass,
@@ -1640,5 +1707,7 @@ if (typeof module !== 'undefined' && module.exports) {
         shortcutsFor,
         nextEvent, untilText, agendaFields, agendaRows, agendaSegments, agendaAlert,
         marketClosed,
+        parseSpectrum, spectrumState, spectrumStep, spectrumAtRest,
+        SPECTRUM_BARS, SPECTRUM_FALL_PER_S, SPECTRUM_PEAK_HOLD_MS,
     };
 }

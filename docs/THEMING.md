@@ -658,6 +658,24 @@ writes a soft bell from any notes. Without `chime` the theme gets `web/sounds/ch
 once per gesture, when the finger lifts. On Windows every set is a PowerShell compile, so a drag
 must not send forty. `done(ok, state)` gets the level the PC then measured, as a string.
 
+## The spectrum bars
+
+T8.5, [ADR 0021](adr/0021-the-spectrum-is-a-stream.md). While the PC streams them, core calls
+your theme's optional `spectrum(bars, root)` about twenty times a second. `bars` is sixteen
+numbers from 0 to 1, bass to treble, already checked by `parseSpectrum`. It is never called while
+the panel is dark. Register it beside `render` and `tick`:
+
+```js
+window.DeskPanel.defineTheme('mine', { render, tick, spectrum });
+```
+
+A theme without it has no bars, and the frames go nowhere. The movement is `format.js`'s, not
+yours: keep a `spectrumState()`, advance it on each animation frame with
+`spectrumStep(state, latestBars, dtMs)` (a bar jumps up and falls at a fixed rate, and a cap holds
+on the peak before dropping), and stop your loop once `spectrumAtRest(state)`. neon draws
+segmented columns on a `<canvas>` over the buttons, and hides it 15 s after the last frame.
+
+
 ## Checking it
 
 ```bash

@@ -245,6 +245,17 @@ night_end = "07:00"
 #   false  the panel follows the login alone, as it did before.
 follow_display = true
 
+# The spectrum bars over the buttons, Winamp-style: what this PC is playing
+# right now, sixteen bars from bass to treble, streamed to the panel twenty
+# times a second (ADR 0021). Only 16 levels leave the PC, never the audio, and
+# capture runs only while the panel is lit and watching.
+#   false  the default: nothing is captured and the space stays empty.
+#   true   macOS 14.2 or newer only, for now. It needs the helper built once
+#          (install_agent.sh does it) and asks once for "System Audio
+#          Recording" in System Settings > Privacy & Security. Windows and
+#          Linux say at startup that they cannot capture yet.
+spectrum = false
+
 # Which theme renders the panel — the name of a directory in the APK's
 # web/themes/. Every theme is packaged, so switching one is a restart of this
 # server and not a reinstall of the app.
