@@ -669,8 +669,16 @@ function normaliseEvent(raw) {
  * @returns {event, start, end, allDay, inProgress, source, title} or null
  */
 function nextEvent(events, now) {
+    const ranked = rankedEvents(events, now);
+    return ranked.length ? ranked[0] : null;
+}
+
+// Every event still on the card, best first, by nextEvent's order. The same
+// ranking for the first row and the second, so the card never shows as
+// "next" something nextEvent would have put behind it.
+function rankedEvents(events, now) {
     if (!Array.isArray(events) || !(now instanceof Date) || Number.isNaN(now.getTime())) {
-        return null;
+        return [];
     }
     const today = localDay(now);
     const ranked = [];
@@ -707,12 +715,10 @@ function nextEvent(events, now) {
         || (a.source < b.source ? -1 : a.source > b.source ? 1 : 0)
         || ((a.title || '') < (b.title || '') ? -1 : (a.title || '') > (b.title || '') ? 1 : 0)
     ));
-    if (!ranked.length) {
-        return null;
+    for (const item of ranked) {
+        delete item.tier;
     }
-    const best = ranked[0];
-    delete best.tier;
-    return best;
+    return ranked;
 }
 
 /**
@@ -846,6 +852,103 @@ function agendaFields(agenda, now, language) {
         when = untilText(next.start, now, language);
     }
     return { title: next.title || w.untitled, when, until, inProgress: next.inProgress, failed };
+}
+
+// How long is left of a meeting in progress, as the right-hand end of its
+// row: "58 min", "1 h 10". Rounded up like untilText, so a meeting with 30
+// seconds left says "1 min" and not "0 min".
+function remainingText(end, now) {
+    const minutes = Math.max(1, Math.ceil((end - now) / 60000));
+    if (minutes < 60) {
+        return `${minutes} min`;
+    }
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return m ? `${h} h ${String(m).padStart(2, '0')}` : `${h} h`;
+}
+
+// "até 14:30", or with the day when it ends on another one.
+function untilEnd(event, now, w) {
+    const endDays = localDay(event.end) - localDay(now);
+    const endText = endDays === 0 ? hhmm(event.end) : `${dayWord(event.end, endDays, w)} ${hhmm(event.end)}`;
+    return `${w.until} ${endText}`;
+}
+
+function agendaRow(event, now, language, primary) {
+    const w = strings(language).agenda;
+    const row = {
+        title: event.title || w.untitled,
+        icon: 'clock',
+        live: false,
+        when: '',
+        aside: null,
+        progress: null,
+    };
+    if (event.allDay) {
+        const days = localDay(event.start) - localDay(now);
+        row.icon = 'calendar';
+        row.when = days <= 0 ? w.allDay : dayWord(event.start, days, w);
+    } else if (event.inProgress) {
+        row.icon = 'live';
+        row.live = true;
+        row.when = untilEnd(event, now, w);
+        row.aside = remainingText(event.end, now);
+        const span = event.end - event.start;
+        row.progress = span > 0 ? Math.min(1, Math.max(0, (now - event.start) / span)) : null;
+    } else {
+        const minutes = Math.ceil((event.start - now) / 60000);
+        const today = localDay(event.start) === localDay(now);
+        if (!primary && today && minutes >= 60) {
+            // The second row has room for a time or a title, not both at the
+            // countdown's length: "14:30" says what "em 3 h 10" does.
+            row.when = hhmm(event.start);
+        } else {
+            row.when = untilText(event.start, now, language);
+        }
+        // "em 25 min" on the first row, and the clock time beside it for
+        // whoever wants to know when that is.
+        if (primary && today) {
+            row.aside = hhmm(event.start);
+        }
+    }
+    return row;
+}
+
+/**
+ * The AGENDA card as rows, for a theme that shows more than the next event:
+ * up to two, best first by nextEvent's ranking, or null when there is no card
+ * to draw (the same two cases as agendaFields).
+ *
+ *   rows     [{ title, icon, live, when, aside, progress }], at most two, or
+ *            one when there is a failure line to make room for:
+ *              icon      'live' (in progress), 'clock' (timed), 'calendar'
+ *                        (all day) -- a name, never markup
+ *              when      "até 23:30" in progress, "em 25 min", "amanhã
+ *                        09:00", "o dia todo"; on the second row a timed
+ *                        event today and an hour or more away is "14:30"
+ *              aside     the right-hand end of the row: what is left of a
+ *                        meeting in progress ("58 min"), or the start time of
+ *                        a countdown today on the first row, or null
+ *              progress  0..1 through a meeting in progress, else null
+ *   none     "nada à vista" when there is nothing and no failure, else null
+ *   failed   as agendaFields
+ *
+ * @param agenda   the payload's `agenda`
+ * @param now      Date, the phone's clock
+ * @param language the payload's `language`
+ */
+function agendaRows(agenda, now, language) {
+    if (!agenda || typeof agenda !== 'object' || !(Number(agenda.accounts) > 0)) {
+        return null;
+    }
+    const w = strings(language).agenda;
+    const failed = failedLine(agenda.failed, w);
+    const events = rankedEvents(agenda.events, now).slice(0, failed ? 1 : 2);
+    return {
+        rows: events.map((event, i) => agendaRow(event, now, language, i === 0)),
+        none: events.length || failed ? null : w.none,
+        failed,
+    };
 }
 
 function weatherLabel(code, language) {
@@ -1407,7 +1510,7 @@ if (typeof module !== 'undefined' && module.exports) {
         sparklinePath,
         formatBattery, batteryFields, tempClass, BATTERY_WARN_C, BATTERY_HOT_C,
         shortcutsFor,
-        nextEvent, untilText, agendaFields,
+        nextEvent, untilText, agendaFields, agendaRows,
         marketClosed,
     };
 }

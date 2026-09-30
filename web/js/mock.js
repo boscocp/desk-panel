@@ -70,7 +70,8 @@
     // 25 minutes out, one an hour after it with a title long enough to have to
     // ellipsise, and an all-day event behind both. `?agenda=off` sends a PC
     // with no calendar connected, which leaves the card reserved -- the state
-    // a theme is most likely to forget to draw.
+    // a theme is most likely to forget to draw. `?agenda=live` starts the
+    // first meeting 35 minutes ago, for the chip and the progress bar.
     const AGENDA = (() => {
         const asked = new URLSearchParams(location.search).get('agenda');
         if (asked === 'off') {
@@ -86,7 +87,8 @@
         return {
             accounts: 2,
             events: [
-                { start: minutes(25), end: minutes(55), allDay: false,
+                { start: minutes(asked === 'live' ? -35 : 25),
+                  end: minutes(asked === 'live' ? 25 : 55), allDay: false,
                   source: 'google/personal', title: 'Standup' },
                 { start: minutes(85), end: minutes(145), allDay: false,
                   source: 'microsoft/work',

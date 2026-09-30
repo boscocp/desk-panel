@@ -1041,54 +1041,122 @@
     // back to reserved: empty, titled, and marked for e2e/layout/measure.js
     // exactly as it was before this task. A failed account costs its own line
     // and nothing else -- the other provider's meeting is still the next one.
+    // The AGENDA card's three pictures, as stroke paths on a 24-unit grid.
+    // Names come from agendaRows; what they look like is this theme's. A
+    // name this table does not know draws nothing, like an unknown weather
+    // glyph: the row's words still say what it is.
+    const AGENDA_ICONS = {
+        live: 'M8 5.5v13l10-6.5z',
+        clock: 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18M12 7v5l3 2',
+        calendar: 'M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1M4 10h16M9 3v4M15 3v4',
+    };
+
+    function agendaIcon(name) {
+        const d = AGENDA_ICONS[name];
+        if (!d) {
+            return null;
+        }
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('class', `a-icon a-icon-${name}`);
+        svg.setAttribute('viewBox', '0 0 24 24');
+        // Decoration, like the sparklines: the row's words carry the meaning.
+        svg.setAttribute('aria-hidden', 'true');
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', d);
+        svg.appendChild(path);
+        return svg;
+    }
+
+    // Ten segments, filled by how far through the meeting the clock is.
+    // Segments rather than a smooth bar: at a redraw a minute the bar moves
+    // in steps anyway, and a HUD's segments say so honestly. No animation --
+    // at night the panel keeps still, and a bar that only ever grows needs none.
+    const AGENDA_SEGMENTS = 10;
+
+    function agendaBar(progress) {
+        const bar = el('div', null, 'a-bar');
+        const lit = Math.round(progress * AGENDA_SEGMENTS);
+        for (let i = 0; i < AGENDA_SEGMENTS; i += 1) {
+            bar.appendChild(el('i', null, i < lit ? 'on' : null));
+        }
+        return bar;
+    }
+
+    // The first row, which is the one read from the chair: a head line (the
+    // chip or the icon, when, and what is left), the title, and the bar while
+    // the meeting runs.
+    function agendaLead(row) {
+        const lead = el('div', null, 'a-lead' + (row.live ? ' a-live' : ''));
+        const head = el('div', null, 'a-head');
+        if (row.live) {
+            // The word rather than a colour alone: a chip says "now" to
+            // anybody, and a screen reader reads it.
+            const chip = el('span', null, 'a-chip');
+            chip.textContent = words.agenda.now.toUpperCase();
+            head.appendChild(chip);
+        } else {
+            const icon = agendaIcon(row.icon);
+            if (icon) {
+                head.appendChild(icon);
+            }
+        }
+        const when = el('span', null, 'a-when');
+        when.textContent = row.when;
+        head.appendChild(when);
+        if (row.aside) {
+            const aside = el('span', null, 'a-aside');
+            aside.textContent = row.aside;
+            head.appendChild(aside);
+        }
+        lead.appendChild(head);
+        const title = el('div', null, 'a-title');
+        title.textContent = row.title;
+        // The whole title for a reader that speaks the DOM; the line ellipsises.
+        title.title = row.title;
+        lead.appendChild(title);
+        if (row.progress !== null) {
+            lead.appendChild(agendaBar(row.progress));
+        }
+        return lead;
+    }
+
+    // The second row: one line, icon, when, title.
+    function agendaNext(row) {
+        const next = el('div', null, 'a-next' + (row.live ? ' a-live' : ''));
+        const icon = agendaIcon(row.icon);
+        if (icon) {
+            next.appendChild(icon);
+        }
+        const when = el('span', null, 'a-when');
+        when.textContent = row.when;
+        const title = el('span', null, 'a-title');
+        title.textContent = row.title;
+        title.title = row.title;
+        next.append(when, title);
+        return next;
+    }
+
     function renderAgenda(now) {
         agendaMinute = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-        const fields = agendaFields(agenda, now, words.tag);
+        const card = agendaRows(agenda, now, words.tag);
         els.agenda.textContent = '';
-        if (!fields) {
+        if (!card) {
             els.agenda.setAttribute('data-reserved', '');
             return;
         }
         els.agenda.removeAttribute('data-reserved');
         const body = el('div', null, 'a-body');
-        // In progress, the colour says "now" and the line says until when:
-        // "agora · até 14:30" is 17 characters and the card holds about 14 at
-        // this size, so the whole phrase ellipsised to "agora · até 15..." --
-        // the one number the line exists for, cut off. The "agora" is still
-        // in the line, visually hidden, because a colour is not something a
-        // screen reader says -- and text rather than an aria-label, which
-        // ARIA 1.2 does not allow on a plain div.
-        const live = fields.inProgress && fields.until;
-        const shown = live ? fields.until : fields.when;
-        if (shown) {
-            // Smaller past fourteen characters. Measured in headless Chrome at
-            // 872x392: "tomorrow 09:00", fourteen, is 187px of the line's 200 at
-            // 32px, and "até amanhã 10:00", sixteen -- a meeting in progress
-            // that ends tomorrow -- is 217, so the time was the part cut off.
-            // At 24px the longest, "until tomorrow 10:00", is 184.
-            // Shrinking one line beats cutting off its time.
-            const long = shown.length > 14;
-            const when = el('div', null,
-                'a-when' + (fields.inProgress ? ' a-live' : '') + (long ? ' a-long' : ''));
-            if (live) {
-                const hidden = el('span', null, 'sr-only');
-                hidden.textContent = `${words.agenda.now} · `;
-                when.appendChild(hidden);
-            }
-            when.appendChild(document.createTextNode(shown));
-            body.appendChild(when);
+        card.rows.forEach((row, i) => {
+            body.appendChild(i === 0 ? agendaLead(row) : agendaNext(row));
+        });
+        if (card.none) {
+            const none = el('div', null, 'a-none');
+            none.textContent = card.none;
+            body.appendChild(none);
         }
-        if (fields.title) {
-            const title = el('div', null, 'a-title');
-            title.textContent = fields.title;
-            // The whole title for a reader that speaks the DOM, since the
-            // line itself ellipsises.
-            title.title = fields.title;
-            body.appendChild(title);
-        }
-        if (fields.failed) {
+        if (card.failed) {
             const failed = el('div', null, 'a-failed');
-            failed.textContent = fields.failed;
+            failed.textContent = card.failed;
             body.appendChild(failed);
         }
         els.agenda.appendChild(body);

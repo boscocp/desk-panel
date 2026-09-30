@@ -562,6 +562,23 @@ const fields = agendaFields(payload.agenda, new Date(), words.tag);
 // { title, when, until, inProgress, failed }: strings, ready to draw
 ```
 
+A theme with room for more than one line can ask for rows instead. Neon does,
+and draws them as a quest tracker (a chip, a segmented bar, one line for the
+next event):
+
+```js
+const card = agendaRows(payload.agenda, new Date(), words.tag);
+// null: as above
+// { rows: [{ title, icon, live, when, aside, progress }], none, failed }
+//   at most two rows, one when there is a failure line to make room for;
+//   icon is 'live' | 'clock' | 'calendar', a name and never markup;
+//   progress is 0..1 through a meeting in progress, else null
+```
+
+`agendaRows` ranks exactly as `agendaFields` does, so its first row is always
+the event `agendaFields` would have shown. `?agenda=live` in the mock starts the
+first meeting half an hour ago, for the chip and the bar.
+
 - **Which event, and what the countdown says, is `agendaFields`'s decision.**
   An event in progress beats the next one; a timed event later today beats an
   all-day one; ties break the same way every time, so the line never flickers

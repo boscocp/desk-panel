@@ -15,7 +15,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
-const { nextEvent, untilText, agendaFields, LANGUAGES } = require('../js/format.js');
+const { nextEvent, untilText, agendaFields, agendaRows, LANGUAGES } = require('../js/format.js');
 
 // An RFC 3339 instant for a *local* wall-clock time, with the local offset,
 // which is what a provider sends once the server has normalised it.
@@ -362,4 +362,74 @@ test('every language has every agenda word', () => {
         assert.deepEqual(Object.keys(table.agenda).sort(), Object.keys(reference).sort(), tag);
         assert.equal(table.agenda.weekdays.length, 7, tag);
     }
+});
+
+
+// agendaRows: the neon card's two rows (the quest tracker).
+
+function card(events, failed = []) {
+    return { accounts: 1, events, failed };
+}
+
+test('agendaRows: a meeting in progress carries its end, what is left and how far through it is', () => {
+    // 13:35, in a 13:00-14:00 meeting: 35 of 60 minutes gone.
+    const out = agendaRows(card([timed(at(2026, 9, 29, 13, 0), at(2026, 9, 29, 14, 0))]), NOW, 'pt-BR');
+    assert.equal(out.rows.length, 1);
+    const [row] = out.rows;
+    assert.equal(row.icon, 'live');
+    assert.equal(row.live, true);
+    assert.equal(row.when, 'até 14:00');
+    assert.equal(row.aside, '25 min');
+    assert.ok(Math.abs(row.progress - 35 / 60) < 1e-9);
+    assert.equal(out.none, null);
+});
+
+test('agendaRows: two events, the second on one compact line', () => {
+    const out = agendaRows(card([
+        timed(at(2026, 9, 29, 17, 0), at(2026, 9, 29, 17, 30), 'google/personal', '1:1'),
+        timed(at(2026, 9, 29, 13, 50), at(2026, 9, 29, 14, 20)),
+        timed(at(2026, 9, 30, 9, 0), at(2026, 9, 30, 9, 30), 'google/personal', 'third'),
+    ]), NOW, 'pt-BR');
+    assert.deepEqual(out.rows.map((r) => r.title), ['Standup', '1:1']);
+    // First row: the countdown, with the clock time beside it.
+    assert.equal(out.rows[0].when, 'em 15 min');
+    assert.equal(out.rows[0].aside, '13:50');
+    assert.equal(out.rows[0].progress, null);
+    // Second row, three hours away today: the time, not "em 3 h 25".
+    assert.equal(out.rows[1].when, '17:00');
+    assert.equal(out.rows[1].aside, null);
+    assert.equal(out.rows[1].icon, 'clock');
+});
+
+test('agendaRows: tomorrow keeps its day, and an all-day event is a calendar', () => {
+    const out = agendaRows(card([
+        timed(at(2026, 9, 30, 9, 0), at(2026, 9, 30, 9, 30)),
+        { start: '2026-09-29', end: '2026-09-30', allDay: true, source: 'google/personal', title: 'Feriado' },
+    ]), NOW, 'en');
+    assert.deepEqual(out.rows.map((r) => [r.icon, r.when]),
+        [['calendar', 'all day'], ['clock', 'tomorrow 09:00']]);
+});
+
+test('agendaRows: a failure takes the second row', () => {
+    const out = agendaRows(card([
+        timed(at(2026, 9, 29, 14, 0), at(2026, 9, 29, 15, 0)),
+        timed(at(2026, 9, 29, 16, 0), at(2026, 9, 29, 17, 0)),
+    ], [{ source: 'microsoft/work', reason: 'reconnect' }]), NOW, 'pt-BR');
+    assert.equal(out.rows.length, 1);
+    assert.equal(out.failed, 'microsoft/work: reconectar');
+});
+
+test('agendaRows: nothing ahead says so, unless an account failed', () => {
+    assert.equal(agendaRows(card([]), NOW, 'pt-BR').none, 'nada à vista');
+    assert.equal(agendaRows(card([], ['google/personal']), NOW, 'pt-BR').none, null);
+    assert.equal(agendaRows({ accounts: 0, events: [] }, NOW, 'pt-BR'), null);
+    assert.equal(agendaRows(undefined, NOW, 'pt-BR'), null);
+});
+
+test('agendaRows: the last seconds of a meeting are 1 min, and over an hour is "1 h 10"', () => {
+    const almost = new Date(2026, 8, 29, 13, 59, 30);
+    const one = agendaRows(card([timed(at(2026, 9, 29, 13, 0), at(2026, 9, 29, 14, 0))]), almost, 'pt-BR');
+    assert.equal(one.rows[0].aside, '1 min');
+    const long = agendaRows(card([timed(at(2026, 9, 29, 13, 0), at(2026, 9, 29, 14, 45))]), NOW, 'pt-BR');
+    assert.equal(long.rows[0].aside, '1 h 10');
 });
