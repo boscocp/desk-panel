@@ -10,6 +10,8 @@ Redmi Note 10 (Android 12, MIUI 14) lying in a landscape stand, powered from the
 
 ![The panel on the Redmi Note 10 in its stand: clock, B3 quotes, FX, crypto, weather and the two mute buttons](docs/images/panel.jpg)
 
+![A screen capture of the neon panel: the clock, B3 marked FECHADO after hours, FX and crypto with sparklines, the weather, and the AGENDA card with a meeting in progress, its time left and a progress bar](docs/images/panel-screen.png)
+
 ## Why this exists
 
 USB ports stay energised in S5, so a phone on your desk never learns that the PC went away.
