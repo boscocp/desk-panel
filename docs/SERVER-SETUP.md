@@ -80,7 +80,7 @@ read [ADR 0017](adr/0017-calendars-are-personal-data.md) first. In short:
 - **Read-only, primary calendar only.** Google `calendar.events.owned.readonly`, Microsoft
   `Calendars.ReadBasic`. The server refuses and discards any grant broader than that.
 - **Tokens stay on this PC**, in `server/calendar-tokens.json` beside the config: gitignored,
-  mode 0600, never in `config.toml`, never on the phone.
+  mode 0600, never in the config file, never on the phone.
   - **On Windows, clone the repository inside your own profile** (`C:\Users\<you>\...`) and
     outside any folder OneDrive syncs. Mode bits do nothing there, so the file is exactly as
     private as the folder it sits in.
@@ -92,27 +92,65 @@ You register your own OAuth client with each provider. Nobody ships a shared one
 
 ### Google
 
+The console reaches the same settings by two routes, and which one you land on depends on where
+you click from:
+
+- **Google Auth Platform**, with the sections *Branding*, *Audience*, *Clients* and *Data
+  access*. The steps below use these names.
+- **APIs & Services → Credentials → Create credentials**, a wizard that walks through
+  *Credential type*, *Scopes* and *OAuth client ID* in one go. Opening the API's page and
+  pressing *Create credentials* lands here. It writes the same configuration, so finishing the
+  wizard is fine; only publishing (step 5) is not in it.
+
+With the console in Portuguese the names are *Público-alvo*, *Clientes*, *Acesso a dados*,
+*APIs e serviços → Credenciais → Criar credenciais* and *App para computador*.
+
 1. In the [Google Cloud console](https://console.cloud.google.com/), create a project and enable
    the **Google Calendar API** for it.
 2. Under **Google Auth Platform**, configure the consent screen with user type **External**, and
    add your own address as a test user.
-3. Under **Data access**, add exactly one scope,
-   `https://www.googleapis.com/auth/calendar.events.owned.readonly`.
-4. Under **Clients**, create an OAuth client of type **Desktop app**. Copy its id and secret into
-   `google_client_id` and `google_client_secret` in `config.toml`. Google's own documentation
-   says a Desktop client's secret is "obviously not treated as a secret". It stays in the
-   gitignored file anyway.
+3. Under **Data access** (or the wizard's *Scopes* step), add exactly one scope,
+   `https://www.googleapis.com/auth/calendar.events.owned.readonly`, and remove anything the
+   console pre-filled.
+   - **Mind the `.owned`.** The picker also offers `calendar.events.readonly` ("See events on all
+     your calendars") and `calendar.calendarlist.readonly`, and they sit next to each other.
+     Neither is accepted: `oauth.check_scope` refuses the grant and the login fails. If the
+     picker's filter does not show the `.owned` one, paste the full URL into *Manually add
+     scopes* at the bottom of the panel.
+   - It is listed under *sensitive scopes*, with a warning that approval is needed. That is
+     expected, and step 5 is why you do not need to submit for verification.
+4. Under **Clients**, create an OAuth client of type **Desktop app**. Not *Android*, even though
+   the panel runs on a phone: the phone never talks to Google. This PC does the login, and a
+   Desktop client is the type that allows the `127.0.0.1` redirect the login command listens on.
+   Copy its id and secret into `google_client_id` and `google_client_secret` in your config file.
+   Google's own documentation says a Desktop client's secret is "obviously not treated as a
+   secret". It stays in the gitignored file anyway.
 5. Under **Audience**, **publish the app** ("In production"). This step is not optional:
    - A consent screen left in "Testing" issues refresh tokens that **expire after 7 days**, and
      the card would say `reconnect` every week
      ([Google](https://developers.google.com/identity/protocols/oauth2)).
    - A published app nobody has verified is allowed for personal use by fewer than 100 users.
-     You click through the "Google hasn't verified this app" warning once, at login.
+     You click through the "Google hasn't verified this app" warning once, at login: choose
+     **Advanced**, then **Go to *your app name* (unsafe)**, the last link on the page. The
+     developer address above it is a `mailto:` link and only opens your email app. The name
+     shown is the one under **Branding**, so if it is not the project you just configured, the
+     client id in your config belongs to another project.
+   - **To check it:** *Audience* shows *Publishing status*, which must read *In production*.
+     If it reads *Testing*, press *Publish app* there. At login, a published app shows the
+     "Google hasn't verified this app" warning; a testing one says it is only available to
+     test users. That is a hint, not a proof, so read the status on the page.
 
-Then list the account and connect it from this PC:
+Then list the account and connect it from this PC. In `config.toml`:
 
 ```toml
 calendar_accounts = [{ provider = "google", name = "personal" }]
+```
+
+or, if you are still on the older `config.json` (it is read whenever no `config.toml` sits
+beside it, see "If you already have a `config.json`" above):
+
+```json
+"calendar_accounts": [{ "provider": "google", "name": "personal" }]
 ```
 
 ```bash
