@@ -226,7 +226,25 @@ public final class DataPoller {
             Log.w(Markers.TAG, Markers.action(String.valueOf(candidate), "rejected"));
             return false;
         }
-        final String url = Actions.urlFor(link, hosts.active(), id);
+        return dispatch(id, Actions.urlFor(link, hosts.active(), id), onResult);
+    }
+
+    /**
+     * The volume bar's press (T8.4): {@code POST /action/volume/<level>}, and
+     * the level the PC then reports arrives as the result's state. False for
+     * a level outside 0..100, or while the PC is away.
+     */
+    public boolean invokeVolume(int level, ResultListener onResult) {
+        String url = Actions.volumeUrlFor(link, hosts.active(), level);
+        if (url == null) {
+            Log.w(Markers.TAG, Markers.action(Actions.VOLUME, "rejected"));
+            return false;
+        }
+        return dispatch(Actions.VOLUME, url, onResult);
+    }
+
+    /** Posts {@code url} on the poller thread and reports as {@code id}. */
+    private boolean dispatch(final String id, final String url, ResultListener onResult) {
         final ScheduledExecutorService owner = scheduler;
         if (!running || owner == null || url == null) {
             Log.i(Markers.TAG, Markers.action(id, "offline"));

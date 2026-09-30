@@ -238,6 +238,47 @@
     // question only a theme can answer because only a theme has any glow
     // (web/themes/neon/theme.css redefines three custom properties under this
     // attribute; plain has nothing to dim and does nothing).
+    // The meeting alert (T9.5): `data-alert="soon"` or "chime" on <html>
+    // while a meeting is inside its window, for the theme's CSS to draw.
+    // An attribute, like `data-night`, so a theme with no rule for it still
+    // renders; the bell on the AGENDA row is the part every theme gets.
+    let alertLevel = null;
+
+    function alert(level) {
+        const next = level === 'soon' || level === 'chime' ? level : null;
+        if (next === alertLevel) {
+            return;
+        }
+        alertLevel = next;
+        if (next) {
+            document.documentElement.setAttribute('data-alert', next);
+        } else {
+            document.documentElement.removeAttribute('data-alert');
+        }
+    }
+
+    // The sound every theme gets unless it names its own, as
+    // defineTheme(name, { ..., chime: 'themes/<name>/chime.wav' }).
+    const DEFAULT_CHIME = 'sounds/chime.wav';
+
+    // One soft chime (T9.5). Never throws: a missing file, an unsupported
+    // format or a WebView that refuses to play costs a console line and
+    // nothing else -- the bell on the card has already said it.
+    function chime(volume) {
+        const src = (current && typeof current.chime === 'string' && current.chime)
+            || DEFAULT_CHIME;
+        try {
+            const audio = new Audio(src);
+            audio.volume = Math.min(1, Math.max(0, Number(volume) || 0));
+            const playing = audio.play();
+            if (playing && typeof playing.catch === 'function') {
+                playing.catch((err) => console.warn('desk-panel: the chime did not play', err));
+            }
+        } catch (err) {
+            console.warn('desk-panel: the chime did not play', err);
+        }
+    }
+
     function night(on) {
         if (on) {
             document.documentElement.setAttribute('data-night', 'on');
@@ -253,5 +294,7 @@
         tick: tick,
         blackout: blackout,
         night: night,
+        alert: alert,
+        chime: chime,
     };
 })();

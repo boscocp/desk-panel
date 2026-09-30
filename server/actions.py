@@ -14,6 +14,7 @@ Standard library only, like the rest of `server/`.
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -38,7 +39,17 @@ MUTED, UNMUTED, UNKNOWN = "muted", "unmuted", "unknown"
 # Every id this server will ever answer to. Config says which of these are
 # *enabled*; it can never add one, which is the half of ADR 0015 that makes a
 # missing authentication layer defensible.
-CATALOGUE = ("mute-audio", "mute-mic")
+# The two buttons: each press flips a mute and reports what the mixer holds.
+TOGGLES = ("mute-audio", "mute-mic")
+
+CATALOGUE = TOGGLES + ("volume",)
+
+# The one action that carries a value (T8.4, ADR 0015's third amendment): the
+# PC's output volume, as a whole percentage. `parse_level` turns the request's
+# text into an int from 0 to 100 before anything else sees it, and only that
+# int, formatted by this module, reaches a command. Setting a volume is safe
+# to repeat in the ADR's sense: the second identical request changes nothing.
+VOLUME = "volume"
 
 
 class ActionError(Exception):
@@ -224,6 +235,13 @@ _LINUX_SOURCES = [_PACTL, "list", "short", "sources"]
 # id -> platform key -> candidate argument lists, tried in order until one of
 # the executables exists. The fallback is a *second binary*, never a shell `||`.
 _TABLE = {
+    # Only for `describe`, which asks which command exists: the volume is
+    # run by set_volume, with its level, and never by run_action.
+    "volume": {
+        "linux": [["wpctl"], ["pactl"]],
+        "darwin": [["osascript"]],
+        "win32": [["powershell"]],
+    },
     "mute-audio": {
         "linux": [
             ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"],
@@ -284,6 +302,7 @@ _READBACK = {
     # press measures every non-monitor input itself and reports `muted` only
     # when all of them are -- `_linux_mic_state`.
     "mute-mic": {},
+    "volume": {},
 }
 
 
@@ -536,6 +555,8 @@ def run_action(action, platform=None, runner=None, which=None, timeout=None):
     list without a mixer, a desktop session or a subprocess. `timeout`
     defaults to the platform's, which is not one number -- see `timeout_for`.
     """
+    if action == VOLUME:
+        raise ActionError("volume needs a level; it is run by set_volume")
     runner = runner or _default_runner
     which = which or shutil.which
     timeout = timeout_for(platform) if timeout is None else timeout
@@ -701,3 +722,158 @@ def _read_state(action, platform, runner, which, timeout):
             return state_from_readback(done.stdout)
         return UNKNOWN
     return UNKNOWN
+
+
+# --- The output volume (T8.4, ADR 0015's third amendment) -------------------
+
+
+def _windows_volume(level=None):
+    """PowerShell that sets (when `level` is an int) and then reads the default
+    output's master volume, printing it as a whole percentage.
+
+    IAudioEndpointVolume's vtable, in order: RegisterControlChangeNotify,
+    UnregisterControlChangeNotify, GetChannelCount, SetMasterVolumeLevel,
+    **SetMasterVolumeLevelScalar** (slot 4), GetMasterVolumeLevel,
+    **GetMasterVolumeLevelScalar** (slot 6). The placeholders keep the two
+    real methods in their slots, as `_windows_toggle` does for SetMute.
+    `level` is this module's own int, never the request's text.
+    """
+    setter = "" if level is None else (
+        f"Ok(ep.SetMasterVolumeLevelScalar({int(level) / 100:.2f}f,System.IntPtr.Zero));")
+    source = (
+        "Add-Type -Language CSharp -TypeDefinition @'\n"
+        "using System.Runtime.InteropServices;\n"
+        "[Guid(\"5CDF2C82-841E-4546-9722-0CF74078229A\"),"
+        "InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]\n"
+        "interface IAudioEndpointVolume {\n"
+        "  int f();int g();int h();int i();\n"
+        "  int SetMasterVolumeLevelScalar(float level,System.IntPtr c);\n"
+        "  int j();\n"
+        "  int GetMasterVolumeLevelScalar(out float level);\n"
+        "}\n"
+        "[Guid(\"D666063F-1587-4E43-81F1-B948E807363F\"),"
+        "InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]\n"
+        "interface IMMDevice {\n"
+        "  int Activate(ref System.Guid id,int ctx,System.IntPtr p,"
+        "out IAudioEndpointVolume ep);\n"
+        "}\n"
+        "[Guid(\"A95664D2-9614-4F35-A746-DE8DB63617E6\"),"
+        "InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]\n"
+        "interface IMMDeviceEnumerator {\n"
+        "  int f();\n"
+        "  int GetDefaultAudioEndpoint(int flow,int role,out IMMDevice dev);\n"
+        "}\n"
+        "[ComImport,Guid(\"BCDE0395-E52F-467C-8E3D-C4579291692E\")]\n"
+        "class MMDeviceEnumeratorComObject {}\n"
+        "public class Volume {\n"
+        "  static void Ok(int hr) { Marshal.ThrowExceptionForHR(hr); }\n"
+        "  public static int Run() {\n"
+        "    var e=(IMMDeviceEnumerator)(new MMDeviceEnumeratorComObject());\n"
+        "    IMMDevice dev; Ok(e.GetDefaultAudioEndpoint(0,1,out dev));\n"
+        "    var iid=typeof(IAudioEndpointVolume).GUID;\n"
+        "    IAudioEndpointVolume ep; Ok(dev.Activate(ref iid,23,System.IntPtr.Zero,out ep));\n"
+        f"    {setter}\n"
+        "    float now; Ok(ep.GetMasterVolumeLevelScalar(out now));\n"
+        "    return (int)System.Math.Round(now*100);\n"
+        "  }\n"
+        "}\n"
+        "'@\n"
+        "[Volume]::Run()"
+    )
+    return ["powershell", "-NoProfile", "-NonInteractive", "-Command", source]
+
+
+_MACOS_VOLUME_READ = "output volume of (get volume settings)"
+
+
+def volume_commands(level=None, platform=None):
+    """Pure: `[(set_argv or None, read_argv)]` for this platform, best first.
+
+    With `level` None it is a read alone. The level is formatted here from an
+    int -- `0.42`, `42%`, `42` -- and never copied from a request.
+    """
+    key = platform_key(platform or sys.platform)
+    if level is not None:
+        level = int(level)
+        if not 0 <= level <= 100:
+            raise ValueError(f"volume level {level} is outside 0-100")
+    if key == "linux":
+        return [
+            (None if level is None else
+             ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{level / 100:.2f}"],
+             ["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"]),
+            (None if level is None else
+             ["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{level}%"],
+             ["pactl", "get-sink-volume", "@DEFAULT_SINK@"]),
+        ]
+    if key == "darwin":
+        script = _MACOS_VOLUME_READ if level is None else (
+            f"set volume output volume {level}\nreturn {_MACOS_VOLUME_READ}")
+        return [(None, ["osascript", "-e", script])]
+    if key == "win32":
+        return [(None, _windows_volume(level))]
+    return []
+
+
+def parse_level(text):
+    """Pure: a request's level -> int 0..100, or None. ASCII digits, 1-3 of them."""
+    if not isinstance(text, str) or not text.isascii() or not text.isdigit() \
+            or not 1 <= len(text) <= 3:
+        return None
+    level = int(text)
+    return level if level <= 100 else None
+
+
+def level_from(stdout):
+    """Pure: a mixer's report -> whole percent 0..100, or None.
+
+    Three spellings, because three mixers:
+      wpctl get-volume       ->  `Volume: 0.42`, maybe ` [MUTED]`, above 1.00 when boosted
+      pactl get-sink-volume  ->  `Volume: front-left: 27525 /  42% / -22.6 dB, ...`
+                                 (one percent per channel; the loudest wins)
+      osascript, PowerShell  ->  `42`
+    Anything else is None, and the bar then draws no level rather than a guess.
+    """
+    text = (stdout or "").strip()
+    percents = re.findall(r"(\d+)%", text)
+    if percents:
+        # The loudest channel, which is what pactl means by a sink's volume
+        # when the channels differ (found by review).
+        value = max(int(p) for p in percents)
+    elif re.fullmatch(r"Volume:\s*\d+\.\d+(\s*\[MUTED\])?", text):
+        value = round(float(text.split(":", 1)[1].split()[0]) * 100)
+    elif re.fullmatch(r"\d{1,3}", text):
+        value = int(text)
+    else:
+        return None
+    return max(0, min(100, value))
+
+
+def set_volume(level, platform=None, runner=None, which=None, timeout=None):
+    """Set the output volume, then return what the mixer holds (or None).
+
+    Raises `Unsupported` (no mixer here) or `ActionError` (it ran and failed),
+    like `run_action`. `level` is an int from `parse_level`, never raw text.
+    """
+    return _volume(level, platform, runner, which, timeout)
+
+
+def read_volume(platform=None, runner=None, which=None, timeout=None):
+    """The output volume now, or None. Never raises: it only draws a bar."""
+    try:
+        return _volume(None, platform, runner, which, timeout)
+    except (Unsupported, ActionError, ValueError):
+        return None
+
+
+def _volume(level, platform, runner, which, timeout):
+    runner = runner or _default_runner
+    which = which or shutil.which
+    timeout = timeout_for(platform) if timeout is None else timeout
+    for setter, reader in volume_commands(level, platform):
+        if not which(reader[0]):
+            continue
+        if setter is not None:
+            _run_or_raise(setter, runner, timeout)
+        return level_from(_run_or_raise(reader, runner, timeout).stdout)
+    raise Unsupported(f"volume is not available on this platform ({platform or sys.platform})")

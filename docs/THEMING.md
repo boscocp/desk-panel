@@ -628,6 +628,36 @@ otherwise. **Absent is not closed**: a theme that tested `!payload.b3Open` would
 say CLOSED all day on a PC that has not been updated. `?b3=closed` holds the
 label on in a browser, and `e2e/layout/stress.js` carries it.
 
+## Meeting alerts, and the volume bar
+
+Both are T9.5 and T8.4, and both follow the rule above: the decision is `format.js`'s and
+the PC's, and the drawing is yours.
+
+**Meeting alerts.** While a timed meeting is within `agenda_soon_min` of its start (5 by
+default, set in `config.toml` on the PC), `host.js` sets `data-alert="soon"` on `<html>`, and
+`data-alert="chime"` within `agenda_chime_min` (1). Style `:root[data-alert] #agenda` however
+you like: neon pulses the border and puts a "!" on the title's line, and plain turns the line
+the caution colour. `agendaRows` also marks that row `soon: true` with `icon: 'bell'`, and
+`agendaFields` has `soon`. A theme with no rule for any of this still gets the bell.
+
+**The chime is a file, and a theme may bring its own.** Name it when you register:
+
+```js
+window.DeskPanel.defineTheme('mine', { render, tick, chime: 'themes/mine/chime.ogg' });
+```
+
+Anything the WebView plays works: WAV, OGG or MP3. A CC0 sound from a library is fine, and so is
+one you make: `python scripts/make_chime.py --notes 523.25,783.99 --out web/themes/mine/chime.wav`
+writes a soft bell from any notes. Without `chime` the theme gets `web/sounds/chime.wav`.
+`agenda_chime_volume` on the PC sets how loud it plays, on top of the phone's media volume, and
+`agenda_chime_min = 0` turns it off. It plays once per meeting, and only while the panel is lit.
+
+**The volume bar** is decided by `volumeFields(payload, language)`: null unless the PC enabled
+`volume` in `actions`, else `{ level, label }`, where `level` is the PC's last measured volume,
+0 to 100, or null. Draw it anywhere in `#shortcuts`. Call `DeskPanel.setVolume(level, done)`
+once per gesture, when the finger lifts. On Windows every set is a PowerShell compile, so a drag
+must not send forty. `done(ok, state)` gets the level the PC then measured, as a string.
+
 ## Checking it
 
 ```bash

@@ -38,7 +38,33 @@
     // not, and a date in whatever shape it likes.
 
     function paintClock() {
-        host.tick(new Date());
+        const now = new Date();
+        host.tick(now);
+        applyAlert(now);
+    }
+
+    // The meeting alerts (T9.5), checked on the clock's second. The chime
+    // plays once per meeting: `chimed` remembers which, and forgets the
+    // oldest past a few dozen so it cannot grow for ever. Only while the panel
+    // is visible -- a dark panel is one nobody is looking at, and a chime from
+    // a phone whose PC is off would be a sound from nowhere.
+    const chimed = [];
+
+    function applyAlert(now) {
+        let alert = null;
+        try {
+            alert = visible() ? agendaAlert(payload && payload.agenda, now) : null;
+        } catch (err) {
+            console.error('desk-panel: the meeting alert failed', err);
+        }
+        host.alert(alert && alert.level);
+        if (alert && alert.level === 'chime' && chimed.indexOf(alert.key) === -1) {
+            chimed.push(alert.key);
+            if (chimed.length > 32) {
+                chimed.shift();
+            }
+            host.chime(alert.volume);
+        }
     }
 
     // The page's half of the arbitration, and the only place the timer is
@@ -70,6 +96,9 @@
             forgetPresses();
         }
         host.blackout(!visible());
+        if (!visible()) {
+            host.alert(null);
+        }
         applyNight();
         // Whatever arrived while nobody could see it, drawn now that somebody
         // can. Before applyClock, so the clock the timer starts painting is
@@ -304,6 +333,37 @@
     }
 
     host.invoke = invoke;
+
+    // The volume bar (T8.4). The same gates as a press -- visible, enabled by
+    // the PC, a bridge to cross -- and the same result channel: the level the
+    // PC then measured arrives at onActionResult('volume', ok, level).
+    host.setVolume = (level, done) => {
+        const report = (ok, state) => {
+            if (typeof done === 'function') {
+                done(!!ok, state || 'unknown');
+            }
+        };
+        const allowed = (payload && payload.actions) || [];
+        const bridge = window.__actions;
+        const value = Math.round(Number(level));
+        if (!visible() || allowed.indexOf('volume') === -1 || !bridge
+            || typeof bridge.setVolume !== 'function' || !(value >= 0 && value <= 100)) {
+            report(false);
+            return false;
+        }
+        let sent = false;
+        try {
+            sent = bridge.setVolume(value) !== false;
+        } catch (err) {
+            console.error('desk-panel: the volume bridge failed', err);
+        }
+        if (!sent) {
+            report(false);
+            return false;
+        }
+        pressed.set('volume', report);
+        return true;
+    };
 
     // --- Start -------------------------------------------------------------
     // Synchronous, while the deferred scripts are still running and before the

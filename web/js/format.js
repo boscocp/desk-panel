@@ -323,6 +323,7 @@ const LANGUAGES = {
         unknown: 'Desconhecido',
         // Never drawn: the accessible name of the rain drop beside the city.
         rainChance: 'Chance de chuva',
+        humidity: 'Umidade relativa',
         // The eight phases, in the order a lunation visits them. The panel
         // draws a shape and these are its accessible name -- eight glyphs
         // cannot tell a waxing crescent from a waning one at 24px, and the
@@ -380,6 +381,8 @@ const LANGUAGES = {
         // page cannot back.
         actionMuted: 'mudo na última vez',
         actionUnmuted: 'com som na última vez',
+        // The volume bar beside the buttons (T8.4): its accessible name.
+        volume: 'Volume do computador',
         // The AGENDA card (T9.1). Short on purpose, like everything that sits
         // in a card: the countdown is read from across the desk and the card
         // is a third of the right-hand column. "reconectar" is the one word
@@ -426,6 +429,7 @@ const LANGUAGES = {
         tag: 'en',
         unknown: 'Unknown',
         rainChance: 'Chance of rain',
+        humidity: 'Relative humidity',
         moon: {
             'new': 'New moon',
             'waxing-crescent': 'Waxing crescent',
@@ -448,6 +452,7 @@ const LANGUAGES = {
         actionFailed: 'failed',
         actionMuted: 'muted when last asked',
         actionUnmuted: 'not muted when last asked',
+        volume: 'Computer volume',
         agenda: {
             in: 'in',
             now: 'now',
@@ -547,6 +552,23 @@ function shortcutsFor(actions, language) {
         out.push({ id: id, label: words.actions[id], hint: words.actionHint });
     }
     return out;
+}
+
+// The volume bar (T8.4), or null when the PC did not enable it. Not a
+// shortcut -- shortcutsFor has no word for `volume` and draws no button -- but
+// it sits in the same strip, so it is decided from the same `actions`.
+//
+//   level  0..100, the PC's last measured volume, or null when it could not
+//          read one (the bar then sits at the middle and says nothing)
+//   label  the accessible name
+function volumeFields(payload, language) {
+    const actions = payload && payload.actions;
+    if (!Array.isArray(actions) || actions.indexOf('volume') === -1) {
+        return null;
+    }
+    const raw = payload.volume && payload.volume.level;
+    const level = Number.isInteger(raw) && raw >= 0 && raw <= 100 ? raw : null;
+    return { level, label: strings(language).volume };
 }
 
 // --- The next meeting (T9.1, ADR 0017) --------------------------------------
@@ -813,6 +835,7 @@ function failedLine(failed, w) {
  *              neon does it in colour -- can draw on its own. At neon's
  *              countdown size the whole of `when` does not fit the card
  *   inProgress true while the event is running, for a theme that marks it
+ *   soon       true inside the alert window before it starts (T9.5)
  *   failed     "google/personal: reconectar", "microsoft/work: indisponível",
  *              or null (see failedLine). With no event and a failure, `when`
  *              is empty rather than "nada à vista". A failed account is
@@ -834,7 +857,8 @@ function agendaFields(agenda, now, language) {
         // "Nothing ahead" is a claim, and with an account failing the panel
         // cannot make it: the meeting may be in the calendar it could not
         // read. The failure line is the whole card then.
-        return { title: null, when: failed ? '' : w.none, until: null, inProgress: false, failed };
+        return { title: null, when: failed ? '' : w.none, until: null, inProgress: false,
+                 soon: false, failed };
     }
     let when;
     let until = null;
@@ -851,7 +875,9 @@ function agendaFields(agenda, now, language) {
     } else {
         when = untilText(next.start, now, language);
     }
-    return { title: next.title || w.untitled, when, until, inProgress: next.inProgress, failed };
+    const soonMs = alertWindowMs(agenda, 'soon_min');
+    const soon = !next.allDay && !next.inProgress && soonMs > 0 && next.start - now <= soonMs;
+    return { title: next.title || w.untitled, when, until, inProgress: next.inProgress, soon, failed };
 }
 
 // How long is left of a meeting in progress, as the right-hand end of its
@@ -875,12 +901,13 @@ function untilEnd(event, now, w) {
     return `${w.until} ${endText}`;
 }
 
-function agendaRow(event, now, language, primary) {
+function agendaRow(event, now, language, primary, soonMs) {
     const w = strings(language).agenda;
     const row = {
         title: event.title || w.untitled,
         icon: 'clock',
         live: false,
+        soon: false,
         when: '',
         aside: null,
         progress: null,
@@ -919,8 +946,70 @@ function agendaRow(event, now, language, primary) {
         if (primary && (today || minutes < 60)) {
             row.aside = hhmm(event.start);
         }
+        // Inside the alert window (T9.5): the bell instead of the clock, on
+        // whichever row it is, and `soon` for a theme that wants more.
+        if (soonMs > 0 && event.start - now <= soonMs) {
+            row.icon = 'bell';
+            row.soon = true;
+        }
     }
     return row;
+}
+
+// The alert windows the PC asked for, in ms, or 0 for "off". A server from
+// before T9.5 sends no `alerts`, and it did not ask for any.
+function alertWindowMs(agenda, key) {
+    const alerts = agenda && agenda.alerts;
+    const minutes = alerts && Number(alerts[key]);
+    return Number.isFinite(minutes) && minutes > 0 ? Math.min(minutes, 60) * 60000 : 0;
+}
+
+/**
+ * The meeting alert due at `now` (T9.5), or null.
+ *
+ *   level   'chime' inside `alerts.chime_min` of a timed meeting's start,
+ *           'soon' inside `alerts.soon_min`; the nearer one wins
+ *   key     the same string for the same meeting on every tick, so the
+ *           caller chimes once per meeting and not once a second
+ *   volume  `alerts.chime_volume`, 0..1
+ *
+ * Only a meeting still to start: in progress it is too late to warn, and an
+ * all-day event has no start anyone is late for. Of several, the nearest.
+ *
+ * @param agenda the payload's `agenda`
+ * @param now    Date, the phone's clock
+ */
+function agendaAlert(agenda, now) {
+    if (!agenda || typeof agenda !== 'object' || !(now instanceof Date)
+        || Number.isNaN(now.getTime())) {
+        return null;
+    }
+    const soonMs = alertWindowMs(agenda, 'soon_min');
+    const chimeMs = alertWindowMs(agenda, 'chime_min');
+    const widest = Math.max(soonMs, chimeMs);
+    if (!widest || !Array.isArray(agenda.events)) {
+        return null;
+    }
+    let nearest = null;
+    for (const raw of agenda.events) {
+        const item = normaliseEvent(raw);
+        if (!item || item.allDay || item.start <= now || item.start - now > widest) {
+            continue;
+        }
+        if (!nearest || item.start < nearest.start) {
+            nearest = item;
+        }
+    }
+    if (!nearest) {
+        return null;
+    }
+    const ms = nearest.start - now;
+    const volume = Number(agenda.alerts.chime_volume);
+    return {
+        level: chimeMs && ms <= chimeMs ? 'chime' : (soonMs && ms <= soonMs ? 'soon' : null),
+        key: `${nearest.source || ''}|${nearest.start.toISOString()}|${nearest.title || ''}`,
+        volume: Number.isFinite(volume) ? Math.min(1, Math.max(0, volume)) : 0.4,
+    };
 }
 
 // The most rows agendaRows returns; how many of them to draw is the theme's.
@@ -932,8 +1021,10 @@ const AGENDA_MAX_ROWS = 3;
  * to draw (the same two cases as agendaFields).
  *
  *   rows     [{ title, icon, live, when, aside, progress }], at most three:
- *              icon      'live' (in progress), 'clock' (timed), 'calendar'
- *                        (all day) -- a name, never markup
+ *              icon      'live' (in progress), 'clock' (timed), 'bell'
+ *                        (timed, inside the alert window, T9.5),
+ *                        'calendar' (all day) -- a name, never markup
+ *              soon      true inside the alert window (`alerts.soon_min`)
  *              when      "até 23:30" in progress, "em 25 min", "amanhã
  *                        09:00", "o dia todo"; on any row after the first
  *                        a timed event today and an hour or more away is
@@ -959,8 +1050,9 @@ function agendaRows(agenda, now, language) {
     // Up to three, and how many of them fit is the theme's call: neon draws
     // three, or two when a failure line needs the room.
     const events = rankedEvents(agenda.events, now).slice(0, AGENDA_MAX_ROWS);
+    const soonMs = alertWindowMs(agenda, 'soon_min');
     return {
-        rows: events.map((event, i) => agendaRow(event, now, language, i === 0)),
+        rows: events.map((event, i) => agendaRow(event, now, language, i === 0, soonMs)),
         none: events.length || failed ? null : w.none,
         failed,
     };
@@ -1132,6 +1224,17 @@ function moonFields(moon, words) {
 // There is no wording anywhere near this. Asked for from the chair as "sem
 // palavra, com icone de chuva": a drop and a number, and the card stays
 // readable in a language nobody has translated it into.
+// The air's relative humidity now, a whole percent, or null when the PC sent
+// none (an older server, or open-meteo without the field). Same rule as the
+// chance of rain beside it: a number or nothing, never a dash.
+function relativeHumidity(weather) {
+    const value = weather && weather.humidity;
+    if (!Number.isFinite(value)) {
+        return null;
+    }
+    return Math.max(0, Math.min(100, Math.round(value)));
+}
+
 function chanceOfRain(weather) {
     const value = weather && weather.precipProb;
     if (!Number.isFinite(value)) {
@@ -1524,8 +1627,8 @@ function marketClosed(payload) {
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         formatPrice, formatRate, formatPair, formatTemp, formatChange, changeClass,
-        weatherLabel, weatherGlyph, formatRange,
-        moonFields, formatPercent, chanceOfRain, MOON_PHASES,
+        weatherLabel, weatherGlyph, formatRange, volumeFields,
+        moonFields, formatPercent, chanceOfRain, relativeHumidity, MOON_PHASES,
         strings, LANGUAGES, FALLBACK_LANGUAGE,
         isNight,
         offsetFor, burnInSchedule,
@@ -1535,7 +1638,7 @@ if (typeof module !== 'undefined' && module.exports) {
         sparklinePath,
         formatBattery, batteryFields, tempClass, BATTERY_WARN_C, BATTERY_HOT_C,
         shortcutsFor,
-        nextEvent, untilText, agendaFields, agendaRows, agendaSegments,
+        nextEvent, untilText, agendaFields, agendaRows, agendaSegments, agendaAlert,
         marketClosed,
     };
 }

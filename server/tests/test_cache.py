@@ -306,7 +306,7 @@ class AppPayloadTests(unittest.TestCase):
         )
         payload = self.app.quotes()
         self.assertEqual(set(payload), {"quotes", "fx", "crypto", "stale", "theme", "night",
-                                        "language", "actions", "agenda", "b3Open"})
+                                        "language", "actions", "agenda", "b3Open", "volume"})
         self.assertFalse(payload["stale"])
         self.assertEqual(payload["quotes"][0]["symbol"], "PETR4")
 
@@ -385,7 +385,7 @@ class AppPayloadTests(unittest.TestCase):
         self.assertTrue(payload["stale"])
         self.assertEqual(payload["quotes"], [])
         self.assertEqual(set(payload), {"quotes", "fx", "crypto", "stale", "theme", "night",
-                                        "language", "actions", "agenda", "b3Open"})
+                                        "language", "actions", "agenda", "b3Open", "volume"})
 
     def test_one_market_failing_does_not_empty_the_other_two(self):
         # Found on the desk, by changing a ticker to one that needs a token:

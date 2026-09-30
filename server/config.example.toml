@@ -372,6 +372,18 @@ calendar_lookahead_h = 24
 # that there is a meeting.
 calendar_show_titles = true
 
+# The meeting alerts (T9.5). A soft visual cue on the AGENDA card this many
+# minutes before a meeting starts, and one quiet chime this many minutes before
+# it. Whole minutes, 0 to 60; 0 turns that one off. Changing them is a server
+# restart, never a rebuild.
+agenda_soon_min = 5
+agenda_chime_min = 1
+
+# How loud the chime plays, 0 to 1, on top of the phone's media volume. The
+# sound itself belongs to the theme: web/themes/<name>/chime.wav, falling back
+# to web/sounds/chime.wav (docs/THEMING.md § Meeting alerts).
+agenda_chime_volume = 0.4
+
 
 # ---------------------------------------------------------------------------
 # Hosts

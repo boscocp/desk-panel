@@ -189,17 +189,153 @@
     // and lose the acknowledgement it was showing.
     let drawnActions = null;
 
-    function renderShortcuts(actions) {
+    function renderShortcuts(actions, payload) {
         const wanted = shortcutsFor(actions, words.tag);
-        const signature = wanted.map((s) => s.id + ':' + s.label).join(',');
-        if (signature === drawnActions) {
-            return;
+        const volume = volumeFields(payload, words.tag);
+        const signature = wanted.map((s) => s.id + ':' + s.label).join(',')
+            + (volume ? '|volume:' + volume.label : '');
+        if (signature !== drawnActions) {
+            drawnActions = signature;
+            els.shortcuts.textContent = '';
+            volumeBar = null;
+            for (const shortcut of wanted) {
+                els.shortcuts.appendChild(buildButton(shortcut));
+            }
+            if (volume) {
+                volumeBar = buildVolume(volume);
+                els.shortcuts.appendChild(volumeBar.root);
+            }
         }
-        drawnActions = signature;
-        els.shortcuts.textContent = '';
-        for (const shortcut of wanted) {
-            els.shortcuts.appendChild(buildButton(shortcut));
+        if (volumeBar && volume) {
+            volumeBar.show(volume.level);
         }
+    }
+
+    // The volume bar beside MIC (T8.4): ten segments stacked like the AGENDA
+    // bar, as tall as the buttons, and the whole box is the target. A tap or
+    // a drag moves the lit segments under the finger; the level is sent once,
+    // when the finger lifts -- on Windows a set is a PowerShell compile, and
+    // a drag must not become forty of them. While one is in flight the next
+    // is held and sent after it, so the last position always wins.
+    //
+    // What it shows between touches is the PC's own measured level, from the
+    // payload or from the answer to the last set: the last known volume, like
+    // the mute cross, and never the panel's guess.
+    const VOLUME_SEGMENTS = 10;
+    const VOLUME_ICON = 'M4 9.5h3.2L12 5.4v13.2L7.2 14.5H4a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1zM15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11';
+    let volumeBar = null;
+
+    function buildVolume(fields) {
+        const root = el('div', null, 'volume');
+        root.setAttribute('role', 'slider');
+        root.setAttribute('aria-label', fields.label);
+        root.setAttribute('aria-valuemin', '0');
+        root.setAttribute('aria-valuemax', '100');
+        root.title = fields.label;
+        // A speaker with two waves, so the bar says what it is.
+        const icon = svgIcon(VOLUME_ICON, 'v-icon');
+        if (icon) {
+            root.appendChild(icon);
+        }
+        const segments = [];
+        for (let i = 0; i < VOLUME_SEGMENTS; i += 1) {
+            const seg = el('i');
+            segments.push(seg);
+            root.appendChild(seg);
+        }
+        let dragging = false;
+        let busy = false;
+        let held = null;
+        let known = null;
+
+        function paint(level) {
+            const lit = level === null ? 0 : Math.round(level / (100 / VOLUME_SEGMENTS));
+            // Bottom-up: the first segment in the DOM is the top one, so
+            // segment i is lit when it is within `lit` of the bottom.
+            segments.forEach((seg, i) => {
+                seg.className = VOLUME_SEGMENTS - i <= lit ? 'on' : '';
+            });
+            root.dataset.unknown = level === null ? '1' : '';
+            if (level !== null) {
+                root.setAttribute('aria-valuenow', String(level));
+            }
+        }
+
+        function levelAt(event) {
+            // The segments' own box, not the root's: the icon on top is not
+            // part of the scale.
+            const first = segments[0].getBoundingClientRect();
+            const last = segments[segments.length - 1].getBoundingClientRect();
+            const fraction = (last.bottom - event.clientY) / (last.bottom - first.top);
+            return Math.max(0, Math.min(100, Math.round(fraction * 10) * 10));
+        }
+
+        function send(level) {
+            if (busy) {
+                held = level;
+                return;
+            }
+            busy = true;
+            root.classList.add('sending');
+            const sent = DeskPanel.setVolume(level, (ok, state) => {
+                busy = false;
+                root.classList.remove('sending');
+                root.classList.toggle('err', !ok);
+                const measured = parseInt(state, 10);
+                if (ok && Number.isInteger(measured)) {
+                    known = measured;
+                }
+                if (held !== null) {
+                    const next = held;
+                    held = null;
+                    send(next);
+                } else if (!dragging) {
+                    paint(known);
+                }
+            });
+            if (!sent) {
+                busy = false;
+                held = null;
+                root.classList.remove('sending');
+                root.classList.add('err');
+                paint(known);
+            }
+        }
+
+        root.addEventListener('pointerdown', (event) => {
+            dragging = true;
+            root.setPointerCapture(event.pointerId);
+            root.classList.remove('err');
+            paint(levelAt(event));
+        });
+        root.addEventListener('pointermove', (event) => {
+            if (dragging) {
+                paint(levelAt(event));
+            }
+        });
+        root.addEventListener('pointerup', (event) => {
+            if (!dragging) {
+                return;
+            }
+            dragging = false;
+            const level = levelAt(event);
+            paint(level);
+            send(level);
+        });
+        root.addEventListener('pointercancel', () => {
+            dragging = false;
+            paint(known);
+        });
+
+        return {
+            root,
+            show(level) {
+                known = level;
+                if (!dragging && !busy) {
+                    paint(level);
+                }
+            },
+        };
     }
 
     function buildButton(shortcut) {
@@ -581,6 +717,9 @@
     // three <use> elements is a second mechanism for the sake of 80 bytes.
     const CLOUD = 'M7.5 16h8.5a3.2 3.2 0 0 0 .3-6.4 4.6 4.6 0 0 0-8.8-1.1'
                 + 'A3.6 3.6 0 0 0 7.5 16z';
+    // A single drop, for the humidity line.
+    const HUMIDITY_ICON = 'M12 3.5c3 4 6 7.2 6 10.5a6 6 0 0 1-12 0c0-3.3 3-6.5 6-10.5z';
+
     const GLYPHS = {
         clear: 'M16.5 12a4.5 4.5 0 1 1-9 0 4.5 4.5 0 1 1 9 0'
              + 'M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3'
@@ -1026,6 +1165,25 @@
         }
 
         body.append(city, main, range);
+
+        // The relative humidity, under the range (asked for 2026-09-30): a
+        // drop and a number, like the chance of rain, and the word in the
+        // accessible name. Nothing at all when the PC sent none.
+        const humidity = relativeHumidity(weather);
+        if (humidity !== null) {
+            const line = el('div', null, 'w-humid');
+            const drop = svgIcon(HUMIDITY_ICON, 'w-humid-glyph');
+            if (drop) {
+                drop.removeAttribute('aria-hidden');
+                drop.setAttribute('role', 'img');
+                drop.setAttribute('aria-label', words.humidity);
+                line.appendChild(drop);
+            }
+            const pct = el('span');
+            pct.textContent = formatPercent(humidity);
+            line.appendChild(pct);
+            body.appendChild(line);
+        }
         els.weather.appendChild(body);
     }
 
@@ -1037,6 +1195,8 @@
         live: 'M8 5.5v13l10-6.5z',
         clock: 'M12 3a9 9 0 1 0 0 18a9 9 0 1 0 0-18M12 7v5l3 2',
         calendar: 'M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1M4 10h16M9 3v4M15 3v4',
+        // Inside the alert window (T9.5): a bell, and the card breathes.
+        bell: 'M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0',
     };
 
     function agendaIcon(name) {
@@ -1093,7 +1253,8 @@
     // The first row: a head line (the mark, when, and what is left), the
     // title, and the bar while the meeting runs.
     function agendaLead(row) {
-        const lead = el('div', null, 'a-lead' + (row.live ? ' a-live' : ''));
+        const lead = el('div', null, 'a-lead' + (row.live ? ' a-live' : '')
+            + (row.soon ? ' a-soon' : ''));
         const head = el('div', null, 'a-head');
         const mark = agendaMark(row);
         if (mark) {
@@ -1279,7 +1440,7 @@
         renderList(els.lists.crypto, payload.crypto || [], 'symbol', 'price', 'USD');
         renderWeather(payload.weather);
         renderBattery(payload.battery);
-        renderShortcuts(payload.actions);
+        renderShortcuts(payload.actions, payload);
         agenda = payload.agenda;
         renderAgenda(new Date());
         els.stale.hidden = !payload.stale;

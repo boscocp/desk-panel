@@ -126,7 +126,7 @@ class CatalogueTests(unittest.TestCase):
         # throwing it. One unchecked SetMute failing on one of three inputs
         # would still end on "muted" -- the lie the every-input change exists
         # to remove. Found by review of PR #37.
-        for action in actions.CATALOGUE:
+        for action in actions.TOGGLES:
             argv, = actions.candidates(action, "win32")
             body = argv[-1].split("public class Endpoint {")[1]
             for call in ("SetMute(", "GetMute(", "Activate(", "GetDefaultAudioEndpoint(",
@@ -304,7 +304,7 @@ class StateTests(unittest.TestCase):
     def test_the_macos_toggles_both_end_on_a_word(self):
         # An osascript ending on `set volume ...` prints nothing, because the
         # command returns no result -- so the state would always be unknown.
-        for action in actions.CATALOGUE:
+        for action in actions.TOGGLES:
             argv, = actions.candidates(action, "darwin")
             self.assertIn('return "muted"', argv[-1], action)
             self.assertIn('return "unmuted"', argv[-1], action)
@@ -695,7 +695,7 @@ class LinuxMicTests(unittest.TestCase):
         # the listing **as the action**: exit 0, nothing muted, and a 200 --
         # the "nothing happened" failure the root CLAUDE.md calls the hardest
         # on this project to diagnose.
-        for action in actions.CATALOGUE:
+        for action in actions.TOGGLES:
             for platform in ("linux", "darwin", "win32"):
                 for argv in actions.candidates(action, platform):
                     if argv[0] not in {"pactl", "wpctl"}:

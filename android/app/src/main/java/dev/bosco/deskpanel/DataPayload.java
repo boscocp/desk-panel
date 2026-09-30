@@ -192,6 +192,14 @@ public final class DataPayload {
             // window follows US daylight saving and the phone has no business
             // knowing that. Absent for an older server, and the page then draws
             // no label rather than guessing.
+            // The volume bar's level (T8.4): {"level": 0..100 or null}, or
+            // null when the bar is not enabled on the PC. Carried whole, like
+            // `agenda`; the page validates what it draws.
+            if (quotes.has("volume")) {
+                payload.put("volume", quotes.isNull("volume")
+                        ? JSONObject.NULL : quotes.optJSONObject("volume"));
+            }
+
             if (quotes.has("b3Open")) {
                 payload.put("b3Open", quotes.optBoolean("b3Open", true));
             }
@@ -227,6 +235,15 @@ public final class DataPayload {
             String state = new JSONObject(body).optString("state", "unknown");
             if ("muted".equals(state) || "unmuted".equals(state)) {
                 return state;
+            }
+            // The volume's answer is the level the mixer reports (T8.4).
+            // Rebuilt from an int, so nothing but 0..100 in digits reaches
+            // the evaluateJavascript string it ends up in.
+            if (state.matches("\\d{1,3}")) {
+                int level = Integer.parseInt(state);
+                if (level <= 100) {
+                    return Integer.toString(level);
+                }
             }
         } catch (JSONException malformed) {
             // Fall through: a response this class cannot read says nothing

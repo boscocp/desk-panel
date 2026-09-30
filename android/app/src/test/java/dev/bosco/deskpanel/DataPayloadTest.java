@@ -424,4 +424,12 @@ public class DataPayloadTest {
                 new JSONObject(DataPayload.merge(Contract.quotesWithout("b3Open"),
                         Contract.weather())).has("b3Open"));
     }
+
+    @Test
+    public void aVolumeAnswerIsALevelAndNothingElse() {
+        assertEquals("42", DataPayload.actionState("{\"ok\":true,\"state\":\"42\"}"));
+        assertEquals("100", DataPayload.actionState("{\"state\":\"100\"}"));
+        assertEquals("unknown", DataPayload.actionState("{\"state\":\"101\"}"));
+        assertEquals("unknown", DataPayload.actionState("{\"state\":\"4');alert(1)//\"}"));
+    }
 }

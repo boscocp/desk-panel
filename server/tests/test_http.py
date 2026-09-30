@@ -145,7 +145,7 @@ class DataRouteTests(unittest.TestCase):
 
         payload = json.loads(body.decode("utf-8"))
         self.assertEqual(set(payload), {"quotes", "fx", "crypto", "stale", "theme", "night",
-                                        "language", "actions", "agenda", "b3Open"})
+                                        "language", "actions", "agenda", "b3Open", "volume"})
         self.assertEqual(payload["quotes"][0]["symbol"], "PETR4")
         self.assertEqual(set(payload["quotes"][0]), {"symbol", "price", "changePct", "history"})
         self.assertEqual(set(payload["fx"][0]), {"pair", "rate", "changePct", "history"})

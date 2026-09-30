@@ -136,7 +136,9 @@ def fetch_forecast(lat, lon, timezone, get=get_json):
         # off the docs: at 21:15 on 2026-09-21 in Sao Paulo this endpoint
         # answered {"weather_code": 1, "is_day": 0} -- clear sky, no sun -- and
         # the panel drew a sun because it had never been told the second half.
-        "&current=temperature_2m,weather_code,is_day"
+        # relative_humidity_2m: the air's relative humidity now, a whole
+        # percent (asked for on 2026-09-30 for the line under the range).
+        "&current=temperature_2m,weather_code,is_day,relative_humidity_2m"
         # precipitation_probability_max is the day's chance of rain and is a
         # *daily* field: open-meteo's `current` block has no probability at
         # all, which was checked against the live endpoint rather than the
@@ -160,7 +162,7 @@ def _is_day(raw):
 
 
 def normalise(raw, city=""):
-    """Pure: the response -> `{tempC, minC, maxC, code, isDay, precipProb, city}`.
+    """Pure: the response -> `{tempC, minC, maxC, code, isDay, precipProb, humidity, city}`.
 
     Missing pieces come back as None rather than 0. A temperature of zero is
     a real reading in most of the world, so a zero standing in for "no data"
@@ -210,6 +212,8 @@ def normalise(raw, city=""):
         # here routes None through `_number`/`_int` and treats it as missing;
         # this one has to do the same before it commits.
         "isDay": _is_day(current.get("is_day")),
+        # Relative humidity now, 0..100, or None when the upstream sent none.
+        "humidity": _int(current.get("relative_humidity_2m")),
         "city": city,
     }
 

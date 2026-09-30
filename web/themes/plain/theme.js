@@ -146,13 +146,50 @@
     // it and docs/THEMING.md says so.
     let drawnActions = null;
 
-    function renderShortcuts(actions) {
+    // The volume bar (T8.4), as the browser's own range input: this theme
+    // draws nothing it does not have to. Sent on `change`, which a range
+    // input fires once, when the finger lifts; held while one is in flight.
+    let volumeInput = null;
+    let volumeBusy = false;
+    let volumeHeld = null;
+
+    function sendVolume(level) {
+        if (volumeBusy) {
+            volumeHeld = level;
+            return;
+        }
+        volumeBusy = true;
+        const sent = DeskPanel.setVolume(level, (ok, state) => {
+            volumeBusy = false;
+            const measured = parseInt(state, 10);
+            if (ok && Number.isInteger(measured) && volumeInput) {
+                volumeInput.value = String(measured);
+            }
+            if (volumeHeld !== null) {
+                const next = volumeHeld;
+                volumeHeld = null;
+                sendVolume(next);
+            }
+        });
+        if (!sent) {
+            volumeBusy = false;
+            volumeHeld = null;
+        }
+    }
+
+    function renderShortcuts(actions, payload) {
         const wanted = shortcutsFor(actions, words.tag);
-        const signature = wanted.map((s) => s.id + ':' + s.label).join(',');
+        const volume = volumeFields(payload, words.tag);
+        const signature = wanted.map((s) => s.id + ':' + s.label).join(',')
+            + (volume ? '|volume:' + volume.label : '');
+        if (volumeInput && volume && volume.level !== null && !volumeBusy) {
+            volumeInput.value = String(volume.level);
+        }
         if (signature === drawnActions) {
             return;
         }
         drawnActions = signature;
+        volumeInput = null;
         els.shortcuts.textContent = '';
         for (const shortcut of wanted) {
             const button = document.createElement('button');
@@ -165,6 +202,24 @@
             applyState(button, 'unknown');
             button.addEventListener('click', () => press(button, shortcut));
             els.shortcuts.appendChild(button);
+        }
+        if (volume) {
+            volumeInput = document.createElement('input');
+            volumeInput.type = 'range';
+            volumeInput.className = 'volume';
+            volumeInput.min = '0';
+            volumeInput.max = '100';
+            volumeInput.step = '10';
+            volumeInput.value = String(volume.level === null ? 50 : volume.level);
+            volumeInput.setAttribute('aria-label', volume.label);
+            volumeInput.title = volume.label;
+            volumeInput.addEventListener('change', () => {
+                sendVolume(Number(volumeInput.value));
+                // A range input keeps focus after `change`; blurred so the
+                // next payload's level is not taken for a drag in progress.
+                volumeInput.blur();
+            });
+            els.shortcuts.appendChild(volumeInput);
         }
     }
 
@@ -347,6 +402,12 @@
             rain.textContent = `${words.rainChance}: ${formatPercent(chance)}`;
             els.weather.appendChild(rain);
         }
+        const humidity = relativeHumidity(weather);
+        if (humidity !== null) {
+            const humid = el('div', null, 'w-chance');
+            humid.textContent = `${words.humidity}: ${formatPercent(humidity)}`;
+            els.weather.appendChild(humid);
+        }
         // The moon as a sentence, because this theme draws no pictures on
         // purpose (T6.13). The neon theme spends a filled path on the phase
         // and puts the name in the glyph's accessible label; here the name
@@ -448,7 +509,7 @@
         fill(els.crypto, payload.crypto || [], 'symbol', 'price', 'USD', formatPrice);
         renderWeather(payload.weather);
         renderBattery(payload.battery);
-        renderShortcuts(payload.actions);
+        renderShortcuts(payload.actions, payload);
         agenda = payload.agenda;
         renderAgenda(new Date());
         els.stale.hidden = !payload.stale;

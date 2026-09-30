@@ -67,6 +67,21 @@ public final class Actions {
         return null;
     }
 
+    /** The one action with a value: the PC's output volume (T8.4). */
+    public static final String VOLUME = "volume";
+
+    /**
+     * {@code <link base>/action/volume/<level>}, or null for a level outside
+     * 0..100 or no host. The level is an int, so the path is digits the app
+     * formatted and never text the page handed over (ADR 0015).
+     */
+    public static String volumeUrlFor(PanelLink link, String host, int level) {
+        if (level < 0 || level > 100 || host == null || host.isEmpty()) {
+            return null;
+        }
+        return link.base(host) + "/action/" + VOLUME + "/" + Integer.toString(level);
+    }
+
     /**
      * {@code <link base>/action/<id>}, or null if the id is not allowed.
      *
