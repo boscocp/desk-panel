@@ -54,6 +54,7 @@
      * on the way past, not a fault. 11.7:1 on black, so it is legible across
      * the desk at the smallest size the panel uses. */
     --warn: #FFB03F;        /* caution: the battery above its temperature floor */
+    --warn-glow: rgba(255, 176, 63, 0.6);  /* the AGENDA bar's lit segments */
 
     /* Derived, all from --accent. */
     --rule: rgba(213, 63, 167, 0.38);
@@ -1260,6 +1261,9 @@ body {
 :root[data-night] {
     --glow: rgba(213, 63, 167, 0.22);
     --glow-dim: rgba(187, 129, 170, 0.16);
+    /* The bar's segments stay lit -- they are the reading, not the
+     * decoration -- and lose their halo like everything else. */
+    --warn-glow: transparent;
 
     /* Not dimmed, and this is the one deliberate exception. STALE is the only
      * thing on this panel that says something is wrong, and the reason it
@@ -1272,17 +1276,12 @@ body {
 /* --- The AGENDA card (T9.1) ------------------------------------------------
  *
  * The same box as #weather -- the two share #side's 1fr/1fr -- so the same
- * budget: 143px of content under a 27px title. Three lines at most, and the
- * worst case is all three with the failure line at its two: 35 + 30 + 52 =
- * 117px. The countdown and the title never wrap. The countdown is short by
- * construction, a title can be anything a person typed into a calendar, and a
- * wrapped title is how this card would grow into the one under it -- so every
- * line ellipsises and the card's own clip is the backstop.
- *
- * Since the quest-tracker redesign it holds two events rather than one, so
- * the countdown is no longer a 32px line of its own: it shares the first
- * row's head with the chip and what is left, and the title is the largest
- * thing here. See .a-body below for the arithmetic.
+ * budget: ~142px of content under a 27px title. Two events and a failure
+ * line at most, and nothing wraps: a title can be anything a person typed
+ * into a calendar, and a wrapped title is how this card would grow into the
+ * one under it -- so every line ellipsises and the card's own clip is the
+ * backstop. The title is the largest thing here; the countdown shares the
+ * first row's head with the chip and what is left. See .a-body below.
  */
 #agenda {
     color: var(--accent);
@@ -1302,8 +1301,9 @@ body {
  * the second is one line under a dashed rule. Two events fit because every
  * line is a single line -- each one ellipsises rather than wraps.
  *
- * Height, at 872x392: 23 (head) + 27 (title) + 12 (bar) + 30 (next) = 92px of
- * the ~104 under the title. */
+ * Height, measured at 872x392: head, title, bar and the next line are 89px of
+ * the ~142 under the title, and a two-line failure under both rows still fits
+ * (~128). */
 .a-head,
 .a-next {
     display: flex;
@@ -1392,13 +1392,7 @@ body {
 
 .a-bar i.on {
     background: var(--warn);
-    box-shadow: 0 0 4px rgba(255, 176, 63, 0.6);
-}
-
-/* Glow and shadow go at night like everywhere else; the segments stay lit,
- * because they are the reading, not the decoration. */
-:root[data-night="on"] .a-bar i.on {
-    box-shadow: none;
+    box-shadow: 0 0 4px var(--warn-glow);
 }
 
 .a-next {
@@ -1410,6 +1404,13 @@ body {
 .a-next .a-when {
     flex: 0 0 auto;
     color: var(--accent);
+}
+
+/* Two meetings at once: the second row is in progress too, and takes the
+ * same colour. Needs the extra class, since .a-next .a-when above is as
+ * specific as .a-live .a-when and comes later. */
+.a-next.a-live .a-when {
+    color: var(--warn);
 }
 
 .a-next .a-title {
@@ -1424,8 +1425,7 @@ body {
 
 /* Which account needs its login run again, or is down. Dim, small and last:
  * it is the owner's to fix on the PC, not something to read from the chair.
- * It takes the second event's place (agendaRows drops that row), and gets
- * two clamped lines where the others ellipsise, because it is a list. */
+ * Two clamped lines where the others ellipsise, because it is a list. */
 .a-failed {
     display: -webkit-box;
     -webkit-box-orient: vertical;

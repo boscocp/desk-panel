@@ -110,7 +110,8 @@ the phone's real viewport.
   `changeClass`, `formatTemp`, `formatRange`, `weatherLabel`, `weatherGlyph`,
   `formatBattery`, `tempClass`, `sparklinePath`, `isNight`, `overflowsBy`,
   `scrollPlan`, `worthScrolling`, `shortcutsFor`, `agendaFields` (and the two it
-  is built on, `nextEvent` and `untilText`). Use them. A theme that reimplemented `formatPrice` would
+  is built on, `nextEvent` and `untilText`), `agendaRows`, `agendaSegments` and
+  `marketClosed`. Use them. A theme that reimplemented `formatPrice` would
   reintroduce the sub-1 rounding bug the yuan found in T6.5, once per theme —
   and one that joined a daily low and high with a hyphen would reintroduce
   `-12-42`, which is what `formatRange` exists to stop (T6.8).
@@ -570,14 +571,15 @@ next event):
 const card = agendaRows(payload.agenda, new Date(), words.tag);
 // null: as above
 // { rows: [{ title, icon, live, when, aside, progress }], none, failed }
-//   at most two rows, one when there is a failure line to make room for;
+//   at most two rows, with or without a failure line under them;
 //   icon is 'live' | 'clock' | 'calendar', a name and never markup;
 //   progress is 0..1 through a meeting in progress, else null
+const lit = agendaSegments(row.progress, 10);   // floor: full means over
 ```
 
 `agendaRows` ranks exactly as `agendaFields` does, so its first row is always
 the event `agendaFields` would have shown. `?agenda=live` in the mock starts the
-first meeting half an hour ago, for the chip and the bar.
+first meeting 35 minutes ago, for the chip and the bar.
 
 - **Which event, and what the countdown says, is `agendaFields`'s decision.**
   An event in progress beats the next one; a timed event later today beats an
@@ -604,7 +606,7 @@ first meeting half an hour ago, for the chip and the bar.
   one from the other. `e2e/layout/stress.js` carries the widest countdown at full
   size ("amanhã 09:00"), a very long title and the longest failure line;
   `e2e/layout/agenda.js` carries a meeting in progress that ends tomorrow,
-  which neon draws a size smaller.
+  which `agendaRows` gives no time-left so that "até amanhã 10:00" fits.
 
 ## Whether the market is open is the PC's answer
 

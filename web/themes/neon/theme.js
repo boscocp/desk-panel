@@ -1029,18 +1029,6 @@
         els.weather.appendChild(body);
     }
 
-    // The AGENDA card (T9.1), reserved since T6.12 and filled here.
-    //
-    // Three lines, in the order they are read from the chair: how long until
-    // it starts, largest; what it is; and, only when an account failed, which
-    // one needs reconnecting. The countdown is on top because it is the line
-    // that changes and the reason the card exists -- a title is something the
-    // owner already knows once they see the time.
-    //
-    // No payload agenda, or a PC with no calendar connected, puts the card
-    // back to reserved: empty, titled, and marked for e2e/layout/measure.js
-    // exactly as it was before this task. A failed account costs its own line
-    // and nothing else -- the other provider's meeting is still the next one.
     // The AGENDA card's three pictures, as stroke paths on a 24-unit grid.
     // Names come from agendaRows; what they look like is this theme's. A
     // name this table does not know draws nothing, like an unknown weather
@@ -1075,30 +1063,40 @@
 
     function agendaBar(progress) {
         const bar = el('div', null, 'a-bar');
-        const lit = Math.round(progress * AGENDA_SEGMENTS);
+        const lit = agendaSegments(progress, AGENDA_SEGMENTS);
         for (let i = 0; i < AGENDA_SEGMENTS; i += 1) {
             bar.appendChild(el('i', null, i < lit ? 'on' : null));
         }
         return bar;
     }
 
-    // The first row, which is the one read from the chair: a head line (the
-    // chip or the icon, when, and what is left), the title, and the bar while
-    // the meeting runs.
+    // The chip for a meeting in progress, the icon otherwise. The word rather
+    // than a colour alone: a chip says "now" to anybody, and a screen reader
+    // reads it -- on either row.
+    function agendaMark(row) {
+        if (row.live) {
+            const chip = el('span', null, 'a-chip');
+            chip.textContent = words.agenda.now.toUpperCase();
+            return chip;
+        }
+        return agendaIcon(row.icon);
+    }
+
+    // The AGENDA card (T9.1), a quest tracker since the redesign: the first
+    // event is read from the chair -- a head line, its title and, while it
+    // runs, a segmented bar -- and the second is one line under it. No
+    // payload agenda, or a PC with no calendar connected, puts the card back
+    // to reserved: empty, titled, and marked for e2e/layout/measure.js. A
+    // failed account costs its own line and nothing else.
+    //
+    // The first row: a head line (the mark, when, and what is left), the
+    // title, and the bar while the meeting runs.
     function agendaLead(row) {
         const lead = el('div', null, 'a-lead' + (row.live ? ' a-live' : ''));
         const head = el('div', null, 'a-head');
-        if (row.live) {
-            // The word rather than a colour alone: a chip says "now" to
-            // anybody, and a screen reader reads it.
-            const chip = el('span', null, 'a-chip');
-            chip.textContent = words.agenda.now.toUpperCase();
-            head.appendChild(chip);
-        } else {
-            const icon = agendaIcon(row.icon);
-            if (icon) {
-                head.appendChild(icon);
-            }
+        const mark = agendaMark(row);
+        if (mark) {
+            head.appendChild(mark);
         }
         const when = el('span', null, 'a-when');
         when.textContent = row.when;
@@ -1123,9 +1121,9 @@
     // The second row: one line, icon, when, title.
     function agendaNext(row) {
         const next = el('div', null, 'a-next' + (row.live ? ' a-live' : ''));
-        const icon = agendaIcon(row.icon);
-        if (icon) {
-            next.appendChild(icon);
+        const mark = agendaMark(row);
+        if (mark) {
+            next.appendChild(mark);
         }
         const when = el('span', null, 'a-when');
         when.textContent = row.when;
