@@ -315,6 +315,17 @@ body {
     line-height: 1.4;
 }
 
+/* The meeting alert (T9.5): no motion in this theme, so the line turns the
+ * caution colour and gains a marker. host.js sets data-alert on <html>. */
+:root[data-alert] #agenda {
+    color: #FFB03F;
+}
+
+:root[data-alert] #agenda .a-line::before {
+    content: "(!)\00A0";
+    font-weight: 700;
+}
+
 .a-line {
     white-space: nowrap;
     overflow: hidden;
@@ -327,7 +338,16 @@ body {
     flex: 0 0 auto;
     margin-left: auto;
     display: flex;
+    align-items: center;
     gap: 8px;
+}
+
+/* The volume bar (T8.4): the browser's own slider, as wide as two buttons so
+ * a finger can place it. */
+#shortcuts .volume {
+    width: 128px;
+    min-height: 56px;
+    accent-color: #ddd;
 }
 
 /* 56px on both axes, the same as neon and for the same reason: it is a fact

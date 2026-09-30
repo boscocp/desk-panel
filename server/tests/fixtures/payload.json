@@ -7,6 +7,11 @@
     ],
     "agenda": {
       "accounts": 2,
+      "alerts": {
+        "chime_min": 1,
+        "chime_volume": 0.4,
+        "soon_min": 5
+      },
       "events": [
         {
           "allDay": true,
@@ -82,7 +87,8 @@
       }
     ],
     "stale": false,
-    "theme": "neon"
+    "theme": "neon",
+    "volume": null
   },
   "weather": {
     "city": "São Paulo",

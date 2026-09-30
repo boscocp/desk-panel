@@ -171,10 +171,36 @@ def check_config(config):
             or not 0 < lookahead <= 24 * 14:
         raise ValueError(f"calendar_lookahead_h must be a number of hours from 1 to 336, "
                          f"not {lookahead!r}")
+    alerts_from_config(config)
     hosts = config.get("allowed_hosts", [])
     if not isinstance(hosts, list) or not all(isinstance(h, str) and h.strip() for h in hosts):
         raise ValueError(f"allowed_hosts must be a list of names, e.g. [\"mypc.local\"], "
                          f"not {hosts!r}")
+
+
+def alerts_from_config(config):
+    """Pure: the meeting alerts the page reads from `agenda.alerts` (T9.5).
+
+    `soon_min` and `chime_min` are whole minutes from 0 to 60, and 0 turns
+    that alert off. `chime_volume` is 0 to 1. Raises ValueError, so a typo is
+    found at startup (via check_config), not by a meeting that arrives in
+    silence.
+    """
+    alerts = {}
+    for key, name in (("soon_min", "agenda_soon_min"), ("chime_min", "agenda_chime_min")):
+        value = config.get(name, DEFAULT_ALERTS[key])
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 60:
+            raise ValueError(f"{name} must be a whole number of minutes from 0 to 60 "
+                             f"(0 turns it off), not {value!r}")
+        alerts[key] = value
+    volume = config.get("agenda_chime_volume", DEFAULT_ALERTS["chime_volume"])
+    if isinstance(volume, bool) or not isinstance(volume, (int, float)) or not 0 <= volume <= 1:
+        raise ValueError(f"agenda_chime_volume must be a number from 0 to 1, not {volume!r}")
+    alerts["chime_volume"] = float(volume)
+    return alerts
+
+
+DEFAULT_ALERTS = {"soon_min": 5, "chime_min": 1, "chime_volume": 0.4}
 
 
 def _rfc3339(instant):

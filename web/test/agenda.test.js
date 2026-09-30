@@ -270,7 +270,7 @@ test('agendaFields draws the countdown and the title', () => {
         events: [timed(at(2026, 9, 29, 14, 0), at(2026, 9, 29, 14, 30))],
         failed: [],
     }, NOW, 'pt-BR');
-    assert.deepEqual(f, { title: 'Standup', when: 'em 25 min', until: null, inProgress: false, failed: null });
+    assert.deepEqual(f, { title: 'Standup', when: 'em 25 min', until: null, inProgress: false, soon: false, failed: null });
 });
 
 test('a blank title is no title', () => {
@@ -355,7 +355,7 @@ test('with an account failing and no event, the card does not claim nothing is a
 
 test('no event at all still draws a card that says so', () => {
     const f = agendaFields({ accounts: 1, events: [], failed: [] }, NOW, 'en');
-    assert.deepEqual(f, { title: null, when: 'nothing ahead', until: null, inProgress: false, failed: null });
+    assert.deepEqual(f, { title: null, when: 'nothing ahead', until: null, inProgress: false, soon: false, failed: null });
 });
 
 test('every language has every agenda word', () => {

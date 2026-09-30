@@ -144,6 +144,10 @@ public class MainActivity extends Activity implements PanelService.Panel {
         // The panel's clock is JavaScript; the data it renders will arrive from
         // native Java, never from a fetch inside the page (ADR 0002).
         settings.setJavaScriptEnabled(true);
+        // The meeting chime (T9.5) plays with nobody touching the screen, and
+        // by default a WebView refuses any media that no gesture started.
+        // The page's own asset is the only sound it has.
+        settings.setMediaPlaybackRequiresUserGesture(false);
         // Nothing legitimate in this app loads http:// into the page, so the
         // strictest mode is free. Never widen this to ALWAYS_ALLOW.
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
@@ -416,6 +420,17 @@ public class MainActivity extends Activity implements PanelService.Panel {
         @JavascriptInterface
         public boolean invoke(String id) {
             return PanelService.invokeAction(id, (resolved, ok, state) ->
+                    runOnUiThread(() -> pushActionResultToPage(resolved, ok, state)));
+        }
+
+        /**
+         * Sets the PC's output volume (T8.4). An {@code int}, not a string:
+         * the bridge converts the page's number, and {@link Actions#volumeUrlFor}
+         * refuses anything outside 0..100 before a request exists.
+         */
+        @JavascriptInterface
+        public boolean setVolume(int level) {
+            return PanelService.invokeVolume(level, (resolved, ok, state) ->
                     runOnUiThread(() -> pushActionResultToPage(resolved, ok, state)));
         }
     }

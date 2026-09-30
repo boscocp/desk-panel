@@ -247,7 +247,7 @@ class PayloadFixtureTests(unittest.TestCase):
         produced = build()["quotes"]
         self.assertEqual(
             set(produced),
-            {"quotes", "fx", "crypto", "stale", "theme", "language", "night", "actions", "agenda", "b3Open"})
+            {"quotes", "fx", "crypto", "stale", "theme", "language", "night", "actions", "agenda", "b3Open", "volume"})
 
     def test_the_rows_carry_their_history(self):
         # A fixture with empty sparklines would let the Android and web

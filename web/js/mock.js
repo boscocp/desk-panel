@@ -58,7 +58,7 @@
     const ACTIONS = (() => {
         const asked = new URLSearchParams(location.search).get('actions');
         if (asked === null) {
-            return ['mute-audio', 'mute-mic'];
+            return ['mute-audio', 'mute-mic', 'volume'];
         }
         return asked ? asked.split(',') : [];
     })();
@@ -72,12 +72,17 @@
     // with no calendar connected, which leaves the card reserved -- the state
     // a theme is most likely to forget to draw. `?agenda=live` starts the
     // first meeting 35 minutes ago, for the chip and the progress bar.
+    // `?agenda=soon` starts it 70 seconds out, so the bell and the breath
+    // show at once and the chime plays ten seconds later (T9.5).
+    let mockVolume = 60;
+
     const AGENDA = (() => {
         const asked = new URLSearchParams(location.search).get('agenda');
         if (asked === 'off') {
             return { accounts: 0, events: [], failed: [] };
         }
         const now = Date.now();
+        const firstAt = asked === 'live' ? -35 : asked === 'soon' ? 70 / 60 : 25;
         const minutes = (n) => new Date(now + n * 60000).toISOString();
         const today = new Date();
         const day = (offset) => {
@@ -87,8 +92,7 @@
         return {
             accounts: 2,
             events: [
-                { start: minutes(asked === 'live' ? -35 : 25),
-                  end: minutes(asked === 'live' ? 25 : 55), allDay: false,
+                { start: minutes(firstAt), end: minutes(firstAt + 30), allDay: false,
                   source: 'google/personal', title: 'Standup' },
                 { start: minutes(85), end: minutes(145), allDay: false,
                   source: 'microsoft/work',
@@ -97,6 +101,7 @@
                   title: 'Aniversário' },
             ],
             failed: [],
+            alerts: { soon_min: 5, chime_min: 1, chime_volume: 0.4 },
         };
     })();
 
@@ -225,6 +230,9 @@
             // sends, and the panel falls back to neon.
             theme: THEME,
             actions: ACTIONS,
+            // The volume bar's level (T8.4): whatever the last mock press
+            // set, as the PC would measure it; null when the bar is off.
+            volume: ACTIONS.indexOf('volume') === -1 ? null : { level: mockVolume },
             // The market shut, now and then or for good: see B3_CLOSED.
             b3Open: B3_CLOSED ? false : tick % 4 !== 0,
             // Every seventh tick one account fails, so the failure line is
@@ -253,6 +261,12 @@
     // argument `stale` above is made with).
     let presses = 0;
     window.__actions = {
+        setVolume: (level) => {
+            mockVolume = level;
+            console.log('mock: volume ' + level);
+            setTimeout(() => window.onActionResult('volume', true, String(level)), 250);
+            return true;
+        },
         invoke: (id) => {
             const ok = ++presses % 3 !== 0;
             console.log('mock: action ' + id + ' -> ' + (ok ? 'ok' : 'err'));

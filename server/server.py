@@ -156,6 +156,12 @@ DEFAULT_CONFIG = {
     # what the owner asked for, and a platform the server cannot read answers
     # "unknown", which leaves the panel following the login alone.
     "follow_display": True,
+    # The meeting alerts on the AGENDA card (T9.5): a visual cue this many
+    # minutes before a meeting, a soft chime this many before it, at this
+    # volume. 0 turns either off. See config.example.toml.
+    "agenda_soon_min": 5,
+    "agenda_chime_min": 1,
+    "agenda_chime_volume": 0.4,
     # The panel's traffic, private on the LAN (T9.4, ADR 0018). All three of
     # panel_key, tls_cert and tls_key, or none; none is the server as it was,
     # open to anyone on the network, and `main` says so at every start.
@@ -556,8 +562,46 @@ class App:
             for provider, name in self.calendar_accounts
         }
         self.agenda_cache = TimedCache()
+        # The output volume the bar draws (T8.4), read off the request path
+        # like the agenda: on Windows a read is a PowerShell compile, seconds
+        # long, and /quotes must answer the phone in five.
+        self._volume_level = None
+        self._volume_at = None
+        self._volume_lock = threading.Lock()
+        self._volume_refreshing = False
         self._agenda_lock = threading.Lock()
         self._agenda_refreshing = False
+
+    # How old a volume reading may be before the next /quotes asks again. The
+    # bar is the last known level, like the mute cross; somebody turning the
+    # knob on the PC shows up at the next data cycle after this.
+    VOLUME_TTL_S = 20
+
+    def volume_level(self):
+        """The last measured output volume, 0..100 or None, never blocking."""
+        now = self.clock()
+        with self._volume_lock:
+            stale = self._volume_at is None or now - self._volume_at >= self.VOLUME_TTL_S
+            start = stale and not self._volume_refreshing
+            if start:
+                self._volume_refreshing = True
+        if start:
+            def run():
+                level = actions_module.read_volume()
+                with self._volume_lock:
+                    self._volume_level = level
+                    self._volume_at = self.clock()
+                    self._volume_refreshing = False
+            threading.Thread(target=run, name="volume-read", daemon=True).start()
+        return self._volume_level
+
+    def set_volume(self, level):
+        """Set the output volume; returns the measured level. Raises like run_action."""
+        measured = actions_module.set_volume(level)
+        with self._volume_lock:
+            self._volume_level = measured
+            self._volume_at = self.clock()
+        return measured
 
     def run_action(self, action):
         """Execute an enabled action, or raise. Never called with an unknown id.
@@ -694,11 +738,20 @@ class App:
         # an action the server would answer 404 to is a button that does
         # nothing, which T8.2 step 7 calls worse than no button at all.
         payload["actions"] = list(self.enabled_actions)
+        # The volume bar's level (T8.4), when the bar is enabled; null when it
+        # is not, so the key is always there for the payload contract.
+        payload["volume"] = ({"level": self.volume_level()}
+                             if actions_module.VOLUME in self.enabled_actions else None)
         # The next meetings (T9.1), riding /quotes for the fourth time and for
         # the same reason. Always present, even with no account configured, so
         # DataPayload.merge and mock.js are held to the key by the payload
         # contract rather than by somebody remembering it.
-        payload["agenda"] = self.agenda()
+        #
+        # The meeting alerts (T9.5) ride inside it, on a copy: the cached
+        # value is shared between requests, and the page reads them only
+        # where it reads the events.
+        payload["agenda"] = dict(self.agenda(),
+                                 alerts=providers_calendar.alerts_from_config(config))
         return payload
 
     def agenda(self):
@@ -1027,6 +1080,19 @@ def action_id(path):
     return rest if ACTION_ID_RE.fullmatch(rest) else None
 
 
+def volume_level_in(path):
+    """Pure: the level in `/action/volume/<0-100>`, or None for any other path.
+
+    The only route with a value in it (ADR 0015's third amendment). The text
+    becomes an int in `actions.parse_level` here, before anything else runs,
+    and that int is all that travels on.
+    """
+    prefix = "/action/" + actions_module.VOLUME + "/"
+    if not path.startswith(prefix):
+        return None
+    return actions_module.parse_level(path[len(prefix):])
+
+
 def apk_to_serve(directory):
     """Which `*.apk` in `directory` `/app` hands over, or None.
 
@@ -1222,8 +1288,10 @@ def route(method, path, app=None, request_headers=None, channel="plain"):
     if method == "GET" and path == "/":
         return index_page(APK_DIR, offer_apk=serves_apk(app))
 
+    # Every POST under /action/, matched or not: a new route shape there
+    # (the volume's /action/volume/<n>) must never be one that skips the key.
     data_route = (method == "GET" and path in ("/quotes", "/weather")) or (
-        method == "POST" and action_id(path) is not None)
+        method == "POST" and path.startswith("/action/"))
     if data_route and app is not None and not private.authorized(
             getattr(app, "config", None) or {}, request_headers, channel):
         return _json(401, {"error": "unauthorized"})
@@ -1239,8 +1307,11 @@ def route(method, path, app=None, request_headers=None, channel="plain"):
         return _json(200, app.weather())
 
     if method == "POST":
+        level = volume_level_in(path)
+        if level is not None:
+            return run_volume(level, app, request_headers)
         action = action_id(path)
-        if action is not None:
+        if action is not None and action != actions_module.VOLUME:
             return run_action(action, app, request_headers)
 
     return 404, b"", "text/plain", ()
@@ -1363,6 +1434,29 @@ def run_action(action, app, request_headers=None):
         print(f"action {action}: {exc}", file=sys.stderr)
         return _json(500, {"error": "action failed"})
     return _json(200, {"ok": True, "id": action, "state": state})
+
+
+def run_volume(level, app, request_headers=None):
+    """`POST /action/volume/<level>` -- run_action's checks, in its order, plus
+    the level. `state` in the answer is the level the mixer then reports, as a
+    string, or "unknown"."""
+    if app is None:
+        return _json(503, {"error": "not configured"})
+    if actions_module.VOLUME not in getattr(app, "enabled_actions", ()):
+        return _json(404, {"error": "unknown action"})
+    if sent_by_a_browser(request_headers):
+        print("action volume: refused, the request carries browser headers", file=sys.stderr)
+        return _json(403, {"error": "not from a browser"})
+    try:
+        measured = app.set_volume(level)
+    except actions_module.Unsupported as exc:
+        print(f"action volume: {exc}", file=sys.stderr)
+        return _json(501, {"error": "not implemented on this platform"})
+    except actions_module.ActionError as exc:
+        print(f"action volume: {exc}", file=sys.stderr)
+        return _json(500, {"error": "action failed"})
+    state = "unknown" if measured is None else str(measured)
+    return _json(200, {"ok": True, "id": actions_module.VOLUME, "state": state})
 
 
 def _json(status, payload):

@@ -78,10 +78,14 @@ test('the page has a word for every action the server can offer', () => {
     // which is correct behaviour and silent. An action added on the PC and
     // not here is a button that never appears, in one language only if the
     // translation is half done.
+    // `volume` is in the catalogue and is not a button (T8.4): it is the
+    // bar beside them, with a word of its own.
     const catalogue = description('action_ids.json').catalogue;
+    const buttons = catalogue.filter((id) => id !== 'volume');
     for (const language of Object.keys(LANGUAGES)) {
         const drawn = shortcutsFor(catalogue, language).map((button) => button.id);
-        assert.deepEqual(drawn, catalogue,
+        assert.deepEqual(drawn, buttons,
             `${language} has no word for one of the server's actions`);
+        assert.ok(LANGUAGES[language].volume, `${language} has no word for the volume bar`);
     }
 });

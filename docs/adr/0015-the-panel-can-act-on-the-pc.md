@@ -4,6 +4,7 @@ Status: accepted · 2026-09-26 (T8.1) · amended twice the same day — see *A `
 is not enough* and *Toggles, and the state is measured rather than guessed* · amended again
 2026-09-27 (T8.3), which extended "every input" to Linux and wrote down the macOS limit
 Amended 2026-09-30 by [ADR 0018](0018-the-panel-traffic-is-private.md): with a panel key, data and presses need it and go over TLS.
+Amended again 2026-09-30 (T8.4): *One action carries a value, and only this one*.
 
 ## Context
 
@@ -214,6 +215,27 @@ needing to be on the LAN at all**.
 
 The check sits *after* the allowlist, so an unknown id is still 404 whether a browser sent it or
 not: it runs nothing either way, and ordering it first would only change what a probe means.
+
+### One action carries a value, and only this one
+
+Asked for on 2026-09-30: a bar beside MIC that sets the PC's output volume on Windows, macOS
+and Linux (CachyOS). A bar sends a number, and until this amendment the rule was that a request
+carries an id and nothing else. The owner chose the real slider over two step buttons that would
+have kept the rule as it was.
+
+- **`volume` is the only id with a value**, at `POST /action/volume/<level>`. The level is
+  ASCII digits, one to three of them, from 0 to 100. `actions.parse_level` turns it into an
+  `int` before any other check runs, and anything else is the same 404 as an unknown id.
+- **Only that int reaches a command**, formatted by `actions.py` itself: `0.42` for `wpctl`,
+  `42%` for `pactl`, `42` for AppleScript, `0.42f` in the Windows C#. The request's text is
+  never copied into an argument list.
+- **It keeps the property this record rests on: safe to repeat.** Setting the same level twice
+  changes nothing the second time. Anyone on the LAN can still set any level, which is the same
+  class of harm as the mute buttons. With a panel key (ADR 0018) nobody without the APK can.
+- **The phone relays it through its own typed method**, `setVolume(int)`, beside `invoke(id)`.
+  `Actions.volumeUrlFor` refuses anything outside 0..100 before a request exists, and the
+  answer's state is rebuilt from an int before it reaches `evaluateJavascript`.
+- **Adding a second valued action is a change to this section**, not a pattern to copy.
 
 ## Consequences
 

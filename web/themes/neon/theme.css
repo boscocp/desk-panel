@@ -182,7 +182,9 @@ body {
     justify-self: start;
     display: grid;
     grid-auto-flow: column;
-    grid-auto-columns: 104px;
+    /* Content width, with the buttons fixed at 104px below: the volume bar
+     * (T8.4) is a narrower third column, and 3 x 104 + gaps would not fit. */
+    grid-auto-columns: max-content;
     gap: 10px;
     /* **The clipped corner.** #sidebar is `overflow: hidden`, and with the
      * strip flush against its bottom the button's own 1px border landed
@@ -206,6 +208,7 @@ body {
      * comfortably over it in both directions. */
     min-height: 72px;
     min-width: 56px;
+    width: 104px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -288,6 +291,64 @@ body {
 .shortcut.ok,
 .shortcut.err {
     transition: none;
+}
+
+/* The volume bar (T8.4): twice a button's height, growing upwards from the
+ * strip's baseline -- asked for from the chair: at one button's height the
+ * steps were too short to place a finger on. A speaker on top says what it
+ * is. Ten segments fill from the bottom; the whole box is the touch target. */
+#shortcuts {
+    align-items: end;
+}
+
+.volume {
+    height: 152px;
+    width: 48px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 6px 9px 8px;
+    border: 1px solid var(--accent-dim);
+    border-radius: 8px;
+    touch-action: none;
+    cursor: pointer;
+}
+
+.volume .v-icon {
+    flex: 0 0 auto;
+    width: 24px;
+    height: 24px;
+    align-self: center;
+    margin-bottom: 4px;
+    fill: none;
+    stroke: var(--accent-dim);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.volume i {
+    flex: 1 1 0;
+    border-radius: 1px;
+    background: var(--rule-faint);
+}
+
+.volume i.on {
+    background: var(--accent);
+    box-shadow: 0 0 4px var(--glow);
+}
+
+.volume.sending {
+    border-color: var(--accent);
+}
+
+.volume.err {
+    border-color: var(--down);
+}
+
+.volume[data-unknown="1"] i {
+    background: var(--rule-faint);
 }
 
 .shortcut {
@@ -1378,6 +1439,66 @@ body {
     stroke-width: 2;
     stroke-linecap: round;
     stroke-linejoin: round;
+}
+
+/* The meeting alert (T9.5). The bell takes the caution colour, and while a
+ * meeting is inside its window the card pulses: the border itself turns the
+ * caution colour and a wide glow swells around it, two seconds a pulse. The
+ * first cut breathed at a quarter of this and was too subtle to notice from
+ * the chair; it is still a pulse, never a flash. host.js sets data-alert on
+ * <html>; the chime at the last minute is host.js's, not this file's. At
+ * night the breath keeps its rhythm and loses most of its light, like every
+ * other glow here. */
+.a-icon-bell {
+    stroke: var(--warn);
+}
+
+@keyframes agenda-breath {
+    0%, 100% {
+        border-color: var(--accent-dim);
+        box-shadow: 0 0 0 0 transparent;
+    }
+    50% {
+        border-color: var(--warn);
+        box-shadow: 0 0 28px 4px var(--warn-glow), inset 0 0 22px 2px var(--warn-glow);
+    }
+}
+
+:root[data-alert] #agenda {
+    position: relative;
+    animation: agenda-breath 2s ease-in-out infinite;
+}
+
+/* The attention mark on the title's line, asked for from the chair: a round
+ * "!" in the caution colour at the right end of the line, where it cannot
+ * collide with AGENDA or SCHEDULE whichever language is drawn. A pseudo-
+ * element, so the card's markup does not change between alert and none. */
+:root[data-alert] #agenda::after {
+    content: "!";
+    position: absolute;
+    /* 22px: at 26 it touched the start time under it (from the chair). */
+    top: 7px;
+    right: 12px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--warn);
+    color: var(--ground);
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 22px;
+    text-align: center;
+    box-shadow: 0 0 12px 2px var(--warn-glow);
+    animation: agenda-mark 2s ease-in-out infinite;
+}
+
+@keyframes agenda-mark {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.15); }
+}
+
+:root[data-night][data-alert] #agenda {
+    --warn-glow: rgba(255, 176, 63, 0.25);
 }
 
 .a-live .a-icon-live {

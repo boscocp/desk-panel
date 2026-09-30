@@ -118,8 +118,25 @@ public class ActionsTest {
         // cannot widen what the bridge will send. What was missing was only a
         // check that they agree, and this is it -- read from the description
         // `server/tests/test_payload_contract.py` generates.
+        //
+        // The volume (T8.4) is in the catalogue and not in ALLOWED: it is not
+        // a button id the page may name, it is its own bridge method with an
+        // int, so the comparison is the buttons plus that one.
         List<String> known = Contract.actionIds();
+        List<String> relayed = new java.util.ArrayList<>(Actions.ALLOWED);
+        relayed.add(Actions.VOLUME);
         assertEquals("the server's catalogue and this app's allowlist have drifted; "
-                + "see ADR 0015 and tasks/T10.1", known, Actions.ALLOWED);
+                + "see ADR 0015 and tasks/T10.1", known, relayed);
+    }
+
+    @Test
+    public void theVolumeUrlIsDigitsTheAppFormatted() {
+        assertEquals("http://192.168.1.100:8777/action/volume/42",
+                Actions.volumeUrlFor(OPEN, "192.168.1.100", 42));
+        assertEquals("https://192.168.1.100:8778/action/volume/0",
+                Actions.volumeUrlFor(new PanelLink("k".repeat(32)), "192.168.1.100", 0));
+        assertNull(Actions.volumeUrlFor(OPEN, "192.168.1.100", 101));
+        assertNull(Actions.volumeUrlFor(OPEN, "192.168.1.100", -1));
+        assertNull(Actions.volumeUrlFor(OPEN, "", 42));
     }
 }
