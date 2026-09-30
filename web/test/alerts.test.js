@@ -85,3 +85,14 @@ test('garbage never throws', () => {
     }
     assert.equal(agendaAlert(agenda([inMinutes(1)]), new Date('nope')), null);
 });
+
+// Not an alert, but new in the same wave: the humidity under the range.
+const { relativeHumidity } = require('../js/format.js');
+
+test('relative humidity is a whole percent or nothing', () => {
+    assert.equal(relativeHumidity({ humidity: 62 }), 62);
+    assert.equal(relativeHumidity({ humidity: 61.6 }), 62);
+    assert.equal(relativeHumidity({ humidity: 140 }), 100);
+    assert.equal(relativeHumidity({}), null);
+    assert.equal(relativeHumidity(null), null);
+});

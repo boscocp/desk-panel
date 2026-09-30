@@ -257,12 +257,12 @@ class OpenMeteoTests(unittest.TestCase):
     def test_a_list_body_normalises_to_empty_rather_than_raising(self):
         weather = providers_openmeteo.normalise([1, 2])
         self.assertIsNone(weather["tempC"])
-        self.assertEqual(set(weather), {"tempC", "minC", "maxC", "code", "isDay", "precipProb", "city"})
+        self.assertEqual(set(weather), {"tempC", "minC", "maxC", "code", "isDay", "precipProb", "humidity", "city"})
 
     def test_forecast_fixture_normalises_to_the_contract_shape(self):
         weather = providers_openmeteo.normalise(fixture("openmeteo_forecast.json"),
                                                 city="São Paulo")
-        self.assertEqual(set(weather), {"tempC", "minC", "maxC", "code", "isDay", "precipProb", "city"})
+        self.assertEqual(set(weather), {"tempC", "minC", "maxC", "code", "isDay", "precipProb", "humidity", "city"})
         self.assertIsInstance(weather["tempC"], float)
         self.assertIsInstance(weather["code"], int)
 
@@ -449,3 +449,22 @@ class PrecipitationProbabilityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HumidityTests(unittest.TestCase):
+    """The relative humidity under the day's range (asked for 2026-09-30)."""
+
+    def test_the_current_humidity_is_a_whole_percent(self):
+        from server import providers_openmeteo
+        raw = {"current": {"time": "2026-09-19T11:15", "relative_humidity_2m": 62}}
+        self.assertEqual(providers_openmeteo.normalise(raw)["humidity"], 62)
+
+    def test_no_humidity_is_none_not_zero(self):
+        from server import providers_openmeteo
+        self.assertIsNone(providers_openmeteo.normalise({"current": {}})["humidity"])
+
+    def test_the_request_asks_for_it(self):
+        from server import providers_openmeteo
+        seen = []
+        providers_openmeteo.fetch_forecast(0, 0, "UTC", get=lambda url: seen.append(url) or {})
+        self.assertIn("relative_humidity_2m", seen[0])

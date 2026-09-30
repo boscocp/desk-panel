@@ -398,6 +398,12 @@
             rain.textContent = `${words.rainChance}: ${formatPercent(chance)}`;
             els.weather.appendChild(rain);
         }
+        const humidity = relativeHumidity(weather);
+        if (humidity !== null) {
+            const humid = el('div', null, 'w-chance');
+            humid.textContent = `${words.humidity}: ${formatPercent(humidity)}`;
+            els.weather.appendChild(humid);
+        }
         // The moon as a sentence, because this theme draws no pictures on
         // purpose (T6.13). The neon theme spends a filled path on the phase
         // and puts the name in the glyph's accessible label; here the name

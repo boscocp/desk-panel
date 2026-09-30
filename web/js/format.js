@@ -323,6 +323,7 @@ const LANGUAGES = {
         unknown: 'Desconhecido',
         // Never drawn: the accessible name of the rain drop beside the city.
         rainChance: 'Chance de chuva',
+        humidity: 'Umidade relativa',
         // The eight phases, in the order a lunation visits them. The panel
         // draws a shape and these are its accessible name -- eight glyphs
         // cannot tell a waxing crescent from a waning one at 24px, and the
@@ -428,6 +429,7 @@ const LANGUAGES = {
         tag: 'en',
         unknown: 'Unknown',
         rainChance: 'Chance of rain',
+        humidity: 'Relative humidity',
         moon: {
             'new': 'New moon',
             'waxing-crescent': 'Waxing crescent',
@@ -1222,6 +1224,17 @@ function moonFields(moon, words) {
 // There is no wording anywhere near this. Asked for from the chair as "sem
 // palavra, com icone de chuva": a drop and a number, and the card stays
 // readable in a language nobody has translated it into.
+// The air's relative humidity now, a whole percent, or null when the PC sent
+// none (an older server, or open-meteo without the field). Same rule as the
+// chance of rain beside it: a number or nothing, never a dash.
+function relativeHumidity(weather) {
+    const value = weather && weather.humidity;
+    if (!Number.isFinite(value)) {
+        return null;
+    }
+    return Math.max(0, Math.min(100, Math.round(value)));
+}
+
 function chanceOfRain(weather) {
     const value = weather && weather.precipProb;
     if (!Number.isFinite(value)) {
@@ -1615,7 +1628,7 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         formatPrice, formatRate, formatPair, formatTemp, formatChange, changeClass,
         weatherLabel, weatherGlyph, formatRange, volumeFields,
-        moonFields, formatPercent, chanceOfRain, MOON_PHASES,
+        moonFields, formatPercent, chanceOfRain, relativeHumidity, MOON_PHASES,
         strings, LANGUAGES, FALLBACK_LANGUAGE,
         isNight,
         offsetFor, burnInSchedule,

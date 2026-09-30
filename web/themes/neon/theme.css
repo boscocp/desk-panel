@@ -1005,6 +1005,25 @@ body {
  * because the moon sits at its right-hand end, and `space-between` rather than
  * a margin because the two halves are not the same width from one payload to
  * the next -- `-10 / 42` is wider than `18.3 / 28.5`. */
+.w-humid {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    font-size: 22px;
+    line-height: 1.2;
+    color: var(--accent-dim);
+}
+
+.w-humid-glyph {
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: var(--accent-dim);
+    stroke-width: 2;
+    stroke-linejoin: round;
+}
+
 .w-range {
     display: flex;
     align-items: center;

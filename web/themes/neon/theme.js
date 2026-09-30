@@ -716,6 +716,9 @@
     // three <use> elements is a second mechanism for the sake of 80 bytes.
     const CLOUD = 'M7.5 16h8.5a3.2 3.2 0 0 0 .3-6.4 4.6 4.6 0 0 0-8.8-1.1'
                 + 'A3.6 3.6 0 0 0 7.5 16z';
+    // A single drop, for the humidity line.
+    const HUMIDITY_ICON = 'M12 3.5c3 4 6 7.2 6 10.5a6 6 0 0 1-12 0c0-3.3 3-6.5 6-10.5z';
+
     const GLYPHS = {
         clear: 'M16.5 12a4.5 4.5 0 1 1-9 0 4.5 4.5 0 1 1 9 0'
              + 'M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3'
@@ -1161,6 +1164,25 @@
         }
 
         body.append(city, main, range);
+
+        // The relative humidity, under the range (asked for 2026-09-30): a
+        // drop and a number, like the chance of rain, and the word in the
+        // accessible name. Nothing at all when the PC sent none.
+        const humidity = relativeHumidity(weather);
+        if (humidity !== null) {
+            const line = el('div', null, 'w-humid');
+            const drop = svgIcon(HUMIDITY_ICON, 'w-humid-glyph');
+            if (drop) {
+                drop.removeAttribute('aria-hidden');
+                drop.setAttribute('role', 'img');
+                drop.setAttribute('aria-label', words.humidity);
+                line.appendChild(drop);
+            }
+            const pct = el('span');
+            pct.textContent = formatPercent(humidity);
+            line.appendChild(pct);
+            body.appendChild(line);
+        }
         els.weather.appendChild(body);
     }
 

@@ -93,6 +93,7 @@
   "weather": {
     "city": "São Paulo",
     "code": 3,
+    "humidity": null,
     "isDay": true,
     "maxC": 27.0,
     "minC": 18.0,

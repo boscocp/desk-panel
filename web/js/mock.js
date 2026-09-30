@@ -137,6 +137,7 @@
         // temperatures beside it. 98 is what the live endpoint answered for
         // Sao Paulo on 2026-09-22.
         precipProb: 98,
+        humidity: 62,
         moon: { phase: 'waxing-gibbous', illum: 84, source: 'usno' },
     };
     const BASE_BATTERY = { level: 87, tempC: 31, charging: true };
