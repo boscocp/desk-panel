@@ -130,7 +130,11 @@ With the console in Portuguese the names are *Público-alvo*, *Clientes*, *Acess
      the card would say `reconnect` every week
      ([Google](https://developers.google.com/identity/protocols/oauth2)).
    - A published app nobody has verified is allowed for personal use by fewer than 100 users.
-     You click through the "Google hasn't verified this app" warning once, at login.
+     You click through the "Google hasn't verified this app" warning once, at login: choose
+     **Advanced**, then **Go to *your app name* (unsafe)**, the last link on the page. The
+     developer address above it is a `mailto:` link and only opens your email app. The name
+     shown is the one under **Branding**, so if it is not the project you just configured, the
+     client id in your config belongs to another project.
    - **To check it:** *Audience* shows *Publishing status*, which must read *In production*.
      If it reads *Testing*, press *Publish app* there. At login, a published app shows the
      "Google hasn't verified this app" warning; a testing one says it is only available to
