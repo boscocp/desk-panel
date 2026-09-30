@@ -40,6 +40,7 @@ from server import (market_hours, oauth, providers_awesomeapi,  # noqa: E402
                     providers_binance, providers_brapi, providers_calendar,
                     providers_openmeteo, providers_usno)
 from server import actions as actions_module  # noqa: E402
+from server import private  # noqa: E402
 from server.config_format import ConfigError, format_for_path, merge, parse  # noqa: E402
 from server.upstream import UpstreamError  # noqa: E402
 
@@ -155,6 +156,16 @@ DEFAULT_CONFIG = {
     # what the owner asked for, and a platform the server cannot read answers
     # "unknown", which leaves the panel following the login alone.
     "follow_display": True,
+    # The panel's traffic, private on the LAN (T9.4, ADR 0018). All three of
+    # panel_key, tls_cert and tls_key, or none; none is the server as it was,
+    # open to anyone on the network, and `main` says so at every start.
+    "panel_key": "",
+    "tls_cert": "",
+    "tls_key": "",
+    "tls_port": private.TLS_PORT,
+    # Whether `/app` hands out the APK. Off: once the APK carries panel_key,
+    # whoever downloads it has the key (ADR 0018).
+    "serve_apk": False,
     # The owner's calendars (T9.1, ADR 0017). Empty is the default and costs
     # nothing: no account, no request, and the AGENDA card stays reserved.
     "calendar_accounts": [],
@@ -1115,19 +1126,23 @@ def apk_download(directory):
     return 200, body, APK_CONTENT_TYPE, (("Content-Disposition", disposition),)
 
 
-def index_page(directory):
+def index_page(directory, offer_apk=True):
     """One page, one link, so the phone only has to remember host and port.
 
     It exists because typing `/app` on a phone keyboard is worse than tapping
     a link, and because a bare host:port answering 404 reads like the server
     is broken.
     """
-    apk = apk_to_serve(directory)
+    apk = apk_to_serve(directory) if offer_apk else None
     try:
         size = apk.stat().st_size if apk is not None else None
     except OSError:
         size = None
-    if apk is None or size is None:
+    if not offer_apk:
+        # Said rather than hidden: the page is where somebody goes looking
+        # for the APK, and a missing link with no reason reads as a bug.
+        offer = "<p>The APK is not served here (<code>serve_apk = false</code>).</p>"
+    elif apk is None or size is None:
         offer = "<p>No APK built yet.</p>"
     else:
         offer = (
@@ -1156,7 +1171,12 @@ def index_page(directory):
     return 200, body.encode("utf-8"), "text/html; charset=utf-8", ()
 
 
-def route(method, path, app=None, request_headers=None):
+def serves_apk(app):
+    """Whether `/app` may hand out the APK. Off without an app (ADR 0018)."""
+    return bool((getattr(app, "config", None) or {}).get("serve_apk", False))
+
+
+def route(method, path, app=None, request_headers=None, channel="plain"):
     """Routing: (method, path) -> (status, body_bytes, content_type, headers).
 
     The returned `headers` is extra response headers only -- Content-Type and
@@ -1174,6 +1194,10 @@ def route(method, path, app=None, request_headers=None):
     Every other route reads none of it, which is why it stays optional rather
     than becoming a parameter the whole file threads around. The one header
     every route does read is `Host`, before anything else: see host_allowed.
+
+    `channel` is which listener the request arrived on, "plain" or "tls".
+    With panel_key set, data and presses answer only on "tls" and only with
+    the key (T9.4, ADR 0018); `/ping` answers on both, always.
     """
     if request_headers is not None:
         extra = (getattr(app, "config", None) or {}).get("allowed_hosts", [])
@@ -1187,13 +1211,22 @@ def route(method, path, app=None, request_headers=None):
         # body stays what it always was.
         if app is None:
             return _json(200, {"ok": True})
-        return _json(200, {"ok": True, "display": app.display.state()})
+        reader = getattr(app, "display", None) or display_module.Fixed()
+        return _json(200, {"ok": True, "display": reader.state()})
 
     if method == "GET" and path == "/app":
+        if not serves_apk(app):
+            return 404, b"", "text/plain", ()
         return apk_download(APK_DIR)
 
     if method == "GET" and path == "/":
-        return index_page(APK_DIR)
+        return index_page(APK_DIR, offer_apk=serves_apk(app))
+
+    data_route = (method == "GET" and path in ("/quotes", "/weather")) or (
+        method == "POST" and action_id(path) is not None)
+    if data_route and app is not None and not private.authorized(
+            getattr(app, "config", None) or {}, request_headers, channel):
+        return _json(401, {"error": "unauthorized"})
 
     if method == "GET" and path == "/quotes":
         if app is None:
@@ -1340,11 +1373,12 @@ def _json(status, payload):
 class Handler(BaseHTTPRequestHandler):
     """Dumb by design: routes to `route()` and serialises its result."""
 
-    def __init__(self, *args, app=None, **kwargs):
+    def __init__(self, *args, app=None, channel="plain", **kwargs):
         # Before super().__init__, which handles the whole request before it
         # returns -- anything set afterwards would not exist yet when
         # do_GET runs.
         self.app = app
+        self.channel = channel
         super().__init__(*args, **kwargs)
 
     def _handle(self, method):
@@ -1356,7 +1390,8 @@ class Handler(BaseHTTPRequestHandler):
         routed = "GET" if method == "HEAD" else method
         try:
             status, body, content_type, headers = route(
-                routed, self.path, getattr(self, "app", None), self.headers
+                routed, self.path, getattr(self, "app", None), self.headers,
+                getattr(self, "channel", "plain"),
             )
         except Exception:  # noqa: BLE001 - deliberately everything
             # route() used to be pure; it does I/O now, and TimedCache
@@ -1428,6 +1463,35 @@ class Server(ThreadingHTTPServer):
     # (invariant 2): a request thread still blocked on a slow upstream must
     # not keep the interpreter alive after the desktop has gone.
     daemon_threads = True
+
+
+class TlsHandler(Handler):
+    """Handler for the TLS listener. A timeout, because the handshake runs
+    in this thread (see TlsServer) and a client that opens a connection and
+    says nothing must cost one thread for a while, not for ever."""
+
+    timeout = private.TLS_TIMEOUT_S
+
+
+class TlsServer(Server):
+    """The private listener: data and presses, over TLS (T9.4, ADR 0018).
+
+    `do_handshake_on_connect=False`, so accept() returns at once and the
+    handshake happens on the request thread's first read. With the default,
+    one slow or hostile client would stall accept() and with it every other
+    client of this port.
+    """
+
+    def __init__(self, address, handler, ssl_context):
+        super().__init__(address, handler)
+        self.socket = ssl_context.wrap_socket(
+            self.socket, server_side=True, do_handshake_on_connect=False)
+
+    def handle_error(self, request, client_address):
+        # One line, not a traceback: a plain-HTTP client or a scanner on this
+        # port fails the handshake, and that is noise, not a bug.
+        exc = sys.exc_info()[1]
+        print(f"tls: {client_address[0]}: {exc.__class__.__name__}: {exc}", file=sys.stderr)
 
 
 def parse_args(argv=None):
@@ -1573,6 +1637,32 @@ def main(argv=None):
             if warning:
                 print(warning, file=sys.stderr)
 
+    # The private listener's settings, checked here like everything above:
+    # a half configuration, a short key or a certificate that does not load
+    # has to be found by --check-only, not by a panel that goes blank.
+    for name in ("tls_cert", "tls_key"):
+        value = config.get(name) or ""
+        if value and not os.path.isabs(value):
+            config[name] = str(Path(config_path).resolve().parent / value)
+    try:
+        private_settings = private.check(config)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        sys.exit(1)
+    if private_settings is None:
+        # Said out loud, like the actions: this is the state in which anyone
+        # on the network can read /quotes, calendar titles included.
+        print("notice: panel traffic is open: anyone on this network can read /quotes "
+              "and press the enabled actions (set panel_key, tls_cert and tls_key; "
+              "docs/adr/0018-the-panel-traffic-is-private.md)", file=sys.stderr)
+    else:
+        print(f"notice: panel traffic is private: data and actions on TLS port "
+              f"{private_settings[3]}, /ping on {config.get('port', PORT)}", file=sys.stderr)
+    if config.get("serve_apk"):
+        print("notice: /app serves the APK to anyone on this network"
+              + (", and the APK carries panel_key" if private_settings else ""),
+              file=sys.stderr)
+
     if args.check_only:
         print(f"config OK: {config_path}")
         return
@@ -1588,12 +1678,24 @@ def main(argv=None):
     app.warm_history()
     app.warm_agenda()
     server = Server((HOST, port), functools.partial(Handler, app=app))
+    tls_server = None
+    if private_settings is not None:
+        _, cert, key_file, tls_port = private_settings
+        tls_server = TlsServer((HOST, tls_port),
+                               functools.partial(TlsHandler, app=app, channel="tls"),
+                               private.context(cert, key_file))
+        # A daemon thread: the plain listener in the main thread is the one
+        # whose life is the login signal, and this one ends with it.
+        threading.Thread(target=tls_server.serve_forever, name="tls-listener",
+                         daemon=True).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         server.server_close()
+        if tls_server is not None:
+            tls_server.server_close()
 
 
 if __name__ == "__main__":

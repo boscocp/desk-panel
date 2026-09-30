@@ -63,8 +63,11 @@ public final class PcPoller {
         void onDormant();
     }
 
-    /** The PC server's port (T3.1). Only the host varies, and only per build. */
-    private static final int PORT = 8777;
+    /**
+     * The PC server's plain port (T3.1). {@code /ping} stays here even when
+     * data moves to TLS, because it is the login signal (ADR 0018).
+     */
+    private static final int PORT = PanelLink.PLAIN_PORT;
 
     /**
      * Connect and read timeout, applied to both ends of the probe.

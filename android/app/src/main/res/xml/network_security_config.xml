@@ -18,9 +18,17 @@
   the placeholder <domain> into one per address in PC_IP from .env (ADR 0013,
   ADR 0016). Each address must match a static DHCP reservation: if a PC's IP
   moves and .env does not, the panel silently stops following that PC.
+
+  The comment inside the domain-config is the second placeholder (T9.4, ADR
+  0018). With PANEL_KEY and PC_CERTS in .env, Gradle replaces it with
+  <trust-anchors> naming the PCs' own certificates, which then are the only
+  anchors for these hosts: the system CAs are not trusted for a LAN address.
+  Cleartext stays permitted either way, because /ping is plain http on the PC's
+  plain port, and a domain-config cannot scope cleartext to one port.
 -->
 <network-security-config>
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">192.168.1.100</domain>
+        <!-- pc-trust-anchors -->
     </domain-config>
 </network-security-config>

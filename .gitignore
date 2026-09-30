@@ -34,3 +34,6 @@ Thumbs.db
 # scripts/after_update.py records the last clean run here. Per machine:
 # two boxes on the same commit have rebuilt different things.
 .after-update-state.json
+
+# --- the PC's TLS key and certificate (T9.4, ADR 0018) ---
+server/tls/

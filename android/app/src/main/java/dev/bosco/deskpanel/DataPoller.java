@@ -40,9 +40,6 @@ import java.util.concurrent.TimeUnit;
  */
 public final class DataPoller {
 
-    /** The PC server's port. Shared with {@link PcPoller} by construction. */
-    private static final int PORT = 8777;
-
     /**
      * Longer than {@link PcPoller}'s, because a failed data fetch is not
      * urgent: the panel keeps the last values and the server has its own
@@ -139,13 +136,29 @@ public final class DataPoller {
 
     private volatile ScheduledExecutorService scheduler;
 
-    public DataPoller(PcHosts hosts, Listener listener) {
+    /** Scheme, port and key for data and presses (T9.4, ADR 0018). */
+    private final PanelLink link;
+
+    public DataPoller(PcHosts hosts, PanelLink link, Listener listener) {
         this.hosts = hosts;
+        this.link = link;
         this.listener = listener;
     }
 
-    private static String url(String host, String path) {
-        return "http://" + host + ":" + PORT + path;
+    private String url(String host, String path) {
+        return link.base(host) + path;
+    }
+
+    /**
+     * The key, on every data request and every press, when the traffic is
+     * private. Set on the connection rather than in the URL, so it never
+     * reaches a log line that prints one.
+     */
+    private void authenticate(HttpURLConnection connection) {
+        String key = link.key();
+        if (key != null) {
+            connection.setRequestProperty(PanelLink.KEY_HEADER, key);
+        }
     }
 
     /** Begins polling, first fetch immediately. Calling it twice is a no-op. */
@@ -213,7 +226,7 @@ public final class DataPoller {
             Log.w(Markers.TAG, Markers.action(String.valueOf(candidate), "rejected"));
             return false;
         }
-        final String url = Actions.urlFor(hosts.active(), PORT, id);
+        final String url = Actions.urlFor(link, hosts.active(), id);
         final ScheduledExecutorService owner = scheduler;
         if (!running || owner == null || url == null) {
             Log.i(Markers.TAG, Markers.action(id, "offline"));
@@ -260,6 +273,7 @@ public final class DataPoller {
         try {
             connection = (HttpURLConnection) new URL(url).openConnection();
             connection.setRequestMethod("POST");
+            authenticate(connection);
             connection.setConnectTimeout(TIMEOUT_MS);
             // Not TIMEOUT_MS: the PC is allowed 15s for this on Windows. See
             // ACTION_TIMEOUT_MS.
@@ -388,6 +402,7 @@ public final class DataPoller {
         try {
             connection = (HttpURLConnection) new URL(url).openConnection();
             connection.setRequestMethod("GET");
+            authenticate(connection);
             connection.setConnectTimeout(TIMEOUT_MS);
             connection.setReadTimeout(TIMEOUT_MS);
             connection.setUseCaches(false);

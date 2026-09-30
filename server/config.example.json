@@ -41,5 +41,10 @@
   "calendar_interval_s": 300,
   "calendar_lookahead_h": 24,
   "calendar_show_titles": true,
-  "allowed_hosts": []
+  "allowed_hosts": [],
+  "panel_key": "",
+  "tls_cert": "",
+  "tls_key": "",
+  "tls_port": 8778,
+  "serve_apk": false
 }

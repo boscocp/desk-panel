@@ -3,6 +3,7 @@
 Status: accepted · 2026-09-26 (T8.1) · amended twice the same day — see *A `POST`-only rule
 is not enough* and *Toggles, and the state is measured rather than guessed* · amended again
 2026-09-27 (T8.3), which extended "every input" to Linux and wrote down the macOS limit
+Amended 2026-09-30 by [ADR 0018](0018-the-panel-traffic-is-private.md): with a panel key, data and presses need it and go over TLS.
 
 ## Context
 

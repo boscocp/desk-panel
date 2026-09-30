@@ -457,7 +457,7 @@ public final class PanelService extends Service implements PcPoller.Listener {
         // whichever PC the PC poller last heard from (ADR 0016).
         PcHosts hosts = PcHosts.parse(getString(R.string.pc_host));
         poller = new PcPoller(hosts, this);
-        dataPoller = new DataPoller(hosts, this::onData);
+        dataPoller = new DataPoller(hosts, new PanelLink(BuildConfig.PANEL_KEY), this::onData);
 
         // RECEIVER_NOT_EXPORTED because nothing outside the system should be
         // able to tell this app what the battery is doing.

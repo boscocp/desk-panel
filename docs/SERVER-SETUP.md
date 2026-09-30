@@ -88,8 +88,8 @@ read [ADR 0017](adr/0017-calendars-are-personal-data.md) first. In short:
     outside any folder OneDrive syncs. Mode bits do nothing there, so the file is exactly as
     private as the folder it sits in.
 - **Titles are on by default, and anyone on your Wi-Fi can read them** at `/quotes`, for up to
-  your next five events. Set `calendar_show_titles = false` and the card shows only the
-  countdown.
+  your next five events, until you make the traffic private (next section). Set
+  `calendar_show_titles = false` and the card shows only the countdown.
 
 You register your own OAuth client with each provider. Nobody ships a shared one.
 
@@ -225,6 +225,51 @@ in with the account you named. The command finishes by itself.
 - Google access can also be removed at
   [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
 - Deleting `server/calendar-tokens.json` disconnects every account on this PC.
+
+## Private traffic (optional)
+
+Without this, anyone on your Wi-Fi can read `/quotes`, calendar titles included, and press the
+enabled actions. With it, data and presses go over TLS on port 8778 with a key only your APK
+has. `/ping` stays plain on 8777, because it is the login signal and a certificate problem must
+never look like a logout. [ADR 0018](adr/0018-the-panel-traffic-is-private.md) is the decision.
+
+1. **On each PC**, make its certificate. `openssl` is already on macOS and Linux, and Git for
+   Windows ships one:
+
+   ```bash
+   python server/make_cert.py --ip <this PC's address, as in PC_IP>
+   ```
+
+   It writes `server/tls/<ip>.pem` (public) and `server/tls/<ip>.key` (mode 0600, never leaves
+   the PC), and prints a key.
+2. **One key for all of them.** Put the printed key, or the first PC's, in every PC's
+   `config.toml`, together with that PC's own files:
+
+   ```toml
+   panel_key = "<the key>"
+   tls_cert = "tls/<ip>.pem"
+   tls_key = "tls/<ip>.key"
+   ```
+
+   Then restart the server. It prints `notice: panel traffic is private` and refuses to start
+   with only some of the three.
+3. **In `.env` on the machine that builds the APK**, set `PANEL_KEY` to the same key and
+   `PC_CERTS` to every PC's `.pem`, copied into the checkout, for example
+   `server/tls/192.168.1.100.pem,server/tls/192.168.1.101.pem`. Then rebuild and reinstall.
+4. **Check it** from another device on the Wi-Fi: `curl http://<pc>:8777/quotes` answers `401`,
+   and `curl http://<pc>:8777/ping` still answers.
+
+**Every PC in `PC_IP` must be private, or none.** A private APK talks TLS to all of them, so a PC
+left open gives the panel no data. The screen still follows it.
+
+**What a mismatch looks like:** the panel wakes and sleeps as usual (that is `/ping`), but the
+cards stay empty, and logcat says `data=err`.
+- A 401 in the server log means the keys differ.
+- `tls: ... SSLError` means the certificate the APK pins is not this PC's. Rebuild with the
+  right `PC_CERTS`.
+
+**`/app` is off by default** (`serve_apk = false`), because the APK carries the key. Turn it on
+for an install and off again after it.
 
 ## Run it once by hand
 

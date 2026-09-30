@@ -21,6 +21,9 @@ import org.junit.Test;
  */
 public class ActionsTest {
 
+    private static final PanelLink OPEN = new PanelLink("");
+
+
     @Test
     public void resolveReturnsThisAppsConstantAndNotTheCallersString() {
         // Not assertEquals: a String with the same characters would pass that
@@ -56,7 +59,7 @@ public class ActionsTest {
         };
         for (String candidate : hostile) {
             assertNull(candidate, Actions.resolve(candidate));
-            assertNull(candidate, Actions.urlFor("192.168.1.100", 8777, candidate));
+            assertNull(candidate, Actions.urlFor(OPEN, "192.168.1.100", candidate));
         }
     }
 
@@ -64,15 +67,22 @@ public class ActionsTest {
     public void urlForBuildsTheRouteTheServerReserved() {
         assertEquals(
                 "http://192.168.1.100:8777/action/mute-mic",
-                Actions.urlFor("192.168.1.100", 8777, "mute-mic"));
+                Actions.urlFor(OPEN, "192.168.1.100", "mute-mic"));
+    }
+
+    @Test
+    public void aPrivateLinkSendsThePressOverTls() {
+        assertEquals(
+                "https://192.168.1.100:8778/action/mute-mic",
+                Actions.urlFor(new PanelLink("k".repeat(32)), "192.168.1.100", "mute-mic"));
     }
 
     @Test
     public void noHostIsNoUrl() {
         // A poller built before the PC's address was known must not produce
         // "http://:8777/action/..." and send it somewhere.
-        assertNull(Actions.urlFor(null, 8777, "mute-mic"));
-        assertNull(Actions.urlFor("", 8777, "mute-mic"));
+        assertNull(Actions.urlFor(OPEN, null, "mute-mic"));
+        assertNull(Actions.urlFor(OPEN, "", "mute-mic"));
     }
 
     @Test
