@@ -304,8 +304,10 @@ actions = ["mute-audio", "mute-mic"]
 
 # Read docs/adr/0017-calendars-are-personal-data.md before turning this on.
 # The short version: the grant is **read-only** (Google
-# `calendar.events.owned.readonly`, Microsoft `Calendars.ReadBasic`), only the
-# primary calendar is read, and the refresh tokens live on this PC in
+# `calendar.events.readonly` + `calendar.calendarlist.readonly`, Microsoft
+# `Calendars.ReadBasic`); Google reads every calendar you have switched on in
+# Google Calendar, shared and subscribed ones included (ADR 0019), Outlook the
+# default one; and the refresh tokens live on this PC in
 # `server/calendar-tokens.json` (gitignored, mode 0600), never in this file and
 # never on the phone.
 #

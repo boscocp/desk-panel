@@ -5,7 +5,8 @@ ADR 0017 is the decision. This module turns two providers that disagree
 about almost everything into one short list the panel can render, and it
 drops what the panel has no business receiving on the way.
 
-    Google     GET calendar/v3/calendars/primary/events
+    Google     GET calendar/v3/users/me/calendarList, then for each calendar
+               the owner shows: GET calendar/v3/calendars/{id}/events
                ?timeMin&timeMax&singleEvents=true&orderBy=startTime
                timed events carry start.dateTime (RFC 3339 with offset),
                all-day ones carry start.date; "you said no" is
@@ -15,8 +16,10 @@ drops what the panel has no business receiving on the way.
                dateTime has no offset and seven fractional digits; "you said
                no" is responseStatus.response == "declined"
 
-**Only the primary calendar, and only reads.** Every call here is a GET, and
-a guard test fails the build if one is not (ADR 0017).
+**Only reads.** Every call here is a GET, and a guard test fails the build if
+one is not (ADR 0017). Google reads every calendar the owner has switched on
+in Google Calendar, shared and subscribed ones included (ADR 0019); Outlook
+reads the default calendar.
 
 **Filtering happens here, not on the phone.** A declined or cancelled event
 never leaves the PC, so it is never on the LAN at all. What does leave is
@@ -41,7 +44,14 @@ import urllib.parse
 from server.oauth import AUTH_ERRORS, OAuthError
 from server.upstream import UpstreamError, get_json
 
-GOOGLE_EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+GOOGLE_EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/{}/events"
+GOOGLE_CALENDAR_LIST_URL = "https://www.googleapis.com/calendar/v3/users/me/calendarList"
+
+# How many of the owner's calendars are read, the primary included. Each is at
+# least one request every `calendar_interval_s`, off the request path; ten is
+# far more than a person switches on, and a cap on something the owner does
+# not control (who shares a calendar with them) is cheap to have.
+MAX_CALENDARS = 10
 GRAPH_CALENDAR_VIEW_URL = "https://graph.microsoft.com/v1.0/me/calendar/calendarView"
 
 PROVIDERS = ("google", "microsoft")
@@ -163,14 +173,87 @@ def _rfc3339(instant):
     return instant.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def fetch_google(access_token, time_min, time_max, get=get_json):
-    """events.list on the primary calendar, every page up to MAX_PAGES. The seam
-    the tests patch.
+def fetch_google_calendars(access_token, get=get_json):
+    """The ids of the calendars to read: the primary, then every other one the
+    owner has switched on in Google Calendar, up to MAX_CALENDARS.
+
+    `selected` is the checkbox beside a calendar in Google Calendar's own list
+    (calendarList: "Whether the calendar content shows up in the calendar UI.
+    ... The default is False"), so the panel shows what the owner already
+    chose to look at, and a calendar they unticked stays off it. Hidden ones
+    are not listed at all without `showHidden`. The primary is always read,
+    whatever it says, as it was before ADR 0019.
+    """
+    params = [("minAccessRole", "reader"), ("maxResults", "250"),
+              ("fields", "items(id,primary,selected),nextPageToken")]
+    headers = {"Authorization": f"Bearer {access_token}"}
+    ids, token = ["primary"], None
+    for _ in range(MAX_PAGES):
+        page = params + ([("pageToken", token)] if token else [])
+        raw = get(f"{GOOGLE_CALENDAR_LIST_URL}?{urllib.parse.urlencode(page)}", headers=headers)
+        if not isinstance(raw, dict):
+            break
+        for item in raw.get("items") if isinstance(raw.get("items"), list) else []:
+            if not isinstance(item, dict) or item.get("primary"):
+                continue
+            if item.get("selected") is True and isinstance(item.get("id"), str) and item["id"]:
+                ids.append(item["id"])
+        token = raw.get("nextPageToken")
+        if not isinstance(token, str) or not token:
+            break
+    return ids[:MAX_CALENDARS]
+
+
+def fetch_google(access_token, time_min, time_max, get=get_json, log=None):
+    """Every shown calendar's events in the window, as one events.list body.
+    The seam the tests patch.
+
+    The primary is read first and its failure is the account's: that is the
+    calendar T9.1 promised. Any other calendar that fails is skipped and the
+    rest still answer -- a calendar somebody else shared can be unshared
+    between the list and the read -- unless the failure is a 401, which is
+    the token and not the calendar. The log never names a calendar: an id is
+    often somebody's e-mail address.
+
+    An event on two calendars (an invitation that is also on a shared team
+    calendar) is kept once, by its iCalUID and start.
+    """
+    log = log or (lambda line: print(line, file=sys.stderr))
+    items, seen = [], set()
+    for calendar_id in fetch_google_calendars(access_token, get=get):
+        try:
+            raw = fetch_google_events(access_token, calendar_id, time_min, time_max, get=get)
+        except UpstreamError as exc:
+            if calendar_id == "primary" or " 401 " in f" {exc} ":
+                raise
+            log("calendar google: a shared or subscribed calendar did not answer; skipped")
+            continue
+        for item in raw["items"]:
+            key = _google_identity(item)
+            if key is not None:
+                if key in seen:
+                    continue
+                seen.add(key)
+            items.append(item)
+    return {"items": items}
+
+
+def _google_identity(item):
+    """(iCalUID, start) for an event, or None when it has no iCalUID."""
+    if not isinstance(item, dict) or not isinstance(item.get("iCalUID"), str):
+        return None
+    start = item.get("start") if isinstance(item.get("start"), dict) else {}
+    return (item["iCalUID"], start.get("dateTime") or start.get("date"))
+
+
+def fetch_google_events(access_token, calendar_id, time_min, time_max, get=get_json):
+    """events.list on one calendar, every page up to MAX_PAGES.
 
     `timeMin` bounds the event's *end*, so an event already in progress is
     included, which is what the panel wants. `fields` asks for exactly what
-    `normalise_google` reads, plus `nextPageToken`, so nothing else crosses
-    the wire either.
+    `normalise_google` reads, plus `nextPageToken` and the `iCalUID`
+    fetch_google drops duplicates by -- which normalise_google never passes
+    on -- so nothing else crosses the wire either.
     """
     params = [
         ("timeMin", _rfc3339(time_min)),
@@ -178,14 +261,15 @@ def fetch_google(access_token, time_min, time_max, get=get_json):
         ("singleEvents", "true"),
         ("orderBy", "startTime"),
         ("maxResults", str(FETCH_PER_ACCOUNT)),
-        ("fields", "items(status,summary,eventType,start,end,attendees(self,responseStatus)),"
-                   "nextPageToken"),
+        ("fields", "items(status,summary,eventType,start,end,iCalUID,"
+                   "attendees(self,responseStatus)),nextPageToken"),
     ] + [("eventTypes", kind) for kind in GOOGLE_EVENT_TYPES]
     headers = {"Authorization": f"Bearer {access_token}"}
     items, token = [], None
     for _ in range(MAX_PAGES):
         page = params + ([("pageToken", token)] if token else [])
-        raw = get(f"{GOOGLE_EVENTS_URL}?{urllib.parse.urlencode(page)}", headers=headers)
+        url = GOOGLE_EVENTS_URL.format(urllib.parse.quote(calendar_id, safe=""))
+        raw = get(f"{url}?{urllib.parse.urlencode(page)}", headers=headers)
         if not isinstance(raw, dict):
             break
         items.extend(raw.get("items") if isinstance(raw.get("items"), list) else [])

@@ -106,7 +106,7 @@ See [ADR 0005](adr/0005-real-screen-sleep.md).
 | Cleartext | `network_security_config.xml`, `domain-config` scoped to the PC IP | [Network Security Config](https://developer.android.com/privacy-and-security/security-config) |
 | Weather | Open-Meteo, no key, CORS `*`, 10k req/day | [terms](https://open-meteo.com/en/terms) |
 | Quotes | brapi.dev, 15k req/month free; token required beyond four sample tickers | [pricing](https://brapi.dev/pricing) |
-| Google Calendar | events.list on `primary`, scope `calendar.events.owned.readonly`; 600 req/min per user | [quota](https://developers.google.com/workspace/calendar/api/guides/quota) |
+| Google Calendar | calendarList, then events.list on each shown calendar; scopes `calendar.events.readonly` + `calendar.calendarlist.readonly` (ADR 0019); 600 req/min per user | [quota](https://developers.google.com/workspace/calendar/api/guides/quota) |
 | Microsoft Graph | calendarView on the default calendar, `Calendars.ReadBasic`; 429 with `Retry-After` when throttled | [throttling](https://learn.microsoft.com/en-us/graph/throttling) |
 
 ## Calendars
@@ -115,8 +115,8 @@ The AGENDA card shows the owner's next meeting from Google Calendar and Microsof
 (T9.1, [ADR 0017](adr/0017-calendars-are-personal-data.md)). It is the first data on the panel
 that is personal, so it has rules the market cards do not:
 
-- **Read-only, primary calendar only.** Google `calendar.events.owned.readonly`, Microsoft
-  `Calendars.ReadBasic`. `oauth.check_scope` refuses any broader grant, and a guard test fails
+- **Read-only.** Google `calendar.events.readonly` and `calendar.calendarlist.readonly`, every
+  calendar the owner shows (ADR 0019); Microsoft `Calendars.ReadBasic`, the default calendar. `oauth.check_scope` refuses any broader grant, and a guard test fails
   the build if `server/` names a scope outside that allowlist.
 - **OAuth runs on the PC.** Google uses a loopback redirect with PKCE, and Microsoft uses the
   device code flow; `server/calendar_login.py` runs both. Refresh tokens live in

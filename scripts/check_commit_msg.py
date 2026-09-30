@@ -134,12 +134,31 @@ def check_message(lines):
     return problems
 
 
+# Subjects already on `main` that break a rule, by their exact text, each with
+# why it stays. `main` is not rewritten to fix one: it is published, and a
+# force-push over it is the kind of thing CLAUDE.md stops for. Without this
+# the listing check fails every branch for the next thirty commits, over a
+# subject nobody can change any more.
+#
+# The listing only. A new commit is checked by `check_subject` through the
+# commit-msg hook, and this table does not reach it: the same subject written
+# again is refused.
+PUBLISHED_EXCEPTIONS = {
+    'feat(web): AGENDA do neon com até três eventos e o título do segundo inteiro (#63)':
+        "squash-merged as #63 on 2026-09-30 with the PR's title, which is 82 characters; "
+        "the branch's own commits were short, so the PR's lint passed",
+}
+
+
 def check_subjects(lines):
-    """Pure: the problems in a list of subjects, each named by its own text."""
+    """Pure: the problems in a list of subjects, each named by its own text.
+
+    A subject in PUBLISHED_EXCEPTIONS is already on `main` and is skipped.
+    """
     problems = []
     for line in lines:
         subject = line.rstrip("\n")
-        if not subject.strip():
+        if not subject.strip() or subject in PUBLISHED_EXCEPTIONS:
             continue
         for why in check_subject(subject):
             problems.append(f"{subject[:60]!r}: {why}")
@@ -191,6 +210,10 @@ def _self_test():
     ok("a subject listing is checked line by line",
        len(check_subjects(["feat: fine", "nope", "also nope"])) == 2)
     ok("blank lines in a listing are skipped", check_subjects(["", "feat: fine", ""]) == [])
+    published = next(iter(PUBLISHED_EXCEPTIONS))
+    ok("a published exception is skipped in the listing", check_subjects([published]) == [])
+    ok("a published exception is still refused as a new commit", check_subject(published) != [])
+    ok("an exception is exact, not a prefix", check_subjects([published + " more"]) != [])
 
     print(f"\ncheck_commit_msg --self-test: {len(failures)} failure(s)")
     return 1 if failures else 0
