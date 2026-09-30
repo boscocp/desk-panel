@@ -85,6 +85,26 @@ class ScopeTests(unittest.TestCase):
         with self.assertRaises(oauth.ScopeError):
             oauth.check_scope("microsoft", "")
 
+    def test_a_grant_from_before_adr_0019_asks_for_a_reconnect(self):
+        # T9.1's token: calendars the owner owns, and nothing else. It cannot
+        # list or read the others, so it fails the check -- and "scope" is in
+        # AUTH_ERRORS, which the card shows as "reconectar".
+        with self.assertRaises(oauth.ScopeError):
+            oauth.check_scope("google", oauth.GOOGLE_OWNED_SCOPE)
+        self.assertIn("scope", oauth.AUTH_ERRORS)
+
+    def test_both_google_scopes_are_required(self):
+        # Unticking either one on the consent screen leaves a token that
+        # cannot do the job: no list, or no events.
+        for scope in (oauth.GOOGLE_EVENTS_SCOPE, oauth.GOOGLE_CALENDAR_LIST_SCOPE):
+            with self.subTest(scope=scope):
+                with self.assertRaises(oauth.ScopeError):
+                    oauth.check_scope("google", scope)
+
+    def test_the_old_scope_beside_the_new_ones_is_kept(self):
+        # Google may hand back what an account granted this client before.
+        oauth.check_scope("google", f"{oauth.GOOGLE_SCOPE} {oauth.GOOGLE_OWNED_SCOPE}")
+
     def test_a_broad_google_grant_is_not_kept_at_login_and_is_revoked(self):
         post = Recorder(dict(GOOGLE_GRANT, scope="https://www.googleapis.com/auth/calendar"), {})
         with self.assertRaises(oauth.ScopeError):
@@ -524,7 +544,7 @@ class SelectAndLoadTests(unittest.TestCase):
              "microsoft/home": Creds(),
              "google/broken": Creds(PermissionError("locked"))},
             NOW, 24, True,
-            google=lambda *a: GOOGLE,
+            google=lambda *a, **k: GOOGLE,
             graph=lambda *a: (_ for _ in ()).throw(UpstreamError("HTTP 503 from graph")),
             log=logged.append)
         self.assertEqual(result["accounts"], 4)
@@ -548,7 +568,10 @@ class SelectAndLoadTests(unittest.TestCase):
 
         providers_calendar.fetch_google("tok", NOW, NOW + datetime.timedelta(hours=24), get=get)
         providers_calendar.fetch_graph("tok", NOW, NOW + datetime.timedelta(hours=24), get=get)
-        google, graph = seen
+        # The calendar list first; it answered nothing, so the primary alone.
+        listing, google, graph = seen
+        self.assertTrue(listing[0].startswith(
+            "https://www.googleapis.com/calendar/v3/users/me/calendarList?"))
         gq = urllib.parse.parse_qs(urllib.parse.urlsplit(google[0]).query)
         self.assertEqual(gq["eventTypes"], ["default", "fromGmail"])
         self.assertIn("nextPageToken", gq["fields"][0])
@@ -575,9 +598,22 @@ class PagingTests(unittest.TestCase):
             urls.append(url)
             return pages[len(urls) - 1]
 
-        raw = providers_calendar.fetch_google("t", NOW, NOW, get=get)
+        raw = providers_calendar.fetch_google_events("t", "primary", NOW, NOW, get=get)
         self.assertEqual(raw, {"items": [{"x": 1}, {"x": 2}]})
         self.assertIn("pageToken=p3", urls[2])
+
+    def test_google_follows_the_calendar_list_s_page_token_too(self):
+        pages = [{"items": [{"id": "a", "selected": True}], "nextPageToken": "p2"},
+                 {"items": [{"id": "b", "selected": True}]}]
+        urls = []
+
+        def get(url, headers=None):
+            urls.append(url)
+            return pages[len(urls) - 1]
+
+        self.assertEqual(providers_calendar.fetch_google_calendars("t", get=get),
+                         ["primary", "a", "b"])
+        self.assertIn("pageToken=p2", urls[1])
 
     def test_graph_follows_next_link_only_to_graph(self):
         pages = [{"value": [{"a": 1}], "@odata.nextLink": "https://graph.microsoft.com/v1.0/next"},
@@ -773,7 +809,13 @@ class ReadOnlyGuardTests(unittest.TestCase):
     `calendar.events.owned`, `calendar.app.created` and `calendar.acls`.
     """
 
-    GOOGLE_READ_ONLY = {"https://www.googleapis.com/auth/calendar.events.owned.readonly",
+    # Every one "read" in Google's own words (developers.google.com/workspace/
+    # calendar/api/auth): "View events on all your calendars", "See the list
+    # of Google calendars you're subscribed to", "See the events on Google
+    # calendars you own" (ADR 0019).
+    GOOGLE_READ_ONLY = {"https://www.googleapis.com/auth/calendar.events.readonly",
+                        "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+                        "https://www.googleapis.com/auth/calendar.events.owned.readonly",
                         "https://www.googleapis.com/auth/userinfo.email",
                         "https://www.googleapis.com/auth/userinfo.profile"}
     GRAPH_READ_ONLY = {"Calendars.ReadBasic", "User.Read"}
@@ -799,8 +841,19 @@ class ReadOnlyGuardTests(unittest.TestCase):
                     self.assertIn(scope, self.GRAPH_READ_ONLY, f"{name} names {scope}")
 
     def test_the_guard_would_catch_a_write_scope(self):
-        google = "https://www.googleapis.com/auth/calendar.events.owned"
-        self.assertNotIn(google, self.GOOGLE_READ_ONLY)
+        # The write twin of each read-only scope in the allowlist, and the
+        # all-access one.
+        for google in ("https://www.googleapis.com/auth/calendar.events.owned",
+                       "https://www.googleapis.com/auth/calendar.events",
+                       "https://www.googleapis.com/auth/calendar.calendarlist",
+                       "https://www.googleapis.com/auth/calendar"):
+            self.assertNotIn(google, self.GOOGLE_READ_ONLY)
+            # And the code, not only this test's own set: the runtime check
+            # would refuse it, and nothing asks for it.
+            self.assertNotIn(google, oauth.ALLOWED_SCOPES["google"])
+            self.assertNotIn(google, oauth.REQUESTED_SCOPES["google"].split())
+        for scope in oauth.REQUESTED_SCOPES["google"].split():
+            self.assertIn(scope, self.GOOGLE_READ_ONLY)
         self.assertNotIn("Calendars.ReadWrite", self.GRAPH_READ_ONLY)
 
     def test_the_calendar_calls_are_gets(self):
@@ -811,8 +864,204 @@ class ReadOnlyGuardTests(unittest.TestCase):
 
     def test_the_only_scopes_requested_are_the_read_only_ones(self):
         self.assertEqual(oauth.GOOGLE_SCOPE,
-                         "https://www.googleapis.com/auth/calendar.events.owned.readonly")
+                         "https://www.googleapis.com/auth/calendar.events.readonly "
+                         "https://www.googleapis.com/auth/calendar.calendarlist.readonly")
         self.assertEqual(oauth.MICROSOFT_SCOPE, "Calendars.ReadBasic offline_access")
+
+
+class OtherCalendarsTests(unittest.TestCase):
+    """ADR 0019: every calendar the owner shows in Google Calendar, not only
+    the primary -- shared and subscribed ones included."""
+
+    LIST_URL = "https://www.googleapis.com/calendar/v3/users/me/calendarList"
+
+    def _get(self, listing, events, fail=()):
+        """A fake `get`: `listing` answers the calendar list, `events` maps a
+        calendar id to its items, and an id in `fail` raises its message."""
+        calls = []
+
+        def get(url, headers=None):
+            calls.append(url)
+            if url.startswith(self.LIST_URL):
+                return {"items": listing}
+            calendar = urllib.parse.unquote(url.split("/calendars/", 1)[1].split("/events", 1)[0])
+            if calendar in fail:
+                raise UpstreamError(fail[calendar])
+            return {"items": events.get(calendar, [])}
+        return get, calls
+
+    def test_the_shown_calendars_are_read_and_the_unticked_are_not(self):
+        listing = [{"id": "me@example.com", "primary": True, "selected": True},
+                   {"id": "family@group.calendar.google.com", "selected": True},
+                   {"id": "pt.brazilian#holiday@group.v.calendar.google.com", "selected": True},
+                   {"id": "unticked@group.calendar.google.com", "selected": False},
+                   # Only a real true: a string is not the checkbox.
+                   {"id": "stringy@group.calendar.google.com", "selected": "false"},
+                   {"id": "no-flag@group.calendar.google.com"}]
+        ids = providers_calendar.fetch_google_calendars("t", get=self._get(listing, {})[0])
+        self.assertEqual(ids, ["primary", "family@group.calendar.google.com",
+                               "pt.brazilian#holiday@group.v.calendar.google.com"])
+
+    def test_the_primary_is_read_even_when_the_list_says_nothing(self):
+        self.assertEqual(providers_calendar.fetch_google_calendars("t", get=lambda *a, **k: {}),
+                         ["primary"])
+
+    def test_no_more_than_max_calendars(self):
+        listing = [{"id": f"c{i}", "selected": True} for i in range(30)]
+        ids = providers_calendar.fetch_google_calendars("t", get=self._get(listing, {})[0])
+        self.assertEqual(len(ids), providers_calendar.MAX_CALENDARS)
+        self.assertEqual(ids[0], "primary")
+
+    def test_events_from_every_calendar_are_merged_and_the_id_is_quoted(self):
+        listing = [{"id": "pt.brazilian#holiday@group.v.calendar.google.com", "selected": True}]
+        events = {"primary": [{"summary": "mine", "iCalUID": "1"}],
+                  "pt.brazilian#holiday@group.v.calendar.google.com": [{"summary": "feriado"}]}
+        get, calls = self._get(listing, events)
+        raw = providers_calendar.fetch_google("t", NOW, NOW, get=get)
+        self.assertEqual([i["summary"] for i in raw["items"]], ["mine", "feriado"])
+        # '#' and '@' encoded: an unquoted '#' would end the path.
+        self.assertIn("/calendars/pt.brazilian%23holiday%40group.v.calendar.google.com/events?",
+                      calls[-1])
+
+    def test_an_event_on_two_calendars_is_kept_once(self):
+        listing = [{"id": "team", "selected": True}]
+        same = {"summary": "Standup", "iCalUID": "u1", "start": {"dateTime": "2026-09-22T10:00:00Z"}}
+        other_day = dict(same, start={"dateTime": "2026-09-23T10:00:00Z"})
+        raw = providers_calendar.fetch_google(
+            "t", NOW, NOW, get=self._get(listing, {"primary": [same], "team": [same, other_day]})[0])
+        # The same instance once; the recurring one's next day is a different event.
+        self.assertEqual(len(raw["items"]), 2)
+
+    def test_a_shared_calendar_that_fails_is_skipped_and_named_nowhere(self):
+        listing = [{"id": "friend@example.com", "selected": True},
+                   {"id": "team", "selected": True}]
+        logged = []
+        get, _ = self._get(listing, {"primary": [{"summary": "a"}], "team": [{"summary": "b"}]},
+                           fail={"friend@example.com": "HTTP 404 from https://...friend@example.com"})
+        raw = providers_calendar.fetch_google("t", NOW, NOW, get=get, log=logged.append)
+        self.assertEqual([i["summary"] for i in raw["items"]], ["a", "b"])
+        self.assertEqual(len(logged), 1)
+        self.assertNotIn("friend", logged[0])
+
+    def test_the_primary_failing_fails_the_account(self):
+        get, _ = self._get([], {}, fail={"primary": "HTTP 500 from google"})
+        with self.assertRaises(UpstreamError):
+            providers_calendar.fetch_google("t", NOW, NOW, get=get, log=lambda line: None)
+
+    def test_a_401_on_any_calendar_is_the_token_and_fails_the_account(self):
+        get, _ = self._get([{"id": "team", "selected": True}], {"primary": []},
+                           fail={"team": "HTTP 401 from google"})
+        with self.assertRaises(UpstreamError):
+            providers_calendar.fetch_google("t", NOW, NOW, get=get, log=lambda line: None)
+
+
+class OtherCalendarsReviewTests(unittest.TestCase):
+    """What PR #64's review found, each pinned."""
+
+    get_for = OtherCalendarsTests._get
+    LIST_URL = OtherCalendarsTests.LIST_URL
+
+    def test_the_same_instant_in_two_zones_is_one_event(self):
+        # events.list writes each calendar's times in its own zone.
+        listing = [{"id": "lisbon", "selected": True}]
+        here = {"summary": "Standup", "iCalUID": "u1",
+                "start": {"dateTime": "2026-09-22T07:00:00-03:00"}}
+        there = dict(here, start={"dateTime": "2026-09-22T11:00:00+01:00"})
+        raw = providers_calendar.fetch_google(
+            "t", NOW, NOW, get=self.get_for(listing, {"primary": [here], "lisbon": [there]})[0])
+        self.assertEqual(len(raw["items"]), 1)
+
+    def test_a_copy_declined_on_the_primary_hides_the_other_copies(self):
+        listing = [{"id": "colleague", "selected": True}]
+        declined = {"summary": "Standup", "iCalUID": "u1",
+                    "start": {"dateTime": "2026-09-22T07:00:00-03:00"},
+                    "end": {"dateTime": "2026-09-22T07:30:00-03:00"},
+                    "attendees": [{"self": True, "responseStatus": "declined"}]}
+        theirs = dict(declined, start={"dateTime": "2026-09-22T11:00:00+01:00"},
+                      end={"dateTime": "2026-09-22T11:30:00+01:00"},
+                      attendees=[{"self": True, "responseStatus": "accepted"}])
+        raw = providers_calendar.fetch_google(
+            "t", NOW, NOW, get=self.get_for(listing, {"primary": [declined],
+                                                      "colleague": [theirs]})[0])
+        self.assertEqual(providers_calendar.normalise_google(raw, "google/me"), [])
+
+    def test_a_401_on_a_shared_calendar_never_names_it(self):
+        get, _ = self.get_for([{"id": "friend@example.com", "selected": True}], {"primary": []},
+                              fail={"friend@example.com":
+                                    "HTTP 401 from https://.../calendars/friend%40example.com/events"})
+        with self.assertRaises(UpstreamError) as caught:
+            providers_calendar.fetch_google("t", NOW, NOW, get=get, log=lambda line: None)
+        self.assertNotIn("friend", str(caught.exception))
+        self.assertIn(" 401 ", f" {caught.exception} ")
+
+    def test_the_list_failing_still_reads_the_primary(self):
+        logged = []
+
+        def get(url, headers=None):
+            if url.startswith(self.LIST_URL):
+                raise UpstreamError("HTTP 503 from google")
+            return {"items": [{"summary": "mine"}]}
+
+        raw = providers_calendar.fetch_google("t", NOW, NOW, get=get, log=logged.append)
+        self.assertEqual([i["summary"] for i in raw["items"]], ["mine"])
+        self.assertEqual(len(logged), 1)
+
+    def test_the_list_answering_401_fails_the_account(self):
+        def get(url, headers=None):
+            raise UpstreamError("HTTP 401 from google")
+
+        with self.assertRaises(UpstreamError):
+            providers_calendar.fetch_google("t", NOW, NOW, get=get, log=lambda line: None)
+
+    def test_past_the_budget_the_rest_are_left_unread_and_counted(self):
+        listing = [{"id": f"c{i}", "selected": True} for i in range(3)]
+        # The deadline, then one tick per calendar after the primary.
+        ticks = iter([0, 0, 100, 100])
+        logged = []
+        get, calls = self.get_for(listing, {"primary": [{"summary": "mine"}],
+                                            "c0": [{"summary": "first"}]})
+        raw = providers_calendar.fetch_google("t", NOW, NOW, get=get, log=logged.append,
+                                              clock=lambda: next(ticks), budget_s=60)
+        self.assertEqual([i["summary"] for i in raw["items"]], ["mine", "first"])
+        self.assertTrue(any("2 calendars left unread" in line for line in logged))
+
+    def test_the_cap_says_so(self):
+        listing = [{"id": f"c{i}", "selected": True} for i in range(30)]
+        logged = []
+        providers_calendar.fetch_google_calendars("t", get=self.get_for(listing, {})[0],
+                                                  log=logged.append)
+        self.assertEqual(len(logged), 1)
+        self.assertIn(str(providers_calendar.MAX_CALENDARS), logged[0])
+
+    def test_load_hands_its_log_to_the_fetch(self):
+        seen = {}
+
+        def google(token, time_min, time_max, log=None):
+            seen["log"] = log
+            return {"items": []}
+
+        def log(line):
+            pass
+
+        class Creds:
+            def access_token(self):
+                return "at"
+
+        providers_calendar.load([("google", "me")], {"google/me": Creds()}, NOW, 24, True,
+                                google=google, log=log)
+        self.assertIs(seen["log"], log)
+
+    def test_a_403_insufficient_permissions_asks_for_a_reconnect(self):
+        class Creds:
+            def access_token(self):
+                return "at"
+
+        def google(*a, **k):
+            raise UpstreamError('HTTP 403 from google: {"reason": "insufficientPermissions"}')
+
+        result = providers_calendar.load([("google", "me")], {"google/me": Creds()}, NOW, 24,
+                                         True, google=google, log=lambda line: None)
+        self.assertEqual(result["failed"], [{"source": "google/me", "reason": "reconnect"}])
 
 
 if __name__ == "__main__":

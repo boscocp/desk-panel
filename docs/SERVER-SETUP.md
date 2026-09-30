@@ -77,8 +77,11 @@ The AGENDA card shows your next meeting from Google Calendar and Outlook (T9.1).
 until you list an account, and it is the one part of the panel that handles personal data, so
 read [ADR 0017](adr/0017-calendars-are-personal-data.md) first. In short:
 
-- **Read-only, primary calendar only.** Google `calendar.events.owned.readonly`, Microsoft
-  `Calendars.ReadBasic`. The server refuses and discards any grant broader than that.
+- **Read-only.** Google `calendar.events.readonly` and `calendar.calendarlist.readonly`, which
+  read every calendar you have switched on in Google Calendar, shared and subscribed ones
+  included ([ADR 0019](adr/0019-every-google-calendar-the-owner-shows.md)). Microsoft
+  `Calendars.ReadBasic`, the default calendar. The server refuses and discards any grant
+  broader than that.
 - **Tokens stay on this PC**, in `server/calendar-tokens.json` beside the config: gitignored,
   mode 0600, never in the config file, never on the phone.
   - **On Windows, clone the repository inside your own profile** (`C:\Users\<you>\...`) and
@@ -109,14 +112,19 @@ With the console in Portuguese the names are *Público-alvo*, *Clientes*, *Acess
    the **Google Calendar API** for it.
 2. Under **Google Auth Platform**, configure the consent screen with user type **External**, and
    add your own address as a test user.
-3. Under **Data access** (or the wizard's *Scopes* step), add exactly one scope,
-   `https://www.googleapis.com/auth/calendar.events.owned.readonly`, and remove anything the
-   console pre-filled.
-   - **Mind the `.owned`.** The picker also offers `calendar.events.readonly` ("See events on all
-     your calendars") and `calendar.calendarlist.readonly`, and they sit next to each other.
-     Neither is accepted: `oauth.check_scope` refuses the grant and the login fails. If the
-     picker's filter does not show the `.owned` one, paste the full URL into *Manually add
-     scopes* at the bottom of the panel.
+3. Under **Data access** (or the wizard's *Scopes* step), add exactly these two scopes and
+   remove anything the console pre-filled:
+   - `https://www.googleapis.com/auth/calendar.events.readonly`
+   - `https://www.googleapis.com/auth/calendar.calendarlist.readonly`
+
+   Both are required, and both are read-only.
+   - **Not the ones without `.readonly`.** `calendar.events` and `calendar.calendarlist` sit
+     beside them in the picker and can write; `oauth.check_scope` refuses a grant carrying
+     either and the login fails. If the picker's filter does not show a scope, paste its full
+     URL into *Manually add scopes* at the bottom of the panel.
+   - **Set up before 2026-09-30?** Your client asked for `calendar.events.owned.readonly`, which
+     reads only calendars you own. Add the two scopes above, then run the login command again
+     on every machine that serves the panel. Until you do, the card says "reconectar".
    - It is listed under *sensitive scopes*, with a warning that approval is needed. That is
      expected, and step 5 is why you do not need to submit for verification.
 4. Under **Clients**, create an OAuth client of type **Desktop app**. Not *Android*, even though

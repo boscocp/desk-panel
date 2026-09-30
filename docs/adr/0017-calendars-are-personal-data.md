@@ -1,6 +1,7 @@
 # 0017 — Calendars are personal data, and the grant is read-only
 
-Status: accepted · 2026-09-29 (T9.1)
+Status: accepted · 2026-09-29 (T9.1) · Google's scope and "primary calendar only" amended by
+[ADR 0019](0019-every-google-calendar-the-owner-shows.md)
 Amends [ADR 0004](0004-server-is-login-signal-and-proxy.md), whose proxy so far carried only
 public data, and extends the threat model of [ADR 0015](0015-the-panel-can-act-on-the-pc.md).
 
@@ -30,10 +31,13 @@ and what a stranger on the LAN, or a web page the owner visits, can get.
 
 | Provider | Scope requested | Why this one |
 |---|---|---|
-| Google | `https://www.googleapis.com/auth/calendar.events.owned.readonly` | Reads events on calendars the owner owns. Cannot write, cannot list other people's calendars, cannot see free/busy of anyone else. |
+| Google | `https://www.googleapis.com/auth/calendar.events.owned.readonly` (superseded by [ADR 0019](0019-every-google-calendar-the-owner-shows.md)) | Reads events on calendars the owner owns. Cannot write, cannot list other people's calendars, cannot see free/busy of anyone else. |
 | Microsoft | `Calendars.ReadBasic offline_access` | Reads events without body, attachments or extensions. No admin consent required. `offline_access` is what returns a refresh token. |
 
 Only the **primary** calendar is read (`calendars/primary`, `/me/calendar/calendarView`).
+**Superseded for Google by [ADR 0019](0019-every-google-calendar-the-owner-shows.md)**, which
+reads every calendar the owner shows, with `calendar.events.readonly` and
+`calendar.calendarlist.readonly`.
 
 Two checks enforce this in the code, not only in this record:
 

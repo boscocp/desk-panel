@@ -41,7 +41,15 @@ from server.upstream import TIMEOUT_S
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke"
-GOOGLE_SCOPE = "https://www.googleapis.com/auth/calendar.events.owned.readonly"
+# Two read-only scopes, both required (ADR 0019): the events on every calendar
+# in the account, and the list of those calendars, which is how the server
+# knows which of them the owner has switched on. `owned.readonly`, T9.1's
+# scope, reached only calendars the owner owns, so a calendar shared with them
+# or subscribed to never reached the panel.
+GOOGLE_EVENTS_SCOPE = "https://www.googleapis.com/auth/calendar.events.readonly"
+GOOGLE_CALENDAR_LIST_SCOPE = "https://www.googleapis.com/auth/calendar.calendarlist.readonly"
+GOOGLE_OWNED_SCOPE = "https://www.googleapis.com/auth/calendar.events.owned.readonly"
+GOOGLE_SCOPE = f"{GOOGLE_EVENTS_SCOPE} {GOOGLE_CALENDAR_LIST_SCOPE}"
 
 # `common` rather than `consumers` or `organizations`: the owner connects both a
 # personal account and a work one (ADR 0017), and one authority serves both.
@@ -58,12 +66,18 @@ MICROSOFT_SCOPE = "Calendars.ReadBasic offline_access"
 # Every entry is read-only. Adding one that is not would be a change to
 # ADR 0017, not to this table.
 REQUIRED_SCOPES = {
-    "google": {GOOGLE_SCOPE},
+    "google": {GOOGLE_EVENTS_SCOPE, GOOGLE_CALENDAR_LIST_SCOPE},
     "microsoft": {"calendars.readbasic"},
 }
 ALLOWED_SCOPES = {
     "google": {
-        GOOGLE_SCOPE,
+        GOOGLE_EVENTS_SCOPE,
+        GOOGLE_CALENDAR_LIST_SCOPE,
+        # T9.1's grant, narrower than the two above. Allowed because Google
+        # may return a scope an account granted this client before alongside
+        # the new ones; never required, so a grant of this alone -- a token
+        # from before ADR 0019 -- fails the check and asks for a reconnect.
+        GOOGLE_OWNED_SCOPE,
         "openid",
         "email",
         "profile",
@@ -524,7 +538,11 @@ class Credentials:
     **A refused token is not sent again.** Once a refresh comes back with an
     auth error, that token is remembered as dead, and every later cycle fails
     at once, without a request, until the store holds a different token,
-    which is what `calendar_login.py` writes. A grant broader than read-only
+    which is what `calendar_login.py` writes. A grant that fails the scope
+    check -- broader than read-only, or, since ADR 0019, a Google grant from
+    before it that is too narrow to read the other calendars -- is deleted
+    from the store here and never revoked, so the log says "scope" once and
+    "not connected" after. A grant broader than read-only
     is worse than dead, and it is deleted from the store on the spot
     (ADR 0017).
     `clock` is wall-clock seconds and is passed in, so the tests move time

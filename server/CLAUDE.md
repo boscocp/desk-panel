@@ -21,7 +21,8 @@ too-old interpreter surfaces as a restart loop in journald rather than as a mess
   must never be embedded in the APK or echoed in a response.
 - **Calendar access is read-only, and the code checks it.**
   [ADR 0017](../docs/adr/0017-calendars-are-personal-data.md) is the decision.
-  - `oauth.check_scope` refuses any grant broader than Google's `calendar.events.owned.readonly`
+  - `oauth.check_scope` refuses any grant broader than Google's `calendar.events.readonly` +
+    `calendar.calendarlist.readonly` (ADR 0019)
     or Microsoft's `Calendars.ReadBasic`.
   - `test_calendar.ReadOnlyGuardTests` fails the build over a write scope, or over a calendar
     call that is not a GET.

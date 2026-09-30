@@ -129,7 +129,8 @@ AGENDA_NOW = datetime.datetime(2026, 9, 22, 9, 0, tzinfo=datetime.timezone.utc)
 def fake_token_post(url, fields):
     """Every token endpoint, answering a refresh with a read-only grant."""
     if "googleapis" in url:
-        scope = "https://www.googleapis.com/auth/calendar.events.owned.readonly"
+        scope = ("https://www.googleapis.com/auth/calendar.events.readonly "
+                 "https://www.googleapis.com/auth/calendar.calendarlist.readonly")
     else:
         scope = "https://graph.microsoft.com/Calendars.ReadBasic"
     return {"access_token": "fixture-access", "expires_in": 3600, "scope": scope,

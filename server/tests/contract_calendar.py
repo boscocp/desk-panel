@@ -87,3 +87,25 @@ class CalendarContract(ContractCase):
                 # the events, in the message.
                 self.assertEqual(len(rows), len(kept),
                                  f"{len(kept)} events should survive and {len(rows)} did")
+
+    def test_the_google_calendar_list_has_the_shape_the_selection_reads(self):
+        # ADR 0019 rests on `selected` and `primary` in calendarList. A change
+        # in either would quietly turn the panel back into primary-only, with
+        # every unit test still green. Shapes and counts only: an id is often
+        # somebody's e-mail address, and none goes into a message.
+        for provider, name, creds in self.accounts:
+            if provider != "google":
+                continue
+            with self.subTest(account=f"{provider}/{name}"):
+                token = creds.access_token()
+                raw = providers_calendar.get_json(
+                    f"{providers_calendar.GOOGLE_CALENDAR_LIST_URL}?maxResults=250",
+                    headers={"Authorization": f"Bearer {token}"})
+                self.assertIsInstance(raw.get("items"), list, "calendarList has no `items` list")
+                self.assertTrue(any(i.get("primary") is True for i in raw["items"]),
+                                "no calendar in the list is marked `primary`")
+                for item in raw["items"]:
+                    if "selected" in item:
+                        self.assertIsInstance(item["selected"], bool, "`selected` is not a boolean")
+                ids = providers_calendar.fetch_google_calendars(token)
+                self.assertEqual(ids[0], "primary")

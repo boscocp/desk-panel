@@ -116,6 +116,14 @@ jobs:
       # The convention, asserted against this repository's own log rather than
       # against a style guide. The hook runs the same script on the same rules.
       - run: git log --format=%s -30 | python scripts/check_commit_msg.py -
+      # The pull request's title, because a squash merge makes it the subject
+      # on `main` and the branch's own commits say nothing about it: #63's was
+      # 82 characters and every check above was green. Through `env`, never
+      # interpolated into the command, since a title is text anyone opening a
+      # pull request writes. Empty on a push, and a blank line is skipped.
+      - env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: printf '%s\n' "$PR_TITLE" | python scripts/check_commit_msg.py -
       # Not a list of scripts: `lint-selftests` discovers them by grep over a
       # glob, so the next one to grow a --self-test is covered by being written.
       - run: make lint-selftests
