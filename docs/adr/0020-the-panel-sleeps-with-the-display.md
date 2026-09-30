@@ -46,7 +46,9 @@ ADR 0010 forbids is wrong.
 - **The phone has a third state, `IDLE`**, with its own marker `state=idle`.
   - The screen, the data poll and the wake lock take the offline path unchanged.
   - The cadence stays the online one. The PC is up, so the monitor coming back is noticed
-    within one 2 s poll, not after a backoff that has climbed to 15 s.
+    within one poll, not after a backoff that has climbed to 15 s. With a second PC listed and
+    switched off, each idle cycle also waits out that PC's timeouts (up to 3 s), because another
+    PC might have somebody at it; one poll is then up to about 5 s.
   - IDLE on battery is dormant, exactly like offline on battery (T5.6). A monitor left off
     overnight must not hold a 2 s probe under a wake lock on a phone that is not charging.
 - **With more than one PC, a dark PC does not end the cycle.** Another listed PC may have
@@ -60,6 +62,11 @@ ADR 0010 forbids is wrong.
 - `state=offline` no longer means every case in which the panel is dark. Read `screen=sleep`
   for "dark", and `state=` for why: `offline` (nobody logged in) or `idle` (logged in, display
   off).
+- **Windows reads the console's display, not this user's session's.** With fast user switching,
+  a disconnected user's server reports whoever is at the console. That errs towards a lit
+  panel. `GUID_SESSION_DISPLAY_STATUS` is the per-session alternative if it ever matters.
+- A monitor switched off with its own power button is invisible on Windows and Linux: the OS
+  still drives it, so the reading stays "on".
 - A locked session with its monitor still on keeps the panel lit. The owner asked about the
   display, and locking is a separate fact that the server does not read today. Adding it later
   belongs in `display.py` and in this ADR.

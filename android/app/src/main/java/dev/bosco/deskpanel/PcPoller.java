@@ -503,7 +503,8 @@ public final class PcPoller {
     /**
      * Reads a {@code /ping} body, which is a few dozen bytes, and closes it.
      * Capped, so a peer that is not the desk-panel server cannot make the
-     * poller hold an unbounded string: past the cap the body is not a ping.
+     * poller hold an unbounded string: past the cap it returns null, which
+     * {@link PcHosts#displayOff} reads as "on" -- the safe side.
      */
     private static String read(InputStream body) throws IOException {
         if (body == null) {

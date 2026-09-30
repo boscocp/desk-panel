@@ -126,7 +126,14 @@ logger.lifecycle(
 val panelKey = dotenvValue("PANEL_KEY") ?: ""
 val pcCertFiles = dotenvValue("PC_CERTS")
     ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
-    ?.map { rootProject.file("../$it") }
+    ?.map {
+        if (File(it).isAbsolute) {
+            throw GradleException(
+                "PC_CERTS: $it is absolute; list paths relative to the repository root, " +
+                    "because the build runs in a container that mounts the checkout")
+        }
+        rootProject.file("../$it")
+    }
     ?: emptyList()
 if (panelKey.isNotEmpty() != pcCertFiles.isNotEmpty()) {
     throw GradleException(

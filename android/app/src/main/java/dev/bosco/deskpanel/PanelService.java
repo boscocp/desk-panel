@@ -879,6 +879,11 @@ public final class PanelService extends Service implements PcPoller.Listener {
         // and PcState keeps the cadence at 2s so the monitor coming back is
         // noticed within one poll.
         boolean online = state == PcState.State.ONLINE;
+        // IDLE -> OFFLINE (the PC sleeping after its monitor) is a real edge
+        // for the marker, but the screen is already dark: telling the window
+        // again would log a second screen=sleep for one dark stretch (found
+        // by review).
+        boolean stillDark = !online && Boolean.FALSE.equals(lastOnline);
         lastOnline = online;
 
         // On mains only. Offline on battery the device is *supposed* to
@@ -917,7 +922,9 @@ public final class PanelService extends Service implements PcPoller.Listener {
         }
 
         Panel target = panel;
-        if (target != null) {
+        if (stillDark) {
+            // Nothing for the window to do; the rest below is idempotent.
+        } else if (target != null) {
             target.onPcState(online, true);
         } else {
             // No window to act on it. Whoever registers next owns this

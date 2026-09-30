@@ -201,6 +201,41 @@ for wave 38; T9.2 is still part of no wave.
 | T9.2 | **Spike: can the panel talk to an assistant for nothing?** | todo | A button to ask something out loud and hear an answer, with the whole pipeline on the PC — invariant 1 means the page cannot call anything. Time-boxed, produces `docs/spikes/2026-voice-assistant.md` and a throwaway prototype under `spikes/`, and is allowed to conclude *do not build this*. The unknown is whether offline STT, a small local model and offline TTS fit inside a latency a person will stand at a panel for; Claude and DeepSeek are the paid comparison, not the plan. Also has to answer the awkward ones: `RECORD_AUDIO` would be the app's first dangerous permission, and an unauthenticated LAN endpoint that runs a model and speaks in someone's room is not in ADR 0015's family |
 | T9.4 | **Nobody else on the Wi-Fi can read the panel** | done | 2026-09-30, wave 39. **Design 1 shipped, measured on the Redmi**: [the spike](../docs/spikes/2026-panel-tls.md), then [ADR 0018](../docs/adr/0018-the-panel-traffic-is-private.md). Data and presses on TLS port 8778 with `X-Panel-Key` (SHA-256 then `compare_digest`), 401 without it and 401 on the plain port even with it; `/ping` stays plain, because a certificate problem must never read as a logout; `/app` off by default. **The spike's real finding**: macOS's LibreSSL writes P-256 keys with explicit curve parameters and Android's BoringSSL answers every handshake with `decode_error` — `make_cert.py` passes `ec_param_enc:named_curve` and a test pins it. After that, TLS 1.3 at 4–8 ms a handshake, two a minute. **Off on the owner's desk for now**: the Windows PC has no certificate, and a private APK needs every listed PC private. **Not measured**: a packet capture from a third device, a press over TLS, Windows |
 
+## Resuming after 2026-09-30 (wave 39)
+
+Wave 39 is **T4.6 + T9.4** on `wave/39-display-and-private-traffic`. T4.6 was asked for the same
+day: the panel sleeps when the PC's monitor sleeps (ADR 0020). T9.4 was the recommendation: data
+and presses over TLS with a key, and `/ping` kept plain (ADR 0018). Both are `done`, and
+`make check` is green. The note is `docs/harness-notes/2026-09-30-wave-39.md`.
+
+**Next: the flip to public, still the owner's call.** The tree and the history are clean (the
+secret sweep passed on 1391 blobs, and every author is the Gmail or a noreply). One thing remains
+before the flip, and only the owner can do it:
+
+1. **File the GitHub Support request** to purge `refs/pull/46..48/head`, which still carry the
+   work email as author (checked 2026-09-30). The owner's own rule is that nothing from the
+   employer is attached to this repository. Flipping first would publish those three refs.
+2. Flip. Then run the two commands in `docs/MAINTAINING.md` (branch protection, private
+   vulnerability reporting), which close T7.7.
+
+Separately, whenever it suits:
+
+- **Turn T9.4 on**: `make_cert.py` on the Windows PC, the same key in both `config.toml`
+  files, `PANEL_KEY` + `PC_CERTS` in `.env`, then rebuild (`docs/SERVER-SETUP.md` § Private
+  traffic). The Mac's certificate is already in `server/tls/`.
+- **T4.6 on Windows**: let the monitor time out and watch `/ping` say `"display": "off"`.
+- **T9.1** now waits only on `check_layout.py`, which needs Firefox.
+
+### What is still only true on this desk
+
+- The Windows and GNOME display readers are unmeasured, and so is T9.4 on Windows.
+- The panel runs the wave-39 APK in **open** mode, and the Mac's server is open too.
+  `server/tls/192.168.3.97.{pem,key}` exist and are gitignored.
+- A wireless HID receiver on this desk wakes the Mac's display within a second of
+  `pmset displaysleepnow`, so a display-off test here needs the receiver unplugged, or the
+  file-driven fake the note describes.
+- Carried: T4.5's move between two live PCs.
+
 ## Resuming after 2026-09-29 (wave 38)
 
 Wave 38 is **T9.1** on `wave/38-next-event`, PR #56. The owner asked for it over the recommended
