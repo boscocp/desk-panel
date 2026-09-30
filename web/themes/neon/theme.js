@@ -222,7 +222,10 @@
     // payload or from the answer to the last set: the last known volume, like
     // the mute cross, and never the panel's guess.
     const VOLUME_SEGMENTS = 10;
-    const VOLUME_ICON = 'M4 9.5h3.2L12 5.4v13.2L7.2 14.5H4a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1zM15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11';
+    // The SOM button's speaker and waves, as one path (ICONS is declared
+    // further down, so the two strings are repeated rather than referenced).
+    const VOLUME_ICON = 'M4 9.5h3.2L12 5.4v13.2L7.2 14.5H4a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1z'
+        + 'M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11';
     let volumeBar = null;
 
     function buildVolume(fields) {
@@ -364,7 +367,12 @@
             // The cross that says *muted*, drawn once and hidden until the PC
             // says so. Built here rather than on each result so a state change
             // is one attribute and not a rebuild of the icon under the finger.
-            icon.appendChild(svgPath(ICONS.mutedCross, 's-cross'));
+            if (shortcut.id === 'mute-audio') {
+                icon.appendChild(svgPath(ICONS.speakerWaves, 's-waves'));
+                icon.appendChild(svgPath(ICONS.mutedSlash, 's-cross'));
+            } else {
+                icon.appendChild(svgPath(ICONS.mutedCross, 's-cross'));
+            }
             button.appendChild(icon);
         }
 
@@ -816,6 +824,12 @@
         // has ink: a cross over the middle of the microphone would eat the
         // shape that identifies it.
         mutedCross: 'M16.4 8.4l5 5M21.4 8.4l-5 5',
+        // The speaker's two waves (T8.4): the same drawing as the volume bar's
+        // icon, so the button and the bar say "sound" the same way, and with
+        // them the speaker sits centred in its box. Hidden when muted, when a
+        // slash crosses the speaker instead -- asked for from the chair.
+        speakerWaves: 'M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11',
+        mutedSlash: 'M4 4l16 16',
     };
 
     // One <svg> with one path in it. Both icon sets go through this: the only

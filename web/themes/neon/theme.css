@@ -258,6 +258,12 @@ body {
     display: inline;
 }
 
+/* The SOM button's waves go when it is muted, and the slash takes their
+ * place across the speaker (T8.4). */
+.shortcut[data-state="muted"] .s-waves {
+    display: none;
+}
+
 /* Muted is a state worth seeing without reading the icon, so the whole button
  * shifts rather than only the cross appearing. Not red: red is this panel's
  * colour for a loss and for a failed press, and a muted speaker is neither
