@@ -904,8 +904,10 @@ function agendaRow(event, now, language, primary) {
         const minutes = Math.ceil((event.start - now) / 60000);
         const today = localDay(event.start) === localDay(now);
         if (!primary && today && minutes >= 60) {
-            // The second row has room for a time or a title, not both at the
-            // countdown's length: "14:30" says what "em 3 h 10" does.
+            // A later row says a clock time rather than a long countdown:
+            // "14:30" says what "em 3 h 10" does, in fewer characters, and
+            // the same on every row after the first however the theme lays
+            // them out.
             row.when = hhmm(event.start);
         } else {
             row.when = untilText(event.start, now, language);
@@ -921,6 +923,9 @@ function agendaRow(event, now, language, primary) {
     return row;
 }
 
+// The most rows agendaRows returns; how many of them to draw is the theme's.
+const AGENDA_MAX_ROWS = 3;
+
 /**
  * The AGENDA card as rows, for a theme that shows more than the next event:
  * up to three, best first by nextEvent's ranking, or null when there is no card
@@ -930,8 +935,9 @@ function agendaRow(event, now, language, primary) {
  *              icon      'live' (in progress), 'clock' (timed), 'calendar'
  *                        (all day) -- a name, never markup
  *              when      "até 23:30" in progress, "em 25 min", "amanhã
- *                        09:00", "o dia todo"; on the second row a timed
- *                        event today and an hour or more away is "14:30"
+ *                        09:00", "o dia todo"; on any row after the first
+ *                        a timed event today and an hour or more away is
+ *                        "14:30"
  *              aside     the right-hand end of the row: what is left of a
  *                        meeting in progress that ends today ("58 min"), or
  *                        the start time beside a countdown on the first row,
@@ -944,8 +950,6 @@ function agendaRow(event, now, language, primary) {
  * @param now      Date, the phone's clock
  * @param language the payload's `language`
  */
-const AGENDA_MAX_ROWS = 3;
-
 function agendaRows(agenda, now, language) {
     if (!agenda || typeof agenda !== 'object' || !(Number(agenda.accounts) > 0)) {
         return null;

@@ -542,7 +542,9 @@ def main():
     # a panel in Sao Paulo.
     #
     # agenda.js measures one card too (T9.1): a meeting in progress that ends
-    # tomorrow, "até amanhã 10:00" beside the AGORA chip on neon's first row.
+    # tomorrow, beside the AGORA chip on neon's first row, and two events
+    # behind it -- the tallest the card gets. agenda-failed.js is the same
+    # three with a failure line, which neon answers with two compact rows.
     # stress.js carries the other widest case, "amanhã 09:00" as a countdown.
     #
     # night.js is the next. A clear sky after dark draws stars rather than a
@@ -558,6 +560,7 @@ def main():
     passes = [("served", None, False), ("stress", "stress.js", False),
               ("unknown", "unknown.js", False),
               ("agenda", "agenda.js", False),
+              ("agenda-failed", "agenda-failed.js", False),
               ("night", "night.js", False),
               ("overflow", "overflow.js", True)]
 

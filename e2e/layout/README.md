@@ -138,13 +138,15 @@ renders it.
 All of them matter. The typical tick is not what breaks a layout, and each fixture says beside
 its values why they are there.
 
-### `agenda`, which measures one line
+### `agenda` and `agenda-failed`, which measure one card
 
-`agenda.js` sends a meeting in progress that ends tomorrow (T9.1). neon draws it as
-"até amanhã 10:00", four characters more than its 32px countdown holds, so the line steps down a
-size rather than cutting off the time. `stress.js` carries the other widest case, "amanhã 09:00"
-at full size, under a very long title and the longest failure line; the card shows one event at a
-time, so the two cannot share a fixture.
+`agenda.js` sends a meeting in progress that ends tomorrow (T9.1) and two events behind it: the
+tallest card neon draws, with "até amanhã 10:00" beside the AGORA chip, the second event stacked
+on two lines and the third on one. `agenda-failed.js` sends the same three with a two-line
+failure line, which neon answers by drawing two compact events; without that cap the failure
+line lands off the bottom of the screen, and this pass is the only thing that would say so.
+`stress.js` carries the other widest case, "amanhã 09:00" as a countdown under a very long
+title.
 
 ### `unknown`, which measures one card
 

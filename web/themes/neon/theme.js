@@ -1084,7 +1084,8 @@
 
     // The AGENDA card (T9.1), a quest tracker since the redesign: the first
     // event is read from the chair -- a head line, its title and, while it
-    // runs, a segmented bar -- and the second is one line under it. No
+    // runs, a segmented bar -- and up to two more under it: the second on two
+    // lines, the third on one, or both on one beside a failure line. No
     // payload agenda, or a PC with no calendar connected, puts the card back
     // to reserved: empty, titled, and marked for e2e/layout/measure.js. A
     // failed account costs its own line and nothing else.
