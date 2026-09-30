@@ -225,7 +225,8 @@ have kept the rule as it was.
 
 - **`volume` is the only id with a value**, at `POST /action/volume/<level>`. The level is
   ASCII digits, one to three of them, from 0 to 100. `actions.parse_level` turns it into an
-  `int` before any other check runs, and anything else is the same 404 as an unknown id.
+  `int` before anything touches the mixer (only the Host and key checks come first), and
+  anything else is the same 404 as an unknown id.
 - **Only that int reaches a command**, formatted by `actions.py` itself: `0.42` for `wpctl`,
   `42%` for `pactl`, `42` for AppleScript, `0.42f` in the Windows C#. The request's text is
   never copied into an argument list.

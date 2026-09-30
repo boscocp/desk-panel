@@ -182,8 +182,7 @@
         const volume = volumeFields(payload, words.tag);
         const signature = wanted.map((s) => s.id + ':' + s.label).join(',')
             + (volume ? '|volume:' + volume.label : '');
-        if (volumeInput && volume && volume.level !== null && !volumeBusy
-            && document.activeElement !== volumeInput) {
+        if (volumeInput && volume && volume.level !== null && !volumeBusy) {
             volumeInput.value = String(volume.level);
         }
         if (signature === drawnActions) {
@@ -214,7 +213,12 @@
             volumeInput.value = String(volume.level === null ? 50 : volume.level);
             volumeInput.setAttribute('aria-label', volume.label);
             volumeInput.title = volume.label;
-            volumeInput.addEventListener('change', () => sendVolume(Number(volumeInput.value)));
+            volumeInput.addEventListener('change', () => {
+                sendVolume(Number(volumeInput.value));
+                // A range input keeps focus after `change`; blurred so the
+                // next payload's level is not taken for a drag in progress.
+                volumeInput.blur();
+            });
             els.shortcuts.appendChild(volumeInput);
         }
     }

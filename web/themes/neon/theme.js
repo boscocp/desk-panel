@@ -250,7 +250,8 @@
 
         function paint(level) {
             const lit = level === null ? 0 : Math.round(level / (100 / VOLUME_SEGMENTS));
-            // Bottom-up: the last segment in the DOM is the top one.
+            // Bottom-up: the first segment in the DOM is the top one, so
+            // segment i is lit when it is within `lit` of the bottom.
             segments.forEach((seg, i) => {
                 seg.className = VOLUME_SEGMENTS - i <= lit ? 'on' : '';
             });

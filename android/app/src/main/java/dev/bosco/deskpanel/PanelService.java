@@ -1144,6 +1144,17 @@ public final class PanelService extends Service implements PcPoller.Listener {
         }
     }
 
+    /** The volume bar's press (T8.4), with invokeAction's checks. */
+    public static boolean invokeVolume(int level, DataPoller.ResultListener onResult) {
+        PanelService service = instance;
+        if (service == null || !Boolean.TRUE.equals(lastOnline)) {
+            Log.i(Markers.TAG, Markers.action(Actions.VOLUME, "offline"));
+            return false;
+        }
+        DataPoller poller = service.dataPoller;
+        return poller != null && poller.invokeVolume(level, onResult);
+    }
+
     /**
      * One shortcut press, from the Activity's JavaScript bridge (T8.2).
      *
@@ -1159,17 +1170,6 @@ public final class PanelService extends Service implements PcPoller.Listener {
      * @return false if nothing was sent, so the page can say so immediately
      *         rather than waiting for a result that is not coming
      */
-    /** The volume bar's press (T8.4), with invokeAction's checks. */
-    public static boolean invokeVolume(int level, DataPoller.ResultListener onResult) {
-        PanelService service = instance;
-        if (service == null || !Boolean.TRUE.equals(lastOnline)) {
-            Log.i(Markers.TAG, Markers.action(Actions.VOLUME, "offline"));
-            return false;
-        }
-        DataPoller poller = service.dataPoller;
-        return poller != null && poller.invokeVolume(level, onResult);
-    }
-
     public static boolean invokeAction(String id, DataPoller.ResultListener onResult) {
         PanelService service = instance;
         if (service == null || !Boolean.TRUE.equals(lastOnline)) {

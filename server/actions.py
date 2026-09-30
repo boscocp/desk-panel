@@ -830,13 +830,16 @@ def level_from(stdout):
     Three spellings, because three mixers:
       wpctl get-volume       ->  `Volume: 0.42`, maybe ` [MUTED]`, above 1.00 when boosted
       pactl get-sink-volume  ->  `Volume: front-left: 27525 /  42% / -22.6 dB, ...`
+                                 (one percent per channel; the loudest wins)
       osascript, PowerShell  ->  `42`
     Anything else is None, and the bar then draws no level rather than a guess.
     """
     text = (stdout or "").strip()
-    percent = re.search(r"(\d+)%", text)
-    if percent:
-        value = int(percent.group(1))
+    percents = re.findall(r"(\d+)%", text)
+    if percents:
+        # The loudest channel, which is what pactl means by a sink's volume
+        # when the channels differ (found by review).
+        value = max(int(p) for p in percents)
     elif re.fullmatch(r"Volume:\s*\d+\.\d+(\s*\[MUTED\])?", text):
         value = round(float(text.split(":", 1)[1].split()[0]) * 100)
     elif re.fullmatch(r"\d{1,3}", text):

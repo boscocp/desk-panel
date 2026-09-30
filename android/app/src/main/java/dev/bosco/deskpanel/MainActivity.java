@@ -389,9 +389,10 @@ public class MainActivity extends Activity implements PanelService.Panel {
      */
     private void pushActionResultToPage(String id, boolean ok, String state) {
         // Both interpolated values are this app's own: `id` comes from
-        // Actions.ALLOWED and `state` from DataPayload.actionState, which
-        // answers one of three literals or "unknown". Neither is a string the
-        // page or the PC chose the characters of.
+        // Actions.ALLOWED (or Actions.VOLUME) and `state` from
+        // DataPayload.actionState, which answers "muted", "unmuted",
+        // "unknown", or a level rebuilt from an int, 0 to 100. Neither is a
+        // string the page or the PC chose the characters of.
         webView.evaluateJavascript(
                 "window.onActionResult('" + id + "'," + ok + ",'" + state + "')", null);
     }

@@ -569,29 +569,39 @@ class App:
         self._volume_at = None
         self._volume_lock = threading.Lock()
         self._volume_refreshing = False
+        # Bumped by every set, so a background read that started before a set
+        # and finished after it drops its older answer (found by review).
+        self._volume_generation = 0
         self._agenda_lock = threading.Lock()
         self._agenda_refreshing = False
 
     # How old a volume reading may be before the next /quotes asks again. The
     # bar is the last known level, like the mute cross; somebody turning the
-    # knob on the PC shows up at the next data cycle after this.
+    # knob on the PC shows up at the next data cycle after this. Two minutes
+    # on Windows, where every read is a PowerShell `Add-Type` compile, and the
+    # phone asks around the clock while the session is logged in.
     VOLUME_TTL_S = 20
+    VOLUME_TTL_WINDOWS_S = 120
 
     def volume_level(self):
         """The last measured output volume, 0..100 or None, never blocking."""
         now = self.clock()
         with self._volume_lock:
-            stale = self._volume_at is None or now - self._volume_at >= self.VOLUME_TTL_S
+            ttl = self.VOLUME_TTL_WINDOWS_S if os.name == "nt" else self.VOLUME_TTL_S
+            stale = self._volume_at is None or now - self._volume_at >= ttl
             start = stale and not self._volume_refreshing
             if start:
                 self._volume_refreshing = True
+                generation = self._volume_generation
         if start:
             def run():
                 level = actions_module.read_volume()
                 with self._volume_lock:
+                    self._volume_refreshing = False
+                    if generation != self._volume_generation:
+                        return
                     self._volume_level = level
                     self._volume_at = self.clock()
-                    self._volume_refreshing = False
             threading.Thread(target=run, name="volume-read", daemon=True).start()
         return self._volume_level
 
@@ -599,6 +609,7 @@ class App:
         """Set the output volume; returns the measured level. Raises like run_action."""
         measured = actions_module.set_volume(level)
         with self._volume_lock:
+            self._volume_generation += 1
             self._volume_level = measured
             self._volume_at = self.clock()
         return measured

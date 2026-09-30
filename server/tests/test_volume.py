@@ -145,3 +145,33 @@ class RouteTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReviewFixTests(unittest.TestCase):
+    def test_pactl_reports_the_loudest_channel(self):
+        self.assertEqual(actions.level_from(
+            "Volume: front-left: 27525 /  42% / -22.6 dB,   front-right: 45219 /  69% / -9.6 dB"), 69)
+
+    def test_a_read_that_started_before_a_set_does_not_overwrite_it(self):
+        import threading
+        from unittest import mock
+        from server.server import App
+        app = App(dict(DEFAULT_CONFIG, actions=["volume"]))
+        release = threading.Event()
+        started = threading.Event()
+
+        def slow_read():
+            started.set()
+            release.wait(2)
+            return 100
+
+        with mock.patch.object(actions, "read_volume", slow_read), \
+                mock.patch.object(actions, "set_volume", lambda level: level):
+            app.volume_level()
+            self.assertTrue(started.wait(2))
+            app.set_volume(30)
+            release.set()
+            for thread in threading.enumerate():
+                if thread.name == "volume-read":
+                    thread.join(2)
+        self.assertEqual(app._volume_level, 30)

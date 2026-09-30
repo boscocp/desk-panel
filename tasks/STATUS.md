@@ -204,6 +204,31 @@ for wave 38; T9.2 is still part of no wave.
 | T9.4 | **Nobody else on the Wi-Fi can read the panel** | done | 2026-09-30, wave 39. **Design 1 shipped, measured on the Redmi**: [the spike](../docs/spikes/2026-panel-tls.md), then [ADR 0018](../docs/adr/0018-the-panel-traffic-is-private.md). Data and presses on TLS port 8778 with `X-Panel-Key` (SHA-256 then `compare_digest`), 401 without it and 401 on the plain port even with it; `/ping` stays plain, because a certificate problem must never read as a logout; `/app` off by default. **The spike's real finding**: macOS's LibreSSL writes P-256 keys with explicit curve parameters and Android's BoringSSL answers every handshake with `decode_error` — `make_cert.py` passes `ec_param_enc:named_curve` and a test pins it. After that, TLS 1.3 at 4–8 ms a handshake, two a minute. **Off on the owner's desk for now**: the Windows PC has no certificate, and a private APK needs every listed PC private. **Not measured**: a packet capture from a third device, a press over TLS, Windows |
 | T9.5 | **A soft alert before a meeting** | done | 2026-09-30, wave 40. Asked for the same day. `agenda_soon_min` (5) and `agenda_chime_min` (1) in `config.toml` ride `agenda.alerts`; inside the first the AGENDA row gets a bell, the border pulses orange and a "!" sits on the title's line (made stronger twice from the chair), and inside the second one soft chime plays once per meeting, only while the panel is lit. The chime is synthesised by `scripts/make_chime.py` (CC0) and a theme can name its own file. **Measured on the Redmi** with a fake meeting: the visuals, and the app's AudioTrack playing a minute before |
 
+## Resuming after 2026-09-30 (wave 40)
+
+Wave 40 is **T9.5 + T8.4 + T6.16** on `wave/40-meeting-alerts`, three requests from the chair
+made in one sitting and refined on the device while the owner watched:
+- the meeting alerts: a bell, an orange pulse and a "!" at 5 minutes, one soft chime at 1;
+- a volume bar beside MIC, with ADR 0015 amended so `volume` may carry one int from 0 to 100;
+- the relative humidity on the weather card.
+
+The note is `docs/harness-notes/2026-09-30-wave-40.md`.
+
+**Next: unchanged from wave 39.** The flip to public is the owner's call, after the GitHub
+Support request that purges `refs/pull/46..48/head`. Separately, whenever it suits:
+
+- **On the Windows PC:** add `"volume"` to `actions` in `config.toml` and try the bar. That is
+  the first real run of the PowerShell path. Then T9.4's certificate, and T4.6's display check.
+- **On CachyOS:** the same `"volume"`, through `wpctl`.
+- **T9.1** still waits only on `check_layout.py` (Firefox).
+
+### What is still only true on this desk
+
+- This Mac's `server/config.json` has `"volume"` in `actions`, added for the device check.
+- The volume bar is measured on macOS only.
+- The Mac's volume was set back to 100 after the test. It had been 100.
+- Everything under wave 39's heading below still holds.
+
 ## Resuming after 2026-09-30 (wave 39)
 
 Wave 39 is **T4.6 + T9.4** on `wave/39-display-and-private-traffic`. T4.6 was asked for the same
