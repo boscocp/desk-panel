@@ -28,6 +28,7 @@
   "night_start": "22:00",
   "night_end": "07:00",
   "follow_display": true,
+  "spectrum": false,
   "theme": "neon",
   "language": "pt-BR",
   "actions": [

@@ -210,6 +210,20 @@
         }
     }
 
+    // One frame of the spectrum bars (T8.5), to the theme if it draws them.
+    // Optional, like `chime`: a theme without a `spectrum` function simply
+    // has no bars, and the frames go nowhere.
+    function spectrum(bars) {
+        if (!current || typeof current.spectrum !== 'function') {
+            return;
+        }
+        try {
+            current.spectrum(bars, root());
+        } catch (err) {
+            console.error('desk-panel: theme "' + currentName + '" spectrum failed', err);
+        }
+    }
+
     // One attribute on <html>, and css/style.css owns what it means. Not a
     // class on <body>, because <body> belongs to the theme and a theme that
     // cleared it would clear the blackout with it.
@@ -296,5 +310,6 @@
         night: night,
         alert: alert,
         chime: chime,
+        spectrum: spectrum,
     };
 })();

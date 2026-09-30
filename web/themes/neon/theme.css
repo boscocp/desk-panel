@@ -143,6 +143,31 @@ body {
     min-width: 0;
 }
 
+/* The spectrum bars (T8.5): over the two buttons, as wide as the pair, and
+ * as tall as the volume bar reaches above them, so the three read as one
+ * block -- bars on the left, the level on the right. Absolute, because the
+ * sidebar's grid has two rows and this is not a third: it floats in the space
+ * the clock and the buttons leave, and costs neither of them a pixel.
+ *
+ *   bottom  6px margin + 72px button + 10px gap (#shortcuts, .shortcut)
+ *   height  200px volume bar - 72px button - 10px gap
+ *   width   two 104px buttons + the 10px gap between them */
+#sidebar {
+    position: relative;
+}
+
+#spectrum {
+    position: absolute;
+    left: 0;
+    bottom: 88px;
+    width: 218px;
+    height: 118px;
+}
+
+#spectrum[hidden] {
+    display: none;
+}
+
 /* 60px, not larger: the clock must not be clipped by #sidebar even when the
  * stack falls all the way through to a non-condensed fallback, which is ~4.5em
  * wide for HH:MM:SS against the ~4.0em of Android's Roboto Condensed. It is

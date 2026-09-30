@@ -278,4 +278,24 @@
 
     window.onData(buildPayload());
     setInterval(() => window.onData(buildPayload()), 3000);
+
+    // The spectrum bars (T8.5): twenty frames a second of something shaped
+    // like music -- a kick on the beat in the bass, a wandering middle, a
+    // thinner top -- in the hex production sends. `?spectrum=off` leaves the
+    // space empty, which is the panel with `spectrum` off on the PC.
+    if (!/[?&]spectrum=off\b/.test(location.search)) {
+        let t = 0;
+        setInterval(() => {
+            t += 0.05;
+            const kick = Math.max(0, Math.cos(t * Math.PI * 4)) ** 6;
+            let hex = '';
+            for (let i = 0; i < 16; i++) {
+                const tilt = 1 - i / 22;
+                const wander = 0.5 + 0.5 * Math.sin(t * (1.3 + i * 0.37) + i);
+                const level = tilt * (i < 3 ? 0.35 + 0.65 * kick : 0.25 + 0.55 * wander * Math.random());
+                hex += Math.round(Math.min(1, level) * 255).toString(16).padStart(2, '0');
+            }
+            window.onSpectrum(hex);
+        }, 50);
+    }
 })();

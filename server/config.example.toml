@@ -245,6 +245,20 @@ night_end = "07:00"
 #   false  the panel follows the login alone, as it did before.
 follow_display = true
 
+# The spectrum bars over the buttons, Winamp-style: what this PC is playing
+# right now, sixteen bars from bass to treble, streamed to the panel twenty
+# times a second (ADR 0021). Only 16 levels leave the PC, never the audio, and
+# capture runs only while the panel is lit and watching.
+#   false  the default: nothing is captured and the space stays empty.
+#   true   macOS 14.2 or newer: a Swift helper, built by install_agent.sh,
+#          and macOS asks once for "System Audio Recording" for python3.
+#          Windows: a C# helper (WASAPI loopback), compiled by
+#          install_task.ps1 with the csc.exe Windows ships; no permission.
+#          Linux: `parec` on the default output's monitor (libpulse on Arch
+#          and CachyOS, pulseaudio-utils elsewhere), PipeWire or PulseAudio.
+#          A PC that cannot capture says why at startup.
+spectrum = false
+
 # Which theme renders the panel — the name of a directory in the APK's
 # web/themes/. Every theme is packaged, so switching one is a restart of this
 # server and not a reinstall of the app.

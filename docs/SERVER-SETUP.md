@@ -554,6 +554,27 @@ Verified on macOS 26.5 (Apple Silicon) on 2026-09-29: `verify_login_scope.py` ex
 and `POST /action/*` answer from the agent. **Not yet verified: that nothing answers at the
 login window**, which needs a logout and a second machine (T3.10's behaviour block).
 
+## The spectrum bars (optional)
+
+`spectrum = true` in `config.toml` puts Winamp-style bars over the panel's buttons, following
+what the PC is playing (T8.5, [ADR 0021](adr/0021-the-spectrum-is-a-stream.md)). Capture runs
+only while the panel is lit and connected, and only sixteen levels leave the PC, never the audio.
+A PC that cannot capture says why in its startup notices, and the space stays empty.
+
+- **Windows.** `install_task.ps1` compiles the helper `server\win\spectrum-tap.exe` from
+  `spectrum_tap.cs` with the `csc.exe` that .NET Framework 4 puts on every Windows. It is WASAPI
+  loopback on the default output, and needs no permission. Switching outputs restarts it on the
+  new one within seconds.
+- **Linux.** `parec` on the default output's monitor. It is in `libpulse` on Arch and CachyOS,
+  and in `pulseaudio-utils` on Debian and Fedora. PipeWire's pulse layer answers it the same as
+  PulseAudio.
+- **macOS 14.2+.** `install_agent.sh` builds the Swift helper `server/mac/spectrum-tap`, which
+  needs the Command Line Tools (`xcode-select --install`). To build it by hand:
+  `swiftc -O server/mac/spectrum_tap.swift -o server/mac/spectrum-tap`. The first time the panel
+  watches, macOS asks to let **python3** record system audio. Allow it, or turn it on later in
+  System Settings → Privacy & Security → Screen & System Audio Recording → System Audio Recording
+  Only. Until then the bars stay flat and the log says `the source has sent no audio`.
+
 ## Verifying the login scope
 
 `probe.py` proves the server answers. It cannot prove *why* it answers, and a Windows Service

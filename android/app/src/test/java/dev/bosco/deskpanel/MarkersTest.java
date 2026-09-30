@@ -118,6 +118,8 @@ public class MarkersTest {
         assertEquals("ping=ok", Markers.ping("ok"));
         assertEquals("data=ok", Markers.data(true));
         assertEquals("data=err", Markers.data(false));
+        assertEquals("spectrum=open", Markers.spectrum("open"));
+        assertEquals("spectrum=off", Markers.spectrum("off"));
         assertEquals("battery=87", Markers.battery(87));
     }
 }

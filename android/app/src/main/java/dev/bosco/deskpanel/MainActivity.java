@@ -381,6 +381,19 @@ public class MainActivity extends Activity implements PanelService.Panel {
     }
 
     /**
+     * One spectrum frame into the page (T8.5). {@link SpectrumFrame} has
+     * already reduced it to 32 hex digits, which is what makes it safe
+     * between quotes. Guarded, because a theme that draws no bars defines no
+     * {@code window.onSpectrum}, and twenty ReferenceErrors a second would be
+     * noise in the WebView's console.
+     */
+    @Override
+    public void onSpectrum(String frame) {
+        webView.evaluateJavascript(
+                "window.onSpectrum&&window.onSpectrum('" + frame + "')", null);
+    }
+
+    /**
      * Hands one shortcut's outcome back to the page (T8.2).
      *
      * <p>{@code id} comes from {@link Actions#ALLOWED} and never from the

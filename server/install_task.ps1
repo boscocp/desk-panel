@@ -566,6 +566,26 @@ if ($null -ne $existing -and $existing.State -eq 'Running') {
     }
 }
 
+# -- the spectrum helper (T8.5, ADR 0021) ------------------------------------
+# Compiled on every install, whether `spectrum` is on or not, so turning it on
+# later is a config edit and a restart. After the stop above: a running
+# helper holds the .exe open, and csc cannot replace it. The compiler is the
+# one .NET Framework 4 puts on every Windows; the source is C# 5 for it.
+$tapSource = Join-Path (Join-Path $RepoRoot 'server') 'win\spectrum_tap.cs'
+$tapExe = Join-Path (Join-Path $RepoRoot 'server') 'win\spectrum-tap.exe'
+$csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+if (Test-Path -LiteralPath $csc -PathType Leaf) {
+    Write-Step 'Building the spectrum helper'
+    & $csc /nologo /optimize+ /target:exe "/out:$tapExe" $tapSource | Out-Host
+    if ($LASTEXITCODE -eq 0) {
+        Write-Note "built $tapExe"
+    } else {
+        Write-Note 'csc failed (its complaint is above); the spectrum bars stay off'
+    }
+} else {
+    Write-Note "no $csc; the spectrum bars stay off"
+}
+
 # -- log file --------------------------------------------------------------
 if ([string]::IsNullOrWhiteSpace($LogFile)) {
     $LogFile = Join-Path (Join-Path $env:LOCALAPPDATA 'desk-panel') 'server.log'

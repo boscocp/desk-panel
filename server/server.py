@@ -41,6 +41,7 @@ from server import (market_hours, oauth, providers_awesomeapi,  # noqa: E402
                     providers_openmeteo, providers_usno)
 from server import actions as actions_module  # noqa: E402
 from server import private  # noqa: E402
+from server import spectrum as spectrum_module  # noqa: E402
 from server.config_format import ConfigError, format_for_path, merge, parse  # noqa: E402
 from server.upstream import UpstreamError  # noqa: E402
 
@@ -156,6 +157,11 @@ DEFAULT_CONFIG = {
     # what the owner asked for, and a platform the server cannot read answers
     # "unknown", which leaves the panel following the login alone.
     "follow_display": True,
+    # The spectrum bars over the buttons (T8.5, ADR 0021): what this PC is
+    # playing, streamed on /spectrum. Off by default, because turning it on
+    # means capturing the system's audio (macOS asks once). macOS, Windows
+    # and Linux each have a source; see spectrum.source_for.
+    "spectrum": False,
     # The meeting alerts on the AGENDA card (T9.5): a visual cue this many
     # minutes before a meeting, a soft chime this many before it, at this
     # volume. 0 turns either off. See config.example.toml.
@@ -493,8 +499,13 @@ class App:
     """
 
     def __init__(self, config, clock=time.monotonic, tokens_path=None,
-                 wall_clock=None, oauth_post=oauth.post_form, display=None):
+                 wall_clock=None, oauth_post=oauth.post_form, display=None,
+                 spectrum=None):
         self.config = config
+        # The spectrum hub (T8.5), or None when `spectrum` is off or this
+        # platform has no capture. Injected like `display`: the real one
+        # starts a process, and a test constructing an App must not.
+        self.spectrum = spectrum
         # Whether this session's display is on (T4.6, ADR 0020). Injected,
         # not built here: on Windows the reader is a thread with a window of
         # its own, and a test constructing an App must not start one. `main`
@@ -1301,7 +1312,7 @@ def route(method, path, app=None, request_headers=None, channel="plain"):
 
     # Every POST under /action/, matched or not: a new route shape there
     # (the volume's /action/volume/<n>) must never be one that skips the key.
-    data_route = (method == "GET" and path in ("/quotes", "/weather")) or (
+    data_route = (method == "GET" and path in ("/quotes", "/weather", "/spectrum")) or (
         method == "POST" and path.startswith("/action/"))
     if data_route and app is not None and not private.authorized(
             getattr(app, "config", None) or {}, request_headers, channel):
@@ -1316,6 +1327,17 @@ def route(method, path, app=None, request_headers=None, channel="plain"):
         if app is None:
             return _json(503, {"error": "not configured"})
         return _json(200, app.weather())
+
+    if method == "GET" and path == "/spectrum":
+        # The one route whose body is not bytes: a generator of frame lines,
+        # which the handler writes as they come (T8.5, ADR 0021). 404 when
+        # the bars are off or cannot be captured here, so the phone stops
+        # asking for a while instead of retrying a stream that never comes.
+        hub = getattr(app, "spectrum", None)
+        if hub is None:
+            return 404, b"", "text/plain", ()
+        return 200, hub.frames(), "text/plain; charset=us-ascii", (
+            ("Cache-Control", "no-store"),)
 
     if method == "POST":
         level = volume_level_in(path)
@@ -1508,6 +1530,9 @@ class Handler(BaseHTTPRequestHandler):
             # read; a reset connection is one they have to guess at.
             traceback.print_exc()
             status, body, content_type, headers = _json(500, {"error": "internal error"})
+        if not isinstance(body, bytes):
+            self._stream(status, body, content_type, headers, method)
+            return
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
@@ -1516,6 +1541,34 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         if body and method != "HEAD":
             self.wfile.write(body)
+
+    def _stream(self, status, frames, content_type, headers, method):
+        """Writes a streaming body (`/spectrum`) until it ends or the client goes.
+
+        No Content-Length, so the end of the body is the end of the
+        connection. Every frame is flushed: a frame that sits in a buffer is
+        a bar that moves late. Closing the generator is what tells the hub
+        this watcher has left, so it happens however the loop ends.
+        """
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Connection", "close")
+            for name, value in headers:
+                self.send_header(name, value)
+            self.end_headers()
+            self.close_connection = True
+            if method == "HEAD":
+                return
+            for line in frames:
+                self.wfile.write(line)
+                self.wfile.flush()
+        except OSError:
+            # The phone went away, which is how every stream ends but the
+            # server's own time limit.
+            pass
+        finally:
+            frames.close()
 
     def do_GET(self):
         self._handle("GET")
@@ -1772,12 +1825,24 @@ def main(argv=None):
         print(f"config OK: {config_path}")
         return
 
+    # The spectrum bars (T8.5), said out loud like the actions: an owner who
+    # turned them on and sees flat bars needs to find the reason here.
+    spectrum = None
+    if config.get("spectrum"):
+        factory, reason = spectrum_module.source_for()
+        if factory is None:
+            print(f"notice: spectrum is on but stays off: {reason}", file=sys.stderr)
+        else:
+            spectrum = spectrum_module.Spectrum(factory)
+            print("notice: spectrum on: /spectrum captures this PC's audio while "
+                  "the panel watches", file=sys.stderr)
+
     port = config.get("port", PORT)
     # functools.partial rather than a class attribute: the app is per-server
     # state, and a class attribute would be shared by every server in a test
     # process that starts more than one.
     app = App(config, tokens_path=tokens_path,
-              display=display_module.watcher(config))
+              display=display_module.watcher(config), spectrum=spectrum)
     # Before the socket is bound rather than after: the first poll lands within
     # seconds of a login, and the series should already be on its way.
     app.warm_history()
