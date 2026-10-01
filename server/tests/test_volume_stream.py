@@ -133,6 +133,45 @@ class HubVolumeTests(unittest.TestCase):
         hub.note_volume(None)
         self.assertEqual(heard, [])
 
+    def test_the_level_is_forgotten_when_the_source_closes(self):
+        # A helper that has gone says nothing about the knob now (found by
+        # review): the next stream must not open with its last word.
+        class Source:
+            def watch_stderr(self, on_volume, log):
+                self.on_volume = on_volume
+
+            def open(self):
+                self.on_volume(30)
+                return 24000, lambda n: b""
+
+            def close(self):
+                pass
+
+        hub = spectrum.Spectrum(Source, log=lambda m: None)
+        hub.on_volume = lambda level: None
+        with mock.patch.object(spectrum, "RESTART_S", 5.0):
+            frames = hub.frames()
+            deadline = time.monotonic() + 2
+            while hub._volume_sequence < 2 and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertIsNone(hub._volume)
+            frames.close()
+
+    def test_the_owner_hears_levels_in_the_order_the_hub_kept_them(self):
+        heard = []
+        hub = self._hub(heard.append)
+
+        def note_many(start):
+            for level in range(start, start + 50):
+                hub.note_volume(level % 101)
+
+        threads = [threading.Thread(target=note_many, args=(n * 7,)) for n in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(heard[-1], hub._volume)
+
     def test_the_hub_hands_its_callbacks_to_the_source(self):
         watched = []
 
@@ -158,10 +197,23 @@ class HubVolumeTests(unittest.TestCase):
 
 
 class AppTests(unittest.TestCase):
-    def _hub(self):
-        hub = spectrum.Spectrum(lambda: None, log=lambda m: None)
+    def _hub(self, reports_volume=True):
+        hub = spectrum.Spectrum(lambda: None, log=lambda m: None,
+                                reports_volume=reports_volume)
         hub._running = True
         return hub
+
+    def test_a_source_that_reports_no_volume_is_not_wired(self):
+        # macOS and Linux: a hub that heard only the phone's sets would open
+        # every new stream with the last one (found by review).
+        hub = self._hub(reports_volume=False)
+        app = App(dict(DEFAULT_CONFIG, actions=["volume"]), spectrum=hub)
+        self.assertIsNone(hub.on_volume)
+        with mock.patch.object(actions, "set_volume", lambda level: level):
+            app.set_volume(30)
+        frames = hub.frames()
+        self.assertEqual(next(frames), spectrum.SILENT_FRAME)
+        frames.close()
 
     def test_the_hub_feeds_quotes_when_the_volume_action_is_on(self):
         hub = self._hub()

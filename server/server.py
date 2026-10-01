@@ -588,7 +588,8 @@ class App:
         # The volume rides the spectrum stream too (T8.6), when both are on:
         # the hub hears the helper's level within a tenth of a second, and
         # the bar no longer waits for the TTL below and the next data cycle.
-        if self.spectrum is not None and actions_module.VOLUME in self.enabled_actions:
+        if (self.spectrum is not None and getattr(self.spectrum, "reports_volume", False)
+                and actions_module.VOLUME in self.enabled_actions):
             self.spectrum.on_volume = self.note_volume
 
     # How old a volume reading may be before the next /quotes asks again. The
@@ -1846,7 +1847,10 @@ def main(argv=None):
         if factory is None:
             print(f"notice: spectrum is on but stays off: {reason}", file=sys.stderr)
         else:
-            spectrum = spectrum_module.Spectrum(factory)
+            # Only the Windows helper reports the volume (T8.6); elsewhere the
+            # bar keeps following /quotes.
+            spectrum = spectrum_module.Spectrum(
+                factory, reports_volume=sys.platform == "win32")
             print("notice: spectrum on: /spectrum captures this PC's audio while "
                   "the panel watches", file=sys.stderr)
 

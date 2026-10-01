@@ -10,7 +10,6 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -71,7 +70,8 @@ public final class SpectrumStream {
     private final VolumeListener volumeListener;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final AtomicReference<String> pending = new AtomicReference<>();
-    private final AtomicInteger pendingVolume = new AtomicInteger(SpectrumFrame.NOT_VOLUME);
+    /** {generation, level}, or null: the generation travels with the level (see deliverVolume). */
+    private final AtomicReference<int[]> pendingVolume = new AtomicReference<>();
 
     private volatile boolean running;
     private volatile int generation;
@@ -207,15 +207,31 @@ public final class SpectrumStream {
         });
     }
 
-    /** Coalesced like a frame: a knob turned fast is many lines, one paint. */
+    /**
+     * Coalesced like a frame: a knob turned fast is many lines, one paint.
+     *
+     * <p>The level carries the generation it was read under. A post queued
+     * by a stream that has since been stopped may run after the next stream
+     * has queued its first level; it must hand that level back, not drop it
+     * as stale, or the new stream's opening line is lost (found by review).
+     */
     private void deliverVolume(int level, int booked) {
-        if (pendingVolume.getAndSet(level) != SpectrumFrame.NOT_VOLUME) {
+        int[] previous = pendingVolume.getAndSet(new int[] {booked, level});
+        if (previous != null && previous[0] == booked) {
             return;
         }
         main.post(() -> {
-            int latest = pendingVolume.getAndSet(SpectrumFrame.NOT_VOLUME);
-            if (latest != SpectrumFrame.NOT_VOLUME && !isStale(booked)) {
-                volumeListener.onVolume(latest);
+            int[] latest = pendingVolume.getAndSet(null);
+            if (latest == null) {
+                return;
+            }
+            if (latest[0] != booked) {
+                // Another generation's: leave it for that generation's post.
+                pendingVolume.compareAndSet(null, latest);
+                return;
+            }
+            if (!isStale(booked)) {
+                volumeListener.onVolume(latest[1]);
             }
         });
     }

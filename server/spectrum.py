@@ -322,12 +322,20 @@ class Spectrum:
     and `on_volume` is told, so `/quotes` says the same number. With
     `on_volume` left None -- the `volume` action not enabled -- no volume
     line is ever written.
+
+    `reports_volume` says whether this platform's source sends the level at
+    all. Only then does the App wire `on_volume`: a hub that heard only the
+    phone's sets would open every new stream with the last one, however far
+    the knob had moved since (found by review). The level is forgotten when
+    the source closes, for the same reason.
     """
 
-    def __init__(self, source_factory, clock=time.monotonic, log=None):
+    def __init__(self, source_factory, clock=time.monotonic, log=None,
+                 reports_volume=False):
         self.source_factory = source_factory
         self.clock = clock
         self.log = log or (lambda message: print(message, file=sys.stderr))
+        self.reports_volume = reports_volume
         self.on_volume = None
         self._cond = threading.Condition()
         self._watchers = 0
@@ -346,13 +354,17 @@ class Spectrum:
         owner = self.on_volume
         if owner is None or level is None:
             return
+        # The owner is told under the lock: two threads noting two levels
+        # must reach the App in the order the hub kept them, or /quotes can
+        # end on the older one (found by review). The App takes only its own
+        # lock in there, and never holds it while taking this one.
         with self._cond:
             if level == self._volume:
                 return
             self._volume = level
             self._volume_sequence += 1
             self._cond.notify_all()
-        owner(level)
+            owner(level)
 
     # -- the capture side --------------------------------------------------
 
@@ -430,6 +442,11 @@ class Spectrum:
                 timer.cancel()
                 with self._cond:
                     self._source = None
+                    # A level from a helper that has gone is not one to open
+                    # the next stream with; the next helper reports afresh.
+                    if self._volume is not None:
+                        self._volume = None
+                        self._volume_sequence += 1
                 source.close()
             self._publish([0] * BARS)
             if stopped:
