@@ -675,6 +675,19 @@ yours: keep a `spectrumState()`, advance it on each animation frame with
 on the peak before dropping), and stop your loop once `spectrumAtRest(state)`. neon draws
 segmented columns on a `<canvas>` over the buttons, and hides it 15 s after the last frame.
 
+### The volume, as it changes
+
+T8.6. When the stream carries the PC's volume, core calls your theme's optional
+`volume(level, root)` the moment the level changes. `level` is an integer from 0 to 100, already
+checked by `parseVolume`, and the held payload's `volume.level` is updated with it, so your next
+`render` draws the same number. A theme without it shows the level from the next payload, up to a
+minute later. Leave a bar the owner is dragging alone. neon's `show` does, for both a drag and a
+set still in flight.
+
+```js
+window.DeskPanel.defineTheme('mine', { render, tick, spectrum, volume });
+```
+
 
 ## Checking it
 

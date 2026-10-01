@@ -224,6 +224,20 @@
         }
     }
 
+    // The PC's volume as it changes (T8.6), to the theme if it draws a bar.
+    // Optional like `spectrum`: a theme without a `volume` function shows the
+    // level from the next payload instead.
+    function volume(level) {
+        if (!current || typeof current.volume !== 'function') {
+            return;
+        }
+        try {
+            current.volume(level, root());
+        } catch (err) {
+            console.error('desk-panel: theme "' + currentName + '" volume failed', err);
+        }
+    }
+
     // One attribute on <html>, and css/style.css owns what it means. Not a
     // class on <body>, because <body> belongs to the theme and a theme that
     // cleared it would clear the blackout with it.
@@ -311,5 +325,6 @@
         alert: alert,
         chime: chime,
         spectrum: spectrum,
+        volume: volume,
     };
 })();

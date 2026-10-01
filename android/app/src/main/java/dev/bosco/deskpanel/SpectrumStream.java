@@ -37,6 +37,12 @@ public final class SpectrumStream {
         void onSpectrum(String frame);
     }
 
+    /** Receives the PC's output volume, on the main thread (T8.6). */
+    public interface VolumeListener {
+        /** @param level 0..100, checked by {@link SpectrumFrame#parseVolume} */
+        void onVolume(int level);
+    }
+
     private static final int CONNECT_TIMEOUT_MS = 5000;
 
     /**
@@ -61,17 +67,22 @@ public final class SpectrumStream {
     private final PcHosts hosts;
     private final PanelLink link;
     private final Listener listener;
+    private final VolumeListener volumeListener;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final AtomicReference<String> pending = new AtomicReference<>();
+    /** {generation, level}, or null: the generation travels with the level (see deliverVolume). */
+    private final AtomicReference<int[]> pendingVolume = new AtomicReference<>();
 
     private volatile boolean running;
     private volatile int generation;
     private volatile HttpURLConnection current;
 
-    public SpectrumStream(PcHosts hosts, PanelLink link, Listener listener) {
+    public SpectrumStream(PcHosts hosts, PanelLink link, Listener listener,
+                          VolumeListener volumeListener) {
         this.hosts = hosts;
         this.link = link;
         this.listener = listener;
+        this.volumeListener = volumeListener;
     }
 
     /** Opens the stream on a thread of its own. Calling it twice is a no-op. */
@@ -160,6 +171,11 @@ public final class SpectrumStream {
                 String frame = SpectrumFrame.parse(line);
                 if (frame != null) {
                     deliver(frame, booked);
+                    continue;
+                }
+                int level = SpectrumFrame.parseVolume(line);
+                if (level != SpectrumFrame.NOT_VOLUME) {
+                    deliverVolume(level, booked);
                 }
             }
             if (!isStale(booked)) {
@@ -187,6 +203,35 @@ public final class SpectrumStream {
             String latest = pending.getAndSet(null);
             if (latest != null && !isStale(booked)) {
                 listener.onSpectrum(latest);
+            }
+        });
+    }
+
+    /**
+     * Coalesced like a frame: a knob turned fast is many lines, one paint.
+     *
+     * <p>The level carries the generation it was read under. A post queued
+     * by a stream that has since been stopped may run after the next stream
+     * has queued its first level; it must hand that level back, not drop it
+     * as stale, or the new stream's opening line is lost (found by review).
+     */
+    private void deliverVolume(int level, int booked) {
+        int[] previous = pendingVolume.getAndSet(new int[] {booked, level});
+        if (previous != null && previous[0] == booked) {
+            return;
+        }
+        main.post(() -> {
+            int[] latest = pendingVolume.getAndSet(null);
+            if (latest == null) {
+                return;
+            }
+            if (latest[0] != booked) {
+                // Another generation's: leave it for that generation's post.
+                pendingVolume.compareAndSet(null, latest);
+                return;
+            }
+            if (!isStale(booked)) {
+                volumeListener.onVolume(latest[1]);
             }
         });
     }

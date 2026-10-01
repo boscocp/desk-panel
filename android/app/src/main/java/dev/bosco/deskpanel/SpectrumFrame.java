@@ -41,4 +41,36 @@ public final class SpectrumFrame {
         }
         return frame;
     }
+
+    /** What {@link #parseVolume} returns for a line that is not a volume. */
+    public static final int NOT_VOLUME = -1;
+
+    /**
+     * The PC's output volume in a {@code v=<0..100>} line (T8.6), or
+     * {@link #NOT_VOLUME}. One to three ASCII digits and nothing else, never
+     * above 100: the number goes into {@code evaluateJavascript}, so it is
+     * an {@code int} built here and never the line's text.
+     */
+    public static int parseVolume(String line) {
+        if (line == null) {
+            return NOT_VOLUME;
+        }
+        String text = line.endsWith("\r") ? line.substring(0, line.length() - 1) : line;
+        if (!text.startsWith("v=")) {
+            return NOT_VOLUME;
+        }
+        String digits = text.substring(2);
+        if (digits.isEmpty() || digits.length() > 3) {
+            return NOT_VOLUME;
+        }
+        int level = 0;
+        for (int i = 0; i < digits.length(); i++) {
+            char c = digits.charAt(i);
+            if (c < '0' || c > '9') {
+                return NOT_VOLUME;
+            }
+            level = level * 10 + (c - '0');
+        }
+        return level <= 100 ? level : NOT_VOLUME;
+    }
 }

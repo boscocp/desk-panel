@@ -585,6 +585,12 @@ class App:
         self._volume_generation = 0
         self._agenda_lock = threading.Lock()
         self._agenda_refreshing = False
+        # The volume rides the spectrum stream too (T8.6), when both are on:
+        # the hub hears the helper's level within a tenth of a second, and
+        # the bar no longer waits for the TTL below and the next data cycle.
+        if (self.spectrum is not None and getattr(self.spectrum, "reports_volume", False)
+                and actions_module.VOLUME in self.enabled_actions):
+            self.spectrum.on_volume = self.note_volume
 
     # How old a volume reading may be before the next /quotes asks again. The
     # bar is the last known level, like the mute cross; somebody turning the
@@ -619,11 +625,19 @@ class App:
     def set_volume(self, level):
         """Set the output volume; returns the measured level. Raises like run_action."""
         measured = actions_module.set_volume(level)
+        self.note_volume(measured)
+        if self.spectrum is not None:
+            self.spectrum.note_volume(measured)
+        return measured
+
+    def note_volume(self, level):
+        """A level measured somewhere else -- a set, the spectrum helper -- now
+        the one /quotes reports. Bumps the generation, so a background read
+        that started before it drops its older answer."""
         with self._volume_lock:
             self._volume_generation += 1
-            self._volume_level = measured
+            self._volume_level = level
             self._volume_at = self.clock()
-        return measured
 
     def run_action(self, action):
         """Execute an enabled action, or raise. Never called with an unknown id.
@@ -1833,7 +1847,10 @@ def main(argv=None):
         if factory is None:
             print(f"notice: spectrum is on but stays off: {reason}", file=sys.stderr)
         else:
-            spectrum = spectrum_module.Spectrum(factory)
+            # Only the Windows helper reports the volume (T8.6); elsewhere the
+            # bar keeps following /quotes.
+            spectrum = spectrum_module.Spectrum(
+                factory, reports_volume=sys.platform == "win32")
             print("notice: spectrum on: /spectrum captures this PC's audio while "
                   "the panel watches", file=sys.stderr)
 

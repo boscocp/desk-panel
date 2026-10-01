@@ -394,6 +394,17 @@ public class MainActivity extends Activity implements PanelService.Panel {
     }
 
     /**
+     * The PC's output volume into the page (T8.6), as it changes. An
+     * {@code int} from {@link SpectrumFrame#parseVolume}, so nothing of the
+     * line's text reaches the script.
+     */
+    @Override
+    public void onVolume(int level) {
+        webView.evaluateJavascript(
+                "window.onVolume&&window.onVolume(" + level + ")", null);
+    }
+
+    /**
      * Hands one shortcut's outcome back to the page (T8.2).
      *
      * <p>{@code id} comes from {@link Actions#ALLOWED} and never from the

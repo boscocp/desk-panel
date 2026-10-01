@@ -145,6 +145,14 @@ public final class PanelService extends Service implements PcPoller.Listener {
          * @param frame 32 lowercase hex digits, checked by {@link SpectrumFrame}
          */
         void onSpectrum(String frame);
+
+        /**
+         * The PC's output volume as it changes (T8.6), from the spectrum
+         * stream. Not replayed either: the next payload carries the level.
+         *
+         * @param level 0..100, checked by {@link SpectrumFrame#parseVolume}
+         */
+        void onVolume(int level);
     }
 
     private static final String CHANNEL_ID = "panel";
@@ -471,7 +479,7 @@ public final class PanelService extends Service implements PcPoller.Listener {
         poller = new PcPoller(hosts, this);
         dataPoller = new DataPoller(hosts, new PanelLink(BuildConfig.PANEL_KEY), this::onData);
         spectrumStream = new SpectrumStream(hosts, new PanelLink(BuildConfig.PANEL_KEY),
-                this::onSpectrum);
+                this::onSpectrum, this::onVolume);
 
         // RECEIVER_NOT_EXPORTED because nothing outside the system should be
         // able to tell this app what the battery is doing.
@@ -523,6 +531,14 @@ public final class PanelService extends Service implements PcPoller.Listener {
         Panel target = panel;
         if (target != null) {
             target.onSpectrum(frame);
+        }
+    }
+
+    /** The PC's output volume, on the main thread, from {@link SpectrumStream}. */
+    private void onVolume(int level) {
+        Panel target = panel;
+        if (target != null) {
+            target.onVolume(level);
         }
     }
 

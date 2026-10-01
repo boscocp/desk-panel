@@ -571,6 +571,23 @@ function volumeFields(payload, language) {
     return { level, label: strings(language).volume };
 }
 
+// The PC's volume from the spectrum stream (T8.6): an integer 0..100, or null
+// for anything else. Native has already checked it (SpectrumFrame.java); this
+// is the page not trusting that.
+function parseVolume(value) {
+    return Number.isInteger(value) && value >= 0 && value <= 100 ? value : null;
+}
+
+// `payload` with the stream's level in place of the one it carried, so a
+// later paint of the held payload does not draw the older number. Pure; a
+// payload whose volume is null (the bar not enabled) is returned as it is.
+function withVolume(payload, level) {
+    if (!payload || !payload.volume || parseVolume(level) === null) {
+        return payload;
+    }
+    return Object.assign({}, payload, { volume: Object.assign({}, payload.volume, { level }) });
+}
+
 // --- The next meeting (T9.1, ADR 0017) --------------------------------------
 //
 // The PC sends up to five events -- three timed, two all-day -- as absolute
@@ -1694,7 +1711,7 @@ function spectrumAtRest(state) {
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         formatPrice, formatRate, formatPair, formatTemp, formatChange, changeClass,
-        weatherLabel, weatherGlyph, formatRange, volumeFields,
+        weatherLabel, weatherGlyph, formatRange, volumeFields, parseVolume, withVolume,
         moonFields, formatPercent, chanceOfRain, relativeHumidity, MOON_PHASES,
         strings, LANGUAGES, FALLBACK_LANGUAGE,
         isNight,
