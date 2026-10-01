@@ -206,6 +206,33 @@ for wave 38; T9.2 is still part of no wave.
 | T9.4 | **Nobody else on the Wi-Fi can read the panel** | done | 2026-09-30, wave 39. **Design 1 shipped, measured on the Redmi**: [the spike](../docs/spikes/2026-panel-tls.md), then [ADR 0018](../docs/adr/0018-the-panel-traffic-is-private.md). Data and presses on TLS port 8778 with `X-Panel-Key` (SHA-256 then `compare_digest`), 401 without it and 401 on the plain port even with it; `/ping` stays plain, because a certificate problem must never read as a logout; `/app` off by default. **The spike's real finding**: macOS's LibreSSL writes P-256 keys with explicit curve parameters and Android's BoringSSL answers every handshake with `decode_error` — `make_cert.py` passes `ec_param_enc:named_curve` and a test pins it. After that, TLS 1.3 at 4–8 ms a handshake, two a minute. **Off on the owner's desk for now**: the Windows PC has no certificate, and a private APK needs every listed PC private. **Not measured**: a packet capture from a third device, a press over TLS, Windows |
 | T9.5 | **A soft alert before a meeting** | done | 2026-09-30, wave 40. Asked for the same day. `agenda_soon_min` (5) and `agenda_chime_min` (1) in `config.toml` ride `agenda.alerts`; inside the first the AGENDA row gets a bell, the border pulses orange and a "!" sits on the title's line (made stronger twice from the chair), and inside the second one soft chime plays once per meeting, only while the panel is lit. The chime is synthesised by `scripts/make_chime.py` (CC0) and a theme can name its own file. **Measured on the Redmi** with a fake meeting: the visuals, and the app's AudioTrack playing a minute before |
 
+## Resuming after 2026-09-30 (wave 42)
+
+Wave 42 is **T8.6** on `wave/42-volume-on-spectrum`. It started as the first Windows run of T8.4,
+T8.5 and the agenda's external calendars, which the owner asked for. That run found the volume bar
+three minutes behind the knob, and the owner chose the recommended fix: the level rides
+`/spectrum` as `v=<0..100>` (ADR 0021, amended). The note is
+`docs/harness-notes/2026-09-30-wave-42.md`.
+
+**Next: build and install this wave's APK on the Mac** (Docker), then on the Windows PC move the
+MCHOSE slider and watch the bar follow within a second. That is T8.6's one unchecked line. After
+it, wave 41's CachyOS check and wave 40's list still stand. Two optional follow-ups:
+- the same volume read in the Swift helper, so macOS gets it too;
+- re-run `install_task.ps1` on Windows, so `spectrum-tap.exe` is rebuilt by the installer and
+  not by hand.
+
+### What is still only true on this desk
+
+- The Windows PC's `server/win/spectrum-tap.exe` was compiled by hand from this wave's source
+  (gitignored). Its `config.json` has `"spectrum": true` and `"volume"` in `actions`, set by the
+  owner.
+- The Windows `calendar-tokens.json` was re-granted on 2026-09-30 with
+  `calendar.calendarlist.readonly`. A token from before ADR 0019 on any other PC needs the same
+  login.
+- The Windows server runs this branch's code under the Scheduled Task, restarted three times
+  today. The phone stayed on Windows each time.
+- The Redmi still runs wave 41's APK, which drops the `v=` line.
+
 ## Resuming after 2026-09-30 (wave 41)
 
 Wave 41 is **T8.5** on `wave/41-spectrum-mac`: Winamp-style spectrum bars over the buttons,
