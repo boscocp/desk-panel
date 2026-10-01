@@ -1847,10 +1847,12 @@ def main(argv=None):
         if factory is None:
             print(f"notice: spectrum is on but stays off: {reason}", file=sys.stderr)
         else:
-            # Only the Windows helper reports the volume (T8.6); elsewhere the
-            # bar keeps following /quotes.
+            # Windows reads the level inside its helper (T8.6), Linux watches
+            # `pactl subscribe` beside parec (T8.7); macOS still has no such
+            # read and its bar keeps following /quotes. `reports_volume` owns
+            # that list, so there is one place to change when it does.
             spectrum = spectrum_module.Spectrum(
-                factory, reports_volume=sys.platform == "win32")
+                factory, reports_volume=spectrum_module.reports_volume())
             print("notice: spectrum on: /spectrum captures this PC's audio while "
                   "the panel watches", file=sys.stderr)
 
