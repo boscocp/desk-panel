@@ -567,7 +567,10 @@ A PC that cannot capture says why in its startup notices, and the space stays em
   new one within seconds.
 - **Linux.** `parec` on the default output's monitor. It is in `libpulse` on Arch and CachyOS,
   and in `pulseaudio-utils` on Debian and Fedora. PipeWire's pulse layer answers it the same as
-  PulseAudio.
+  PulseAudio. `pactl`, from the same package, is what makes the **volume bar follow the knob
+  within a second** instead of waiting up to 20 s for `/quotes` (T8.7): the server watches
+  `pactl subscribe` and reads the level only when the output device changes. Without it the
+  bars still work and the bar falls back to `/quotes`, and the log says so once.
 - **macOS 14.2+.** `install_agent.sh` builds the Swift helper `server/mac/spectrum-tap`, which
   needs the Command Line Tools (`xcode-select --install`). To build it by hand:
   `swiftc -O server/mac/spectrum_tap.swift -o server/mac/spectrum-tap`. The first time the panel

@@ -100,4 +100,30 @@ the owner turned the knob and the phone took up to three minutes to follow.
 - An APK from before this amendment drops the line, because it only ever took frames.
 - **macOS and Linux are unchanged.** Their sources report no volume, so their bars still follow
   `/quotes`. The Swift helper could do the same read. `parec` cannot.
+  - **Superseded for Linux** by the amendment below: `parec` still cannot, and it turned out not
+    to have to.
+
+## Amendment, 2026-10-01 (T8.7): Linux reports it too, from a second process
+
+The bullet above read "`parec` cannot" and stopped there, which quietly made the level a
+property of the capture process. It is not: it is a property of the sound server, and on Linux
+that can be asked separately. Reported from the chair the same evening — the spectrum followed
+the music and the bar did not follow the knob.
+
+- **Two processes, one source.** `ParecSource` keeps `parec` for the PCM and adds
+  `pactl subscribe`, which emits a line when anything in the sound server changes. On a line
+  that means the output device (`on sink #N`, or `on server` for a change of default sink), it
+  reads the level with `actions.read_volume` — the same `wpctl get-volume` `/quotes` already
+  uses — and pushes it through the same `on_volume` the stderr drain owns. The hub, every open
+  stream and `/quotes` therefore still end on one number.
+- **An event, not a poll.** Nothing runs while nothing moves. A poll fast enough to feel
+  instant would be five `wpctl` processes a second for as long as the panel is lit, which is
+  the kind of idle cost this project refuses elsewhere.
+- **`sink-input` is not `sink`.** One application's own slider must not redraw the panel's bar,
+  and `is_sink_event` is where that distinction lives, pinned by its own tests.
+- **Degrading is the old behaviour, not an error.** With no `pactl` on PATH the bars still work
+  and the bar falls back to `/quotes`, with the reason logged once. `reports_volume` is the one
+  place that says which platforms claim a level at all, so the hub is told rather than guessing.
+- **macOS is still `/quotes`.** The Swift helper would need the CoreAudio read, and this change
+  does not give it one.
 

@@ -186,6 +186,7 @@ class HubVolumeTests(unittest.TestCase):
                 pass
 
         hub = spectrum.Spectrum(Source, log=lambda m: None)
+        hub.on_volume = lambda level: None
         with mock.patch.object(spectrum, "RESTART_S", 0.01):
             frames = hub.frames()
             next(frames)
@@ -194,6 +195,32 @@ class HubVolumeTests(unittest.TestCase):
                 time.sleep(0.01)
             frames.close()
         self.assertEqual(watched[0], hub.note_volume)
+
+    def test_a_source_is_told_when_nobody_wants_a_level(self):
+        # T8.7: `note_volume` would drop it anyway, but a source that is told
+        # can decline to spend a process looking for it -- which is what the
+        # Linux watch does. The hub with no owner is the `volume` action off.
+        watched = []
+
+        class Source:
+            def watch_stderr(self, on_volume, log):
+                watched.append(on_volume)
+
+            def open(self):
+                raise OSError("no device")
+
+            def close(self):
+                pass
+
+        hub = spectrum.Spectrum(Source, log=lambda m: None)
+        with mock.patch.object(spectrum, "RESTART_S", 0.01):
+            frames = hub.frames()
+            next(frames)
+            deadline = time.monotonic() + 2
+            while not watched and time.monotonic() < deadline:
+                time.sleep(0.01)
+            frames.close()
+        self.assertIsNone(watched[0])
 
 
 class AppTests(unittest.TestCase):

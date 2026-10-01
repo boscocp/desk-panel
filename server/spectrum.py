@@ -30,6 +30,8 @@ import threading
 import time
 from pathlib import Path
 
+from server import actions
+
 BARS = 16
 FPS = 20
 # 1024 samples at 24 kHz: 43 ms of sound and 23 Hz per bin, which is enough
@@ -74,6 +76,12 @@ WINDOWS_HELPER_SOURCE = WINDOWS_HELPER.parent / "spectrum_tap.cs"
 # the sound server itself, so parec's stdout is already what the hub reads.
 LINUX_RATE = 24000
 PAREC = "parec"
+# The Linux volume watch (T8.7). `parec` hands over PCM and nothing else, so
+# the level needs a second, much cheaper process: `pactl subscribe` sleeps
+# until something in the sound server moves and costs nothing while nothing
+# does. Measured on CachyOS: it line-buffers into a pipe, so the events
+# arrive as they happen rather than in a block at exit.
+PACTL = "pactl"
 
 
 def fft(re, im):
@@ -276,10 +284,175 @@ class HelperSource:
             process.wait()
 
 
+class ParecSource(HelperSource):
+    """The Linux source: `parec` for the PCM, `pactl subscribe` for the volume.
+
+    T8.6 gave the level a ride on the stream and only Windows took it, where
+    the helper reads the endpoint itself and prints `v=`. `parec` has no such
+    read and never will, so on Linux the bar followed `/quotes` and sat up to
+    `App.VOLUME_TTL_S` behind the knob (T8.7).
+
+    This is the other half of the Windows helper, assembled out of two
+    processes instead of one: `pactl subscribe` says *when*, and the same
+    `wpctl get-volume` `/quotes` uses says *what*. Pushing it through
+    `on_volume` -- the callback the stderr drain already owns -- means the hub,
+    every open stream and `/quotes` end on one number, with no second path to
+    keep in step.
+
+    A read per event and not a poll: nothing runs while nothing moves, which
+    is the property that lets this watch a desk all evening. `pactl` missing
+    is not an error, only the old behaviour: the bar falls back to `/quotes`
+    and the reason is logged once.
+    """
+
+    def __init__(self, argv, rate=None, popen=subprocess.Popen,
+                 subscribe_argv=None, read_level=None, which=shutil.which):
+        super().__init__(argv, rate=rate, popen=popen)
+        self.subscribe_argv = subscribe_argv or volume_events_argv()
+        self.read_level = read_level or actions.read_volume
+        self.which = which
+        self._events = None
+        self._closed = False
+
+    def open(self):
+        # The PCM first: a volume watch that failed must not cost the bars,
+        # which are the thing the stream is actually for.
+        rate, read = super().open()
+        self._watch_volume()
+        return rate, read
+
+    def _watch_volume(self):
+        if self.on_volume is None:
+            # `reports_volume` is off, or the volume action is: the hub wants
+            # no level and `pactl` must not be started to throw one away.
+            return
+        if self.which(self.subscribe_argv[0]) is None:
+            self._say(f"spectrum: no {self.subscribe_argv[0]} on PATH; the volume bar "
+                      f"follows /quotes instead of the stream")
+            return
+        try:
+            self._events = self.popen(
+                self.subscribe_argv, stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0,
+                # **LC_ALL=C, because the event lines are parsed.** `pactl`
+                # binds the `pulseaudio` text domain and the line is the
+                # translatable `Event '%s' on %s #%u`, so on a desktop with
+                # the language pack installed every event arrives translated
+                # and `is_sink_event` matches none of them -- the bar would
+                # stop following the knob, silently, which is the very
+                # symptom this task exists to fix. `actions._default_runner`
+                # has forced it on this binary since T8.1 and says why at
+                # length; the server inherits the graphical session's
+                # environment (invariant 2), which is the one with a
+                # language set. Found by review, on a box whose own locale
+                # happened to be English.
+                env=dict(os.environ, LC_ALL="C"))
+        except OSError as exc:
+            self._say(f"spectrum: the volume watch did not start: {exc}")
+            return
+        threading.Thread(target=self._drain_events, args=(self._events,),
+                         name="spectrum-volume", daemon=True).start()
+
+    def _drain_events(self, process):
+        # The level on opening, before the first event: the hub cleared its
+        # own when the last source went, and a desk where nobody touches the
+        # knob would otherwise show no bar at all until somebody did.
+        self._report()
+        try:
+            for raw in iter(process.stdout.readline, b""):
+                if self._closed:
+                    return
+                if is_sink_event(raw.decode("ascii", "replace")):
+                    self._report()
+        except (OSError, ValueError):
+            # The pipe closed under the read: the watch has gone with close().
+            return
+        if self._closed:
+            return
+        # End of stream with nobody having closed us: the watch died on its
+        # own. `pactl` with no sound server to reach answers `Connection
+        # failure` and exits at once, and without this the bar would drop
+        # back to /quotes while the log said nothing -- which is not what
+        # ADR 0021 and SERVER-SETUP promise. Its stderr is at most the one
+        # line it exits on, so reading it here cannot block the writer.
+        self._say("spectrum: the volume watch ended; the bar follows /quotes"
+                  + self._complaint(process))
+
+    @staticmethod
+    def _complaint(process):
+        stream = getattr(process, "stderr", None)
+        if stream is None:
+            return ""
+        try:
+            text = (stream.read() or b"").decode("ascii", "replace").strip()
+        except (OSError, ValueError):
+            return ""
+        return f": {text[:200]}" if text else ""
+
+    def _report(self):
+        # `actions.read_volume` never raises and answers None when no mixer
+        # replies; `note_volume` drops a None and an unchanged level itself.
+        on_volume = self.on_volume
+        if on_volume is None:
+            return
+        level = self.read_level()
+        # The read spawns `wpctl` and can outlive `close()`. The hub clears
+        # its level when a source goes, precisely so the next stream does not
+        # open on a dead source's number; a late answer here would put one
+        # straight back. Checked after the read, not before (review, T8.7).
+        if not self._closed:
+            on_volume(level)
+
+    def _say(self, message):
+        if self.log is not None:
+            self.log(message)
+
+    def close(self):
+        # Before terminating, so a read already in flight is dropped rather
+        # than delivered into a hub that has forgotten this source.
+        self._closed = True
+        events, self._events = self._events, None
+        if events is not None:
+            try:
+                events.terminate()
+                events.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                events.kill()
+                events.wait()
+            except OSError:
+                pass
+        super().close()
+
+
 def parec_argv():
     """The Linux source: the default output's monitor, as the hub reads it."""
     return [PAREC, "--device=@DEFAULT_MONITOR@", "--format=s16le",
             f"--rate={LINUX_RATE}", "--channels=1", "--latency-msec=25"]
+
+
+def volume_events_argv():
+    """The Linux volume watch (T8.7): one line out of the sound server per change."""
+    return [PACTL, "subscribe"]
+
+
+def is_sink_event(text):
+    """Pure: does this `pactl subscribe` line mean the output volume may have moved?
+
+    Measured against CachyOS, where one `wpctl set-volume` prints exactly
+    `Event 'change' on sink #57`. Two near-misses are deliberately excluded:
+
+    - `sink-input #N` is one application's own slider, not the device's, and
+      a video raising its stream must not redraw the panel's bar. The ` #`
+      in the match is what separates them -- `sink-input #` is not `sink #`.
+    - `source` is a microphone, which the bar does not show.
+
+    `server` is kept: a change of default sink arrives as that, and the new
+    sink's level is a different number from the old one's.
+    """
+    text = text.strip()
+    if not text.startswith("Event "):
+        return False
+    return " on sink #" in text or text.endswith(" on server") or " on server #" in text
 
 
 def source_for(platform=sys.platform, helper=None, which=shutil.which):
@@ -304,8 +477,26 @@ def source_for(platform=sys.platform, helper=None, which=shutil.which):
         if which(PAREC) is None:
             return None, ("no parec on PATH; it comes with libpulse (Arch, CachyOS) "
                           "or pulseaudio-utils (Debian, Fedora)")
-        return (lambda: HelperSource(parec_argv(), rate=LINUX_RATE)), None
+        return (lambda: ParecSource(parec_argv(), rate=LINUX_RATE)), None
     return None, f"no audio capture on {platform}"
+
+
+def reports_volume(platform=sys.platform, which=shutil.which):
+    """Pure-ish: does this platform's source send the level up the stream?
+
+    Windows reads the endpoint inside its helper (T8.6); Linux watches
+    `pactl subscribe` beside `parec` (T8.7) and so needs `pactl` on PATH,
+    even though the level itself may come back from `wpctl`.
+
+    macOS is the remaining False: the Swift helper has no volume read yet, so
+    its bar still follows `/quotes`. The hub is told, rather than guessing,
+    because a hub that heard no level must not claim one.
+    """
+    if platform == "win32":
+        return True
+    if platform.startswith("linux"):
+        return which(PACTL) is not None
+    return False
 
 
 class Spectrum:
@@ -421,7 +612,13 @@ class Spectrum:
             source = self.source_factory()
             watch = getattr(source, "watch_stderr", None)
             if watch is not None:
-                watch(self.note_volume, self.log)
+                # None when nobody wants a level -- `reports_volume` off, or
+                # the `volume` action not enabled. `note_volume` would drop
+                # it anyway, but a source that is told so can decline to go
+                # looking: on Linux the difference is a `pactl subscribe`
+                # process and a `wpctl` per sink change, spent on a mixer the
+                # owner disabled (review, T8.7).
+                watch(self.note_volume if self.on_volume is not None else None, self.log)
             with self._cond:
                 self._source = source
             self._heard = False
