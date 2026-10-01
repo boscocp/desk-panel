@@ -239,6 +239,21 @@
         host.spectrum(bars);
     };
 
+    // MainActivity.onVolume (T8.6): the PC's volume the moment it changes,
+    // riding the spectrum stream, so the bar no longer waits for the next
+    // payload. Kept in `payload` even while dark, so the panel coming back
+    // draws this level and not the one the last payload carried.
+    window.onVolume = (value) => {
+        const level = parseVolume(value);
+        if (level === null || !payload) {
+            return;
+        }
+        payload = withVolume(payload, level);
+        if (visible()) {
+            host.volume(level);
+        }
+    };
+
     // --- The shortcut buttons (T8.2) ---------------------------------------
     // The page cannot make the request. `web/` has no network code at all --
     // the WebView is served from a virtual https origin, so reaching the PC's

@@ -164,6 +164,27 @@ def frame_line(bars):
 SILENT_FRAME = frame_line([0] * BARS)
 
 
+def volume_line(level):
+    """The output volume on the wire (T8.6): `v=` and 0..100 in decimal."""
+    return b"v=%d\n" % level
+
+
+def read_volume(text):
+    """The level in a helper's `v=<0..100>` stderr line, or None if it is not one.
+
+    Strict, because the line is the helper's and the number goes to the
+    phone: one to three digits, nothing else, and never above 100.
+    """
+    text = text.strip()
+    if not text.startswith("v="):
+        return None
+    digits = text[len("v="):]
+    if not (1 <= len(digits) <= 3 and digits.isascii() and digits.isdigit()):
+        return None
+    level = int(digits)
+    return level if level <= 100 else None
+
+
 def read_header(line):
     """The rate in a helper's `rate=<hz>` line, or None if it is not one."""
     text = line.decode("ascii", "replace").strip()
@@ -184,6 +205,11 @@ class HelperSource:
     helper's `rate=` line, or `rate` when the command's own arguments fix it
     (parec) and it writes no header. `close()` ends it: closing stdin is what
     the helpers wait for, and a kill backs that up.
+
+    Its stderr is read on a thread of its own (T8.6). A `v=<level>` line is
+    the output volume, which the Windows helper reports as it changes, and
+    goes to `on_volume`; any other line is the helper's complaint and goes to
+    `log`. Under pythonw nothing else would ever see it.
     """
 
     def __init__(self, argv, rate=None, popen=subprocess.Popen):
@@ -191,18 +217,45 @@ class HelperSource:
         self.rate = rate
         self.popen = popen
         self.process = None
+        self.on_volume = None
+        self.log = None
+
+    def watch_stderr(self, on_volume, log):
+        """Where the helper's stderr lines go; the hub calls it before `open`."""
+        self.on_volume = on_volume
+        self.log = log
+
+    def _drain_stderr(self, stream):
+        try:
+            for raw in iter(stream.readline, b""):
+                text = raw.decode("ascii", "replace").strip()
+                level = read_volume(text)
+                if level is not None:
+                    if self.on_volume is not None:
+                        self.on_volume(level)
+                elif text and self.log is not None:
+                    self.log(f"spectrum: helper says: {text[:200]}")
+        except (OSError, ValueError):
+            # The pipe closed under the read: the helper has gone.
+            pass
 
     def open(self):
         # CREATE_NO_WINDOW: the server runs under pythonw on Windows, and a
         # console program started from it opens a window of its own, which
         # would sit on the owner's desktop for as long as the panel watched.
         self.process = self.popen(
-            self.argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=0,
+            self.argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, bufsize=0,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        rate = self.rate
         # Local: close() may run from the linger timer at any moment and
         # clears self.process (found by review).
         process = self.process
+        # Drained whatever it carries: a pipe nobody reads fills, and the
+        # helper then blocks on its next complaint.
+        stderr = getattr(process, "stderr", None)
+        if stderr is not None:
+            threading.Thread(target=self._drain_stderr, args=(stderr,),
+                             name="spectrum-stderr", daemon=True).start()
         rate = self.rate
         if rate is None:
             rate = read_header(process.stdout.readline())
@@ -262,21 +315,44 @@ class Spectrum:
     starts the capture thread; the thread stops `LINGER_S` after the last
     stream closes. A source that dies is restarted after `RESTART_S` for as
     long as somebody is still watching.
+
+    It also carries the output volume (T8.6), once `on_volume` is set: a
+    source that reports it (the Windows helper) feeds `note_volume`, every
+    stream gets a `v=<level>` line when the level changes and one on opening,
+    and `on_volume` is told, so `/quotes` says the same number. With
+    `on_volume` left None -- the `volume` action not enabled -- no volume
+    line is ever written.
     """
 
     def __init__(self, source_factory, clock=time.monotonic, log=None):
         self.source_factory = source_factory
         self.clock = clock
         self.log = log or (lambda message: print(message, file=sys.stderr))
+        self.on_volume = None
         self._cond = threading.Condition()
         self._watchers = 0
         self._last_watcher_left = None
         self._running = False
         self._frame = frame_line([0] * BARS)
         self._sequence = 0
+        self._volume = None
+        self._volume_sequence = 0
         self._source = None
         self._heard = False
         self._warned = False
+
+    def note_volume(self, level):
+        """A measured output volume, 0..100: to every stream, if it changed."""
+        owner = self.on_volume
+        if owner is None or level is None:
+            return
+        with self._cond:
+            if level == self._volume:
+                return
+            self._volume = level
+            self._volume_sequence += 1
+            self._cond.notify_all()
+        owner(level)
 
     # -- the capture side --------------------------------------------------
 
@@ -331,6 +407,9 @@ class Spectrum:
             stopped = False
             heard = False
             source = self.source_factory()
+            watch = getattr(source, "watch_stderr", None)
+            if watch is not None:
+                watch(self.note_volume, self.log)
             with self._cond:
                 self._source = source
             self._heard = False
@@ -400,7 +479,12 @@ class Spectrum:
     # -- the stream side ---------------------------------------------------
 
     def frames(self):
-        """Wire lines for one stream: a frame when one changes, a keepalive otherwise."""
+        """Wire lines for one stream: a frame when one changes, a keepalive otherwise.
+
+        And the volume (T8.6): the last known level first, then a line each
+        time it changes. It does not count as a write for the keepalive: a
+        frame is what the phone's freshness check is about.
+        """
         with self._cond:
             self._watchers += 1
             self._start_locked()
@@ -408,12 +492,18 @@ class Spectrum:
             opened = self.clock()
             sent_sequence = -1
             sent_frame = None
+            sent_volume = -1
             last_write = opened
             while self.clock() - opened < MAX_STREAM_S:
                 with self._cond:
-                    if self._sequence == sent_sequence:
+                    if self._sequence == sent_sequence and self._volume_sequence == sent_volume:
                         self._cond.wait(timeout=1.0)
                     sequence, frame = self._sequence, self._frame
+                    volume_sequence, volume = self._volume_sequence, self._volume
+                if volume_sequence != sent_volume:
+                    sent_volume = volume_sequence
+                    if volume is not None and self.on_volume is not None:
+                        yield volume_line(volume)
                 now = self.clock()
                 if sequence != sent_sequence and frame != sent_frame:
                     sent_sequence, sent_frame, last_write = sequence, frame, now

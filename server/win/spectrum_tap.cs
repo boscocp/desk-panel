@@ -6,6 +6,9 @@
 //   one line  "rate=<hz>\n"
 //   then      mono signed 16-bit little-endian samples at that rate, for ever
 //
+// and, on stderr, which the Swift helper does not: "v=<0..100>\n" each time
+// the captured output's volume changes (T8.6), for the panel's volume bar.
+//
 // install_task.ps1 compiles it with the csc.exe every Windows ships in
 // .NET Framework 4, which is why this is C# 5: no string interpolation, no
 // expression-bodied members, no `out var`. The binary is gitignored.
@@ -103,6 +106,31 @@ interface IAudioCaptureClient {
     int GetNextPacketSize(out uint frames);
 }
 
+// endpointvolume.h, all eighteen slots in order; only
+// GetMasterVolumeLevelScalar (the seventh) is called. The volume line on
+// stderr (T8.6) is that number, read on the device being captured.
+[Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+interface IAudioEndpointVolume {
+    int RegisterControlChangeNotify(IntPtr notify);
+    int UnregisterControlChangeNotify(IntPtr notify);
+    int GetChannelCount(out uint count);
+    int SetMasterVolumeLevel(float levelDb, IntPtr context);
+    int SetMasterVolumeLevelScalar(float level, IntPtr context);
+    int GetMasterVolumeLevel(out float levelDb);
+    int GetMasterVolumeLevelScalar(out float level);
+    int SetChannelVolumeLevel(uint channel, float levelDb, IntPtr context);
+    int SetChannelVolumeLevelScalar(uint channel, float level, IntPtr context);
+    int GetChannelVolumeLevel(uint channel, out float levelDb);
+    int GetChannelVolumeLevelScalar(uint channel, out float level);
+    int SetMute([MarshalAs(UnmanagedType.Bool)] bool mute, IntPtr context);
+    int GetMute([MarshalAs(UnmanagedType.Bool)] out bool mute);
+    int GetVolumeStepInfo(out uint step, out uint count);
+    int VolumeStepUp(IntPtr context);
+    int VolumeStepDown(IntPtr context);
+    int QueryHardwareSupport(out uint mask);
+    int GetVolumeRange(out float minDb, out float maxDb, out float incrementDb);
+}
+
 [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
 class MMDeviceEnumeratorComObject {}
 
@@ -146,6 +174,38 @@ static class SpectrumTap {
         }
     }
 
+    // The output volume as the server reads it (T8.6): "v=<0..100>\n" on
+    // stderr, once at the start and then whenever the whole percent changes.
+    // Checked at most every WAIT_MS, which the loop below wakes for even in
+    // silence. A failed read sends nothing: the bar keeps its last level.
+    static IAudioEndpointVolume endpointVolume;
+    static int lastVolume = -1;
+    static int lastVolumeCheck = Environment.TickCount - WAIT_MS;
+
+    static void ReportVolume() {
+        if (endpointVolume == null || Environment.TickCount - lastVolumeCheck < WAIT_MS) {
+            return;
+        }
+        lastVolumeCheck = Environment.TickCount;
+        float scalar;
+        if (endpointVolume.GetMasterVolumeLevelScalar(out scalar) < 0) {
+            return;
+        }
+        int level = (int)Math.Round(scalar * 100f);
+        if (level < 0) { level = 0; }
+        if (level > 100) { level = 100; }
+        if (level == lastVolume) {
+            return;
+        }
+        lastVolume = level;
+        try {
+            Console.Error.Write("v=" + level + "\n");
+            Console.Error.Flush();
+        } catch (IOException) {
+            Environment.Exit(0);
+        }
+    }
+
     static void Write(byte[] bytes, int count) {
         try {
             output.Write(bytes, 0, count);
@@ -180,6 +240,13 @@ static class SpectrumTap {
         object activated;
         Ok(device.Activate(ref clientIid, CLSCTX_ALL, IntPtr.Zero, out activated), "Activate");
         IAudioClient client = (IAudioClient)activated;
+        // Not through Ok: the bars do not need the volume, and a device that
+        // will not give it still gets its spectrum.
+        Guid volumeIid = typeof(IAudioEndpointVolume).GUID;
+        object volumeObject;
+        if (device.Activate(ref volumeIid, CLSCTX_ALL, IntPtr.Zero, out volumeObject) >= 0) {
+            endpointVolume = volumeObject as IAudioEndpointVolume;
+        }
 
         IntPtr format;
         Ok(client.GetMixFormat(out format), "GetMixFormat");
@@ -222,6 +289,7 @@ static class SpectrumTap {
         int carried = 0;
 
         while (!watcher.Changed) {
+            ReportVolume();
             ready.WaitOne(WAIT_MS);
             uint pending;
             Ok(capture.GetNextPacketSize(out pending), "GetNextPacketSize");

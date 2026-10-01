@@ -10,6 +10,7 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -37,6 +38,12 @@ public final class SpectrumStream {
         void onSpectrum(String frame);
     }
 
+    /** Receives the PC's output volume, on the main thread (T8.6). */
+    public interface VolumeListener {
+        /** @param level 0..100, checked by {@link SpectrumFrame#parseVolume} */
+        void onVolume(int level);
+    }
+
     private static final int CONNECT_TIMEOUT_MS = 5000;
 
     /**
@@ -61,17 +68,21 @@ public final class SpectrumStream {
     private final PcHosts hosts;
     private final PanelLink link;
     private final Listener listener;
+    private final VolumeListener volumeListener;
     private final Handler main = new Handler(Looper.getMainLooper());
     private final AtomicReference<String> pending = new AtomicReference<>();
+    private final AtomicInteger pendingVolume = new AtomicInteger(SpectrumFrame.NOT_VOLUME);
 
     private volatile boolean running;
     private volatile int generation;
     private volatile HttpURLConnection current;
 
-    public SpectrumStream(PcHosts hosts, PanelLink link, Listener listener) {
+    public SpectrumStream(PcHosts hosts, PanelLink link, Listener listener,
+                          VolumeListener volumeListener) {
         this.hosts = hosts;
         this.link = link;
         this.listener = listener;
+        this.volumeListener = volumeListener;
     }
 
     /** Opens the stream on a thread of its own. Calling it twice is a no-op. */
@@ -160,6 +171,11 @@ public final class SpectrumStream {
                 String frame = SpectrumFrame.parse(line);
                 if (frame != null) {
                     deliver(frame, booked);
+                    continue;
+                }
+                int level = SpectrumFrame.parseVolume(line);
+                if (level != SpectrumFrame.NOT_VOLUME) {
+                    deliverVolume(level, booked);
                 }
             }
             if (!isStale(booked)) {
@@ -187,6 +203,19 @@ public final class SpectrumStream {
             String latest = pending.getAndSet(null);
             if (latest != null && !isStale(booked)) {
                 listener.onSpectrum(latest);
+            }
+        });
+    }
+
+    /** Coalesced like a frame: a knob turned fast is many lines, one paint. */
+    private void deliverVolume(int level, int booked) {
+        if (pendingVolume.getAndSet(level) != SpectrumFrame.NOT_VOLUME) {
+            return;
+        }
+        main.post(() -> {
+            int latest = pendingVolume.getAndSet(SpectrumFrame.NOT_VOLUME);
+            if (latest != SpectrumFrame.NOT_VOLUME && !isStale(booked)) {
+                volumeListener.onVolume(latest);
             }
         });
     }

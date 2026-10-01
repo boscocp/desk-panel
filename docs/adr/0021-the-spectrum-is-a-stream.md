@@ -71,6 +71,33 @@ number when asked. This one listens continuously to whatever the machine is play
   ADR 0016's three PCs are three servers.
 - The phone's radio carries a steady trickle while the panel is lit and the PC plays something.
   Silence sends only the five-second keepalive.
-- **Not yet measured:** the Windows helper on a Windows PC (it compiles as C# 5, and nothing
-  more is known), `parec` against PipeWire on CachyOS (measured against PulseAudio only), and
-  private mode end to end on the device, which has unit coverage only.
+- **Not yet measured:** `parec` against PipeWire on CachyOS (measured against PulseAudio
+  only), and private mode end to end on the device, which has unit coverage only. The Windows
+  helper ran on the Windows PC on 2026-09-30 (wave 42), with real bars on the wire and no console
+  window.
+
+## Amendment, 2026-09-30 (T8.6): The volume rides the stream
+
+The volume bar (T8.4) was told the PC's level only on `/quotes`, once a minute, and on Windows
+behind a 120 s cache, because each read there is a PowerShell process. On the first Windows run
+the owner turned the knob and the phone took up to three minutes to follow.
+
+- **One more line type on the same stream:** `v=<0..100>`, in decimal, sent when a stream opens
+  if the level is known, and on every change after that. A frame is still exactly 32 hex digits,
+  so neither shape can be taken for the other. The keepalive is still the frame's: a volume line
+  does not reset it.
+- **The source reports the level, out of band.** The Windows helper reads
+  `IAudioEndpointVolume` on the device it is capturing, at most every 100 ms, and writes
+  `v=<level>` on **stderr**. stdout stays raw PCM. The hub drains stderr on a thread: `v=` lines
+  are the level, and anything else is the helper's complaint, now logged instead of lost under
+  `pythonw`.
+- **Only with the `volume` action enabled.** Otherwise the hub writes no volume line, the same
+  rule `/quotes` follows, where the bar is `null`.
+- **One number everywhere.** The hub tells the App, so `/quotes` reports what the stream sent, and
+  a set from the phone goes out on every open stream.
+- **Checked twice, like a frame.** `SpectrumFrame.parseVolume` turns the line into an `int`
+  before `evaluateJavascript`, and `parseVolume` in `format.js` checks it again.
+- An APK from before this amendment drops the line, because it only ever took frames.
+- **macOS and Linux are unchanged.** Their sources report no volume, so their bars still follow
+  `/quotes`. The Swift helper could do the same read. `parec` cannot.
+

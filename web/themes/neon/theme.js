@@ -1602,5 +1602,13 @@
         });
     }
 
-    window.DeskPanel.defineTheme('neon', { render, tick, spectrum });
+    // The PC's volume as it changes (T8.6). The bar's own `show` already
+    // leaves a finger mid-drag, or a set in flight, alone.
+    function volume(level) {
+        if (volumeBar) {
+            volumeBar.show(level);
+        }
+    }
+
+    window.DeskPanel.defineTheme('neon', { render, tick, spectrum, volume });
 })();
