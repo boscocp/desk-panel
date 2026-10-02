@@ -633,7 +633,10 @@ def step_login_scope(python_exe):
     if code == 0:
         return Step("login scope", PASS, "session-scoped, no system-scoped twin, auto-login off")
     lines = [ln for ln in output.splitlines() if ln.strip()]
-    tail = lines[-1][:160] if lines else ""
+    # The failing check, not the summary under it: "windows.task.priority ...
+    # re-run server/install_task.ps1" says what to do, the summary does not.
+    failed = [ln.strip() for ln in lines if ln.lstrip().startswith("[FAIL]")]
+    tail = (failed[0] if failed else lines[-1] if lines else "")[:160]
     # Its own 2 means "could not tell" and must not be promoted to a failure
     # here -- it fails closed for the same reason this script does.
     return Step("login scope", FAIL if code == 1 else UNKNOWN, tail)

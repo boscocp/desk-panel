@@ -53,7 +53,9 @@ power and still ages the panel.
 ## Decision
 
 - **Online:** hold `FLAG_KEEP_SCREEN_ON`.
-- **Offline:** clear the flag and let Android sleep the screen normally.
+- **Offline:** clear the flag and let Android sleep the screen normally. Offline from online
+  takes two failed probes in a row, not one (T4.7, see ADR 0010's consequences): the screen
+  still follows the PC, through a filter one probe wide.
 - **Back online:** `setTurnScreenOn(true)` together with `setShowWhenLocked(true)`.
 
 `screenBrightness = 0f` plus a black render is kept as a **documented fallback**, to be used

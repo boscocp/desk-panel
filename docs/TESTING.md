@@ -149,7 +149,9 @@ than restating it — three copies had already drifted apart on scenario 5.
 | 8 | `dumpsys battery set temp 460` while online | `screen=thermal` within 15s |
 | 9 | `dumpsys battery set temp 300` while blanked | `screen=thermal-clear` within 15s, `mWakefulness=Awake` |
 
-The 20s allowances exist because the offline backoff caps at 15s (T5.3). Tighter windows
+From online, offline takes two failed probes in a row (`PcState.ONLINE_GRACE_FAILURES`,
+T4.7): a killed server reaches `state=offline` about 4s after the first refused poll, well
+inside scenario 2's window. The 20s allowances exist because the offline backoff caps at 15s (T5.3). Tighter windows
 produce flaky failures that are not bugs.
 
 **Clear the buffer before changing the PC's state, never after.** `adb logcat -c` followed by

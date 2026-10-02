@@ -85,6 +85,13 @@ acceptance has not executed is a task file that lies.
 - Fast user switching means a second user's instance fails to bind while the first still
   answers. The panel then reads "logged in", which is true, just not about the owner. Accepted;
   the server must fail loudly rather than hang, so `allow_reuse_address` is off on Windows.
+- **A starved server reads as a logout** (T4.7, 2026-10-01). The Scheduled Task's default
+  priority is 7, which is BELOW_NORMAL, and with a game loading on the same PC `/ping` came back
+  later than the phone's 1500 ms: the panel slept and woke six times in ninety seconds. The task
+  is registered at priority 4 (NORMAL) and `verify_login_scope.py` fails anything outside 4–6.
+  Not higher: a clock beside the monitor must not outrank its owner's own work. The phone also
+  rides out one failed probe while online (`PcState.ONLINE_GRACE_FAILURES`), so one late answer
+  from any cause is a missed poll and not a blink.
 
 ## Alternatives considered
 

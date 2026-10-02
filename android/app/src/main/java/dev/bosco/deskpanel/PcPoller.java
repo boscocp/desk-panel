@@ -77,8 +77,11 @@ public final class PcPoller {
      * the screen off when the PC disappears is the whole product. The platform
      * default is measured in tens of seconds, which would let a dead PC look
      * alive for most of a minute. At 1500 ms a probe against a host that has
-     * gone away reaches the offline marker within about a second and a half of
-     * the poll that was due. There is no DNS to bound — the host is a bare
+     * gone away fails within about a second and a half of the poll that was
+     * due. From online it takes two failed probes in a row to reach the offline
+     * marker ({@link PcState#ONLINE_GRACE_FAILURES}, T4.7): about 4 s for a
+     * refused connection, about 8 s for one that hangs after accept, one
+     * backoff rung between them. There is no DNS to bound — the host is a bare
      * IPv4 address.
      *
      * <p>Note the arithmetic: the two timeouts are applied separately, so the

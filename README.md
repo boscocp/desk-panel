@@ -12,6 +12,8 @@ Redmi Note 10 (Android 12, MIUI 14) lying in a landscape stand, powered from the
 
 ![A screen capture of the neon panel: the clock, B3, FX and crypto with sparklines, the weather with the humidity, the mute buttons beside the volume bar, and the AGENDA card alerting three minutes before a meeting, with the bell, the orange border and the "!" (the meetings are illustrative)](docs/images/panel-screen.png)
 
+![The spectrum bars over the speaker and mic buttons moving with the audio, beside the volume bar, in the full panel (captured from the browser with the fixture data, so the quotes, weather and meetings are illustrative)](docs/images/panel-spectrum.gif)
+
 ## Why this exists
 
 USB ports stay energised in S5, so a phone on your desk never learns that the PC went away.

@@ -149,17 +149,43 @@ class WindowsScheduledTaskTests(unittest.TestCase):
             with self.subTest(check.name):
                 self.assertEqual(check.status, vls.PASS, check.detail)
 
-    def test_the_real_capture_from_the_windows_box_still_passes(self):
+    def test_the_real_capture_from_the_windows_box_fails_only_on_priority(self):
         """Not the same fixture as the one above, and the difference is the
         point: this one is what `schtasks /query /xml` actually printed on the
         machine T3.8 was run on, childless elements, boilerplate and all. The
         handwritten fixture is what the checks were designed against; this is
         what they have to survive.
+
+        It used to pass every check. T4.7 found the one it should not have:
+        no <Priority>, which is the default 7 and BELOW_NORMAL, and a game on
+        the same PC then starved /ping into reading as a logout.
         """
         task = vls.parse_schtasks_xml(vls.fixture("windows_schtasks_real_capture.xml"))
+        statuses = vls.statuses(vls.check_windows_task(task))
+        self.assertEqual(statuses.pop("windows.task.priority"), vls.FAIL)
+        for name, status in statuses.items():
+            with self.subTest(name):
+                self.assertEqual(status, vls.PASS)
+
+    def test_the_real_capture_after_the_priority_fix_passes_every_check(self):
+        """Captured from the same box after `install_task.ps1` gained
+        `-Priority 4`: the cmdlet writes the element only when it is not the
+        default, which is why the old capture has none."""
+        task = vls.parse_schtasks_xml(
+            vls.fixture("windows_schtasks_real_capture_priority.xml"))
+        self.assertEqual(task["priority"], "4")
         for check in vls.check_windows_task(task):
             with self.subTest(check.name):
                 self.assertEqual(check.status, vls.PASS, check.detail)
+
+    def test_the_priority_must_be_normal(self):
+        task = vls.parse_schtasks_xml(vls.fixture("windows_schtasks_good.xml"))
+        for raw, expected in (("4", vls.PASS), ("5", vls.PASS), ("6", vls.PASS),
+                              ("7", vls.FAIL), ("10", vls.FAIL), ("2", vls.FAIL),
+                              (None, vls.FAIL), ("high", vls.UNKNOWN)):
+            with self.subTest(raw):
+                checks = vls.statuses(vls.check_windows_task(dict(task, priority=raw)))
+                self.assertEqual(checks["windows.task.priority"], expected)
 
     def test_the_three_windows_traps_are_each_caught(self):
         """One fixture carrying all three, because they arrive together: a
