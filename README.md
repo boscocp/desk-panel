@@ -8,8 +8,6 @@ The PC can be Windows, Linux or macOS, and the panel can follow up to three of t
 while you are logged in at any one ([ADR 0016](docs/adr/0016-more-than-one-pc.md)). Built for a
 Redmi Note 10 (Android 12, MIUI 14) lying in a landscape stand, powered from the PC's USB port.
 
-![The panel on the Redmi Note 10 in its stand: clock, B3 quotes, FX, crypto, weather and the two mute buttons](docs/images/panel.jpg)
-
 ![A screen capture of the neon panel: the clock, B3, FX and crypto with sparklines, the weather with the humidity, the mute buttons beside the volume bar, and the AGENDA card alerting three minutes before a meeting, with the bell, the orange border and the "!" (the meetings are illustrative)](docs/images/panel-screen.png)
 
 ![The spectrum bars over the speaker and mic buttons moving with the audio, beside the volume bar, in the full panel (captured from the browser with the fixture data, so the quotes, weather and meetings are illustrative)](docs/images/panel-spectrum.gif)
