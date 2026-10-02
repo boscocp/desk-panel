@@ -92,7 +92,7 @@ public class PcStateTest {
         // flaps fails the repeats. Both are caught by the same sequence. Going
         // offline from online takes two failures (ONLINE_GRACE_FAILURES), so
         // the falling edges land on the second one, and the lone failure at
-        // probe 10 is ridden out.
+        // index 10 is ridden out.
         boolean[] probes = {true, true, false, false, false, true, true, false, false, true,
                 false, true};
         boolean[] expected = {true, false, false, true, false, true, false, false, true, true,
@@ -336,9 +336,10 @@ public class PcStateTest {
 
     @Test
     public void dormancyFollowsTheStateAndNotTheFailureCount() {
-        // A single failure is enough: there is no "deeply offline" threshold to
-        // cross, because the cost being avoided is the wake lock, and that is
-        // held from the first failure onwards.
+        // Dormancy follows OFFLINE, not a failure count: there is no "deeply
+        // offline" threshold to cross, because the cost being avoided is the
+        // wake lock. From UNKNOWN one failure is OFFLINE; from ONLINE it takes
+        // two (ONLINE_GRACE_FAILURES), which the second half shows.
         PcState s = new PcState();
         s.record(false, T0);
         assertTrue(s.isDormant(false));

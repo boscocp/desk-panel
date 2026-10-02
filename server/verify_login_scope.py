@@ -278,7 +278,8 @@ def _priority_check(raw):
     name = "windows.task.priority"
     if raw is None:
         return Check(name, FAIL, "Priority=(absent, defaults to 7, BELOW_NORMAL), must be 4 to 6"
-                     " -- a busy PC then answers /ping too late and reads as a logout")
+                     " -- a busy PC then answers /ping too late and reads as a logout;"
+                     " re-run server/install_task.ps1")
     try:
         value = int(raw.strip())
     except ValueError:
@@ -287,7 +288,8 @@ def _priority_check(raw):
         return Check(name, PASS, f"Priority={value}, NORMAL")
     return Check(name, FAIL, f"Priority={value}, must be 4 to 6 (NORMAL)"
                  + (" -- below normal answers /ping too late on a busy PC" if value > 6 else
-                    " -- above normal outranks the owner's own work"))
+                    " -- above normal outranks the owner's own work")
+                 + "; re-run server/install_task.ps1")
 
 
 def _enabled_check(name, value, raw, absent, label, why):

@@ -1613,8 +1613,10 @@ class Server(ThreadingHTTPServer):
     signal. Serving one request at a time meant a `/quotes` whose cache had
     just expired could sit inside three sequential upstream calls -- up to 30s
     of `urlopen` timeouts -- with `/ping` queued behind it. The phone gives a
-    ping 1500ms and `PcState` flips to OFFLINE on a single failure, so the
-    panel would go dark while its owner sat at the logged-in PC. An internet
+    ping 1500ms and `PcState` flips to OFFLINE on the second failure in a row
+    (one is ridden out since T4.7), and a request queued for 30s fails every
+    ping in that time, so the panel would go dark while its owner sat at the
+    logged-in PC. An internet
     hiccup would have looked exactly like a logout, which is the one thing
     this server must never get wrong.
 
