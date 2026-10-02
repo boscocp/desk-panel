@@ -73,6 +73,24 @@ public final class PcState {
      */
     public static final long DORMANT_ALARM_MS = 15 * 60 * 1000L;
 
+    /**
+     * Failed probes an ONLINE panel rides out before it goes OFFLINE (T4.7).
+     *
+     * <p>One, and it is measured rather than picked. On 2026-10-01 a game
+     * loading on the PC kept the server from answering inside
+     * {@code PcPoller.TIMEOUT_MS}, a single probe at a time, and every one of
+     * those read as a logout: the screen slept and woke six times in ninety
+     * seconds. The server's priority was the cause and is fixed on the PC; this
+     * is so one late answer from any cause is a missed poll, not a blink.
+     *
+     * <p>The cost is the logout: the panel goes dark one backoff rung later,
+     * {@value #BACKOFF_BASE_MS} ms plus one probe. It applies only from ONLINE.
+     * From UNKNOWN the first failure is still OFFLINE, so a phone that boots
+     * beside a PC that is off does not light up for it; and from IDLE the
+     * screen is already dark, so there is nothing to protect.
+     */
+    public static final int ONLINE_GRACE_FAILURES = 1;
+
     private State state = State.UNKNOWN;
     private boolean transitioned;
     private int consecutiveFailures;
@@ -101,6 +119,10 @@ public final class PcState {
      * PC is up, and the monitor coming back has to be noticed at the online
      * cadence, not after a ladder climbed to fifteen seconds.
      *
+     * <p>A failure while ONLINE is held as ONLINE for
+     * {@link #ONLINE_GRACE_FAILURES} probes. The failure is still counted, so
+     * the next probe comes at the offline backoff and not the online cadence.
+     *
      * @param reachable  whether the PC server answered
      * @param displayOff whether it said its display is off
      * @param nowMs      the time of the probe, on any monotonic scale
@@ -117,6 +139,10 @@ public final class PcState {
         }
 
         State next = !reachable ? State.OFFLINE : displayOff ? State.IDLE : State.ONLINE;
+        if (next == State.OFFLINE && state == State.ONLINE
+                && consecutiveFailures <= ONLINE_GRACE_FAILURES) {
+            next = State.ONLINE;
+        }
         transitioned = next != state;
         state = next;
         return transitioned;

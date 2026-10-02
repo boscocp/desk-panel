@@ -174,6 +174,7 @@ def parse_schtasks_xml(text):
         "trigger_enabled": _xml_bool(_text(root, "Triggers/LogonTrigger/Enabled")),
         "trigger_enabled_raw": _text(root, "Triggers/LogonTrigger/Enabled"),
         "command": _text(root, "Actions/Exec/Command"),
+        "priority": _text(root, "Settings/Priority"),
     }
 
 
@@ -234,6 +235,15 @@ def check_windows_task(task):
         f", must be false",
     ))
 
+    # Absent means 7, the Task Scheduler's default, and 7 is BELOW_NORMAL.
+    # Measured on 2026-10-01: with Battlefield loading on the same PC, a
+    # below-normal server answered /ping later than the phone's 1500 ms, the
+    # panel read that as a logout, and the screen slept and woke six times in
+    # ninety seconds. 4 to 6 are NORMAL; 0 to 3 outrank the owner's own
+    # foreground work, which a clock beside the monitor has no business doing.
+    priority = task.get("priority")
+    checks.append(_priority_check(priority))
+
     # Absent is an answer here, not an inability to tell, and it is the
     # opposite of the two settings above: the Task Scheduler omits this element
     # at its default, and the default is enabled. A task that really is
@@ -261,6 +271,23 @@ def check_windows_task(task):
         why=" -- a disabled trigger never fires at logon, however healthy the rest is",
     ))
     return checks
+
+
+def _priority_check(raw):
+    """Pure: Settings/Priority must be a NORMAL one, 4 to 6."""
+    name = "windows.task.priority"
+    if raw is None:
+        return Check(name, FAIL, "Priority=(absent, defaults to 7, BELOW_NORMAL), must be 4 to 6"
+                     " -- a busy PC then answers /ping too late and reads as a logout")
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        return Check(name, UNKNOWN, f"Priority={raw!r} is not a number")
+    if 4 <= value <= 6:
+        return Check(name, PASS, f"Priority={value}, NORMAL")
+    return Check(name, FAIL, f"Priority={value}, must be 4 to 6 (NORMAL)"
+                 + (" -- below normal answers /ping too late on a busy PC" if value > 6 else
+                    " -- above normal outranks the owner's own work"))
 
 
 def _enabled_check(name, value, raw, absent, label, why):
@@ -1183,8 +1210,21 @@ def self_test_cases():
     real = parse_schtasks_xml(fixture("windows_schtasks_real_capture.xml"))
     cases.append(("schtasks real capture: Enabled is omitted", real["enabled"], None))
     cases.append(("schtasks real capture: one LogonTrigger", real["triggers"], ["LogonTrigger"]))
-    cases.append(("schtasks real capture: checks",
-                  set(statuses(check_windows_task(real)).values()), {PASS}))
+    # Captured before T4.7, and the first fixture to show the priority trap:
+    # the cmdlets omit <Priority> at its default, and the default is below
+    # normal. Everything else in it still passes.
+    real_checks = statuses(check_windows_task(real))
+    cases.append(("schtasks real capture: priority is absent", real["priority"], None))
+    cases.append(("schtasks real capture: only the priority fails",
+                  {name for name, status in real_checks.items() if status != PASS},
+                  {"windows.task.priority"}))
+
+    # The same box after T4.7's reinstall: `-Priority 4` writes the element,
+    # and nothing else in the export moved.
+    fixed = parse_schtasks_xml(fixture("windows_schtasks_real_capture_priority.xml"))
+    cases.append(("schtasks real capture after T4.7: priority", fixed["priority"], "4"))
+    cases.append(("schtasks real capture after T4.7: checks",
+                  set(statuses(check_windows_task(fixed)).values()), {PASS}))
 
     bad = parse_schtasks_xml(fixture("windows_schtasks_bad_boot_trigger.xml"))
     cases.append(("schtasks bad: checks", statuses(check_windows_task(bad)), {
@@ -1194,6 +1234,7 @@ def self_test_cases():
         "windows.task.execution-time-limit": FAIL,
         "windows.task.batteries": FAIL,
         "windows.task.stop-on-battery": FAIL,
+        "windows.task.priority": FAIL,
         "windows.task.enabled": PASS,
         # The bad fixture's trigger is a BootTrigger, so there is no
         # LogonTrigger/Enabled to read -- absent, which is the default and a
@@ -1222,6 +1263,12 @@ def self_test_cases():
                   statuses(check_windows_task(
                       dict(good, trigger_enabled=None, trigger_enabled_raw=None)))
                   ["windows.task.trigger-enabled"], PASS))
+
+    for raw, expected in (("4", PASS), ("6", PASS), ("7", FAIL), ("3", FAIL), (None, FAIL),
+                          ("high", UNKNOWN)):
+        cases.append((f"schtasks priority {raw!r}",
+                      statuses(check_windows_task(dict(good, priority=raw)))
+                      ["windows.task.priority"], expected))
 
     absent = parse_schtasks_xml(fixture("windows_schtasks_absent.txt"))
     cases.append(("schtasks absent: found", absent["found"], False))

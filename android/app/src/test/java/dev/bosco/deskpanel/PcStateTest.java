@@ -89,9 +89,14 @@ public class PcStateTest {
     @Test
     public void everyFlipReportsATransitionAndEveryRepeatDoesNot() {
         // A machine that is stuck in one state fails the flips; a machine that
-        // flaps fails the repeats. Both are caught by the same sequence.
-        boolean[] probes = {true, true, false, false, false, true, true, false, true};
-        boolean[] expected = {true, false, true, false, false, true, false, true, true};
+        // flaps fails the repeats. Both are caught by the same sequence. Going
+        // offline from online takes two failures (ONLINE_GRACE_FAILURES), so
+        // the falling edges land on the second one, and the lone failure at
+        // probe 10 is ridden out.
+        boolean[] probes = {true, true, false, false, false, true, true, false, false, true,
+                false, true};
+        boolean[] expected = {true, false, false, true, false, true, false, false, true, true,
+                false, false};
 
         PcState s = new PcState();
         for (int i = 0; i < probes.length; i++) {
@@ -107,6 +112,65 @@ public class PcStateTest {
         assertTrue(s.transitioned());
         s.record(false, T0 + 2000L);
         assertFalse("transitioned() must describe the last probe only", s.transitioned());
+    }
+
+    // --- one late answer is not a logout (T4.7) ---------------------------
+
+    @Test
+    public void oneFailureWhileOnlineIsRiddenOut() {
+        PcState s = new PcState();
+        s.record(true, T0);
+        assertFalse("no transition on the first failure", s.record(false, T0 + 2000L));
+        assertEquals(PcState.State.ONLINE, s.state());
+        assertTrue(s.isOnline());
+        assertEquals("the failure is still counted", 1, s.consecutiveFailures());
+        assertEquals("and the retry is the backoff's, not the cadence's",
+                PcState.BACKOFF_BASE_MS, s.nextIntervalMs());
+    }
+
+    @Test
+    public void theSecondFailureInARowGoesOffline() {
+        PcState s = new PcState();
+        s.record(true, T0);
+        s.record(false, T0 + 2000L);
+        assertTrue(s.record(false, T0 + 4000L));
+        assertEquals(PcState.State.OFFLINE, s.state());
+        assertEquals(2, s.consecutiveFailures());
+    }
+
+    @Test
+    public void aSuccessBetweenFailuresResetsTheGrace() {
+        // The game-loading pattern: a late answer every few polls. None of
+        // them may darken the screen.
+        PcState s = new PcState();
+        s.record(true, T0);
+        long now = T0;
+        for (int i = 0; i < 20; i++) {
+            now += 2000L;
+            assertFalse("late answer " + i, s.record(false, now));
+            now += 2000L;
+            assertFalse("recovery " + i, s.record(true, now));
+            assertEquals(PcState.State.ONLINE, s.state());
+        }
+    }
+
+    @Test
+    public void theGraceIsOnlyForOnline() {
+        // From UNKNOWN, a phone booting beside a PC that is off must not light.
+        PcState fresh = new PcState();
+        assertTrue(fresh.record(false, T0));
+        assertEquals(PcState.State.OFFLINE, fresh.state());
+
+        // From IDLE the screen is already dark; offline is the truer state.
+        PcState idle = new PcState();
+        idle.record(true, true, T0);
+        assertTrue(idle.record(false, T0 + 2000L));
+        assertEquals(PcState.State.OFFLINE, idle.state());
+    }
+
+    @Test
+    public void graceIsOneFailure() {
+        assertEquals(1, PcState.ONLINE_GRACE_FAILURES);
     }
 
     // --- the backoff ladder ----------------------------------------------
@@ -283,6 +347,8 @@ public class PcStateTest {
         assertFalse("one success is enough to leave dormancy", s.isDormant(false));
 
         s.record(false, T0 + 4000L);
+        assertFalse("one failure from online is ridden out", s.isDormant(false));
+        s.record(false, T0 + 6000L);
         assertTrue(s.isDormant(false));
     }
 

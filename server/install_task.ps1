@@ -422,7 +422,8 @@ function Assert-TaskShape {
         @{ Name = 'LogonType'; Actual = (Get-XmlText -Node $principal -Name 'LogonType'); Expected = 'InteractiveToken' },
         @{ Name = 'ExecutionTimeLimit'; Actual = (Get-XmlText -Node $settings -Name 'ExecutionTimeLimit'); Expected = 'PT0S' },
         @{ Name = 'DisallowStartIfOnBatteries'; Actual = (Get-XmlText -Node $settings -Name 'DisallowStartIfOnBatteries'); Expected = 'false' },
-        @{ Name = 'StopIfGoingOnBatteries'; Actual = (Get-XmlText -Node $settings -Name 'StopIfGoingOnBatteries'); Expected = 'false' }
+        @{ Name = 'StopIfGoingOnBatteries'; Actual = (Get-XmlText -Node $settings -Name 'StopIfGoingOnBatteries'); Expected = 'false' },
+        @{ Name = 'Priority'; Actual = (Get-XmlText -Node $settings -Name 'Priority'); Expected = '4' }
     )
     foreach ($check in $checks) {
         if ($check.Actual -ne $check.Expected) {
@@ -443,7 +444,7 @@ function Assert-TaskShape {
         foreach ($failure in $failures) { Write-Host "    $failure" -ForegroundColor Red }
         Stop-WithError 'the registered task does not have the shape ADR 0010 requires.'
     }
-    Write-Note 'read back: one LogonTrigger, InteractiveToken, PT0S, batteries false, enabled.'
+    Write-Note 'read back: one LogonTrigger, InteractiveToken, PT0S, batteries false, priority 4, enabled.'
 }
 
 # --------------------------------------------------------------------------
@@ -618,8 +619,9 @@ $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
     -ExecutionTimeLimit (New-TimeSpan -Seconds 0) `
-    -MultipleInstances IgnoreNew
-# Each of those four undoes a default that is wrong here:
+    -MultipleInstances IgnoreNew `
+    -Priority 4
+# Each of those five undoes a default that is wrong here:
 #   AllowStartIfOnBatteries    -- the default never starts the task on a laptop
 #   DontStopIfGoingOnBatteries -- the default stops it the moment you unplug
 #   ExecutionTimeLimit 0       -- the default 72h kills the server on day four,
@@ -628,6 +630,10 @@ $settings = New-ScheduledTaskSettingsSet `
 #   IgnoreNew                  -- fast user switching must not start a second
 #                                 server; allow_reuse_address is off on Windows
 #                                 precisely so the second one fails loudly
+#   Priority 4                 -- the default 7 is BELOW_NORMAL. A game loading
+#                                 on this PC then starves /ping past the phone's
+#                                 1500 ms, which reads as a logout, and the panel
+#                                 blinks off and on (T4.7, measured 2026-10-01)
 
 $task = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings `
     -Description 'desk-panel PC server (login signal) -- see docs/adr/0010-login-signal-is-session-scoped.md'
