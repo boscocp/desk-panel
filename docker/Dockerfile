@@ -3,7 +3,7 @@
 #
 # Pinned by digest, not by tag: a tag is a moving target and this image is the
 # definition of "reproducible build" for the whole project.
-FROM eclipse-temurin:21.0.5_11-jdk-noble@sha256:971bf64388e4fcf4a32cf87b5b19ed8e8a105e8f694b8718da9f3a128833dd7c
+FROM eclipse-temurin:24.0.2_12-jdk-noble@sha256:dacac8e9a0df0d2bd24e702b4431132875c249930b70555ebd7ca285b5bee684
 
 # Exact versions, never "latest". The task file is explicit about this.
 ARG CMDLINE_TOOLS_VERSION=13114758
