@@ -30,7 +30,8 @@ class MacHelperVolumeTests(unittest.TestCase):
 
     def test_it_follows_the_default_output_when_it_changes(self):
         self.assertIn("kAudioHardwarePropertyDefaultOutputDevice", SOURCE)
-        self.assertRegex(SOURCE, r"AddPropertyListenerBlock\(AudioObjectID\(kAudioObjectSystemObject\),\s*&defaultOutputAddress")
+        system_listener = r"AddPropertyListenerBlock\(AudioObjectID\(kAudioObjectSystemObject\),"
+        self.assertRegex(SOURCE, system_listener + r"\s*&defaultOutputAddress")
         self.assertEqual(len(re.findall(r"AudioObjectAddPropertyListenerBlock\(", SOURCE)), 2)
 
     def test_stdout_still_carries_only_the_header_and_pcm(self):
