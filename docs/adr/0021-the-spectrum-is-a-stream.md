@@ -126,4 +126,23 @@ the music and the bar did not follow the knob.
   place that says which platforms claim a level at all, so the hub is told rather than guessing.
 - **macOS is still `/quotes`.** The Swift helper would need the CoreAudio read, and this change
   does not give it one.
+  - **Superseded** by the amendment below.
+
+## Amendment, 2026-10-09 (T8.8): macOS reports it from the helper
+
+The Swift helper now does what the Windows one does: it reads the level itself and writes
+`v=<level>` on stderr, once on starting and once per change. Nothing in the hub, the stream or
+the phone changed; `reports_volume("darwin")` is now True and that is the whole Python side.
+
+- **The same number `/quotes` reads.** The helper reads the default output's
+  `kAudioHardwareServiceDeviceProperty_VirtualMainVolume`, which is what AppleScript's
+  `output volume of (get volume settings)` reports. Measured side by side at 30, 55 and 80.
+- **An event, not a poll**, as on Linux. Core Audio calls back when the volume moves and when
+  the default output changes, and the helper follows the new output. Windows polls every 100 ms
+  inside a loop it already runs; here there is no such loop to ride.
+- **A device with no main volume sends nothing.** Some HDMI and USB outputs have no such
+  control. The bar then keeps the level `/quotes` reads, which is the old behaviour.
+- **An old helper is harmless.** A `spectrum-tap` built before this change sends no `v=` line,
+  so the hub claims a level and never hears one, and `/quotes` still feeds the bar. Re-running
+  `install_agent.sh`, or the `swiftc` line, rebuilds it.
 

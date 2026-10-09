@@ -50,8 +50,8 @@ class ReportsVolumeTests(unittest.TestCase):
         self.assertTrue(spectrum.reports_volume("linux", which=lambda name: "/usr/bin/pactl"))
         self.assertFalse(spectrum.reports_volume("linux", which=lambda name: None))
 
-    def test_macos_does_not_report_one_yet(self):
-        self.assertFalse(spectrum.reports_volume("darwin", which=lambda name: "/usr/bin/pactl"))
+    def test_macos_reads_it_in_the_helper(self):
+        self.assertTrue(spectrum.reports_volume("darwin", which=lambda name: None))
 
 
 class SourceForTests(unittest.TestCase):

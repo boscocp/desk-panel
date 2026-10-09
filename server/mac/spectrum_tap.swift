@@ -17,6 +17,8 @@
 // Protocol, and nothing else is ever written to stdout:
 //   one line  "rate=<hz>\n"
 //   then      mono signed 16-bit little-endian samples at that rate, for ever
+// and, on stderr: "v=<0..100>\n" once on starting and each time the default
+// output's volume changes (T8.8), the line the Windows helper writes (T8.6).
 //
 // The mix is downmixed and halved in rate here (48 kHz becomes 24 kHz): bars
 // stop around 11 kHz, and it halves what Python has to read.
@@ -26,6 +28,7 @@
 // to stdout fails. The tap and the aggregate are private to this process and
 // die with it.
 
+import AudioToolbox
 import CoreAudio
 import Foundation
 
@@ -122,6 +125,60 @@ status = AudioDeviceCreateIOProcIDWithBlock(&procID, device, queue) { _, input, 
 if status != noErr { fail("AudioDeviceCreateIOProcIDWithBlock", status) }
 status = AudioDeviceStart(device, procID)
 if status != noErr { fail("AudioDeviceStart", status) }
+
+// The output volume (T8.8), the number `osascript -e "output volume of (get
+// volume settings)"` gives /quotes: the default output's virtual main volume,
+// as a whole percent. Core Audio calls back when it moves and when the
+// default output changes, so nothing here polls. A device with no such
+// control (some HDMI and USB outputs) sends no line, and the bar keeps the
+// level /quotes reads.
+let volumeQueue = DispatchQueue(label: "spectrum-tap.volume")
+var defaultOutputAddress = AudioObjectPropertyAddress(
+    mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+    mScope: kAudioObjectPropertyScopeGlobal,
+    mElement: kAudioObjectPropertyElementMain)
+var mainVolumeAddress = AudioObjectPropertyAddress(
+    mSelector: kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
+    mScope: kAudioDevicePropertyScopeOutput,
+    mElement: kAudioObjectPropertyElementMain)
+var output = AudioObjectID(kAudioObjectUnknown)
+var listening = Set<AudioObjectID>()
+var lastVolume = -1
+
+func reportVolume() {
+    var scalar: Float32 = 0
+    var size = UInt32(MemoryLayout<Float32>.size)
+    guard output != kAudioObjectUnknown,
+          AudioObjectGetPropertyData(output, &mainVolumeAddress, 0, nil, &size, &scalar) == noErr
+    else { return }
+    let level = max(0, min(100, Int((scalar * 100).rounded())))
+    if level == lastVolume { return }
+    lastVolume = level
+    FileHandle.standardError.write("v=\(level)\n".data(using: .utf8)!)
+}
+
+// Listeners are added once per device and never removed: a device left behind
+// still calls, and reportVolume reads only the current output, so the call is
+// a read that changes nothing.
+func followDefaultOutput() {
+    var device = AudioObjectID(kAudioObjectUnknown)
+    var size = UInt32(MemoryLayout<AudioObjectID>.size)
+    guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject),
+                                     &defaultOutputAddress, 0, nil, &size, &device) == noErr
+    else { return }
+    output = device
+    if !listening.contains(device),
+       AudioObjectAddPropertyListenerBlock(device, &mainVolumeAddress, volumeQueue,
+                                           { _, _ in reportVolume() }) == noErr {
+        listening.insert(device)
+    }
+    reportVolume()
+}
+
+AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject),
+                                    &defaultOutputAddress, volumeQueue,
+                                    { _, _ in followDefaultOutput() })
+volumeQueue.async { followDefaultOutput() }
 
 // Blocks until the server closes its end of stdin, or dies.
 _ = FileHandle.standardInput.readDataToEndOfFile()
