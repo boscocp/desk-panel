@@ -577,6 +577,9 @@ A PC that cannot capture says why in its startup notices, and the space stays em
   watches, macOS asks to let **python3** record system audio. Allow it, or turn it on later in
   System Settings → Privacy & Security → Screen & System Audio Recording → System Audio Recording
   Only. Until then the bars stay flat and the log says `the source has sent no audio`.
+  The same helper reads the output volume, so the **volume bar follows the Mac's slider and
+  keys within a second** (T8.8). A helper built before 2026-10-09 does not; rebuild it with
+  the `swiftc` line above and restart the agent.
 
 ## Verifying the login scope
 

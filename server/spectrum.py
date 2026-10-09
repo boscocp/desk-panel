@@ -215,9 +215,10 @@ class HelperSource:
     the helpers wait for, and a kill backs that up.
 
     Its stderr is read on a thread of its own (T8.6). A `v=<level>` line is
-    the output volume, which the Windows helper reports as it changes, and
-    goes to `on_volume`; any other line is the helper's complaint and goes to
-    `log`. Under pythonw nothing else would ever see it.
+    the output volume, which the Windows and macOS helpers report as it
+    changes (T8.6, T8.8), and goes to `on_volume`; any other line is the
+    helper's complaint and goes to `log`. Under pythonw nothing else would
+    ever see it.
     """
 
     def __init__(self, argv, rate=None, popen=subprocess.Popen):
@@ -484,15 +485,13 @@ def source_for(platform=sys.platform, helper=None, which=shutil.which):
 def reports_volume(platform=sys.platform, which=shutil.which):
     """Pure-ish: does this platform's source send the level up the stream?
 
-    Windows reads the endpoint inside its helper (T8.6); Linux watches
-    `pactl subscribe` beside `parec` (T8.7) and so needs `pactl` on PATH,
-    even though the level itself may come back from `wpctl`.
-
-    macOS is the remaining False: the Swift helper has no volume read yet, so
-    its bar still follows `/quotes`. The hub is told, rather than guessing,
+    Windows reads the endpoint inside its helper (T8.6), and so does the
+    Swift helper on macOS (T8.8); Linux watches `pactl subscribe` beside
+    `parec` (T8.7) and so needs `pactl` on PATH, even though the level itself
+    may come back from `wpctl`. The hub is told, rather than guessing,
     because a hub that heard no level must not claim one.
     """
-    if platform == "win32":
+    if platform in ("win32", "darwin"):
         return True
     if platform.startswith("linux"):
         return which(PACTL) is not None
@@ -508,8 +507,9 @@ class Spectrum:
     long as somebody is still watching.
 
     It also carries the output volume (T8.6), once `on_volume` is set: a
-    source that reports it (the Windows helper) feeds `note_volume`, every
-    stream gets a `v=<level>` line when the level changes and one on opening,
+    source that reports it (the Windows and macOS helpers, `ParecSource` on
+    Linux) feeds `note_volume`, every stream gets a `v=<level>` line when the
+    level changes and one on opening,
     and `on_volume` is told, so `/quotes` says the same number. With
     `on_volume` left None -- the `volume` action not enabled -- no volume
     line is ever written.
