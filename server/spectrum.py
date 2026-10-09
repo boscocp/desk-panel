@@ -507,8 +507,9 @@ class Spectrum:
     long as somebody is still watching.
 
     It also carries the output volume (T8.6), once `on_volume` is set: a
-    source that reports it (the Windows helper) feeds `note_volume`, every
-    stream gets a `v=<level>` line when the level changes and one on opening,
+    source that reports it (the Windows and macOS helpers, `ParecSource` on
+    Linux) feeds `note_volume`, every stream gets a `v=<level>` line when the
+    level changes and one on opening,
     and `on_volume` is told, so `/quotes` says the same number. With
     `on_volume` left None -- the `volume` action not enabled -- no volume
     line is ever written.

@@ -175,9 +175,15 @@ func followDefaultOutput() {
     reportVolume()
 }
 
-AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject),
-                                    &defaultOutputAddress, volumeQueue,
-                                    { _, _ in followDefaultOutput() })
+// Not fatal: the bars and the first read work without it. The line reaches the
+// server's log, which is the only place anyone would look.
+if AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject),
+                                       &defaultOutputAddress, volumeQueue,
+                                       { _, _ in followDefaultOutput() }) != noErr {
+    FileHandle.standardError.write(
+        "spectrum-tap: cannot follow a change of output; the volume stays on this one\n"
+            .data(using: .utf8)!)
+}
 volumeQueue.async { followDefaultOutput() }
 
 // Blocks until the server closes its end of stdin, or dies.

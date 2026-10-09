@@ -209,6 +209,26 @@ for wave 38; T9.2 is still part of no wave.
 | T9.4 | **Nobody else on the Wi-Fi can read the panel** | done | 2026-09-30, wave 39. **Design 1 shipped, measured on the Redmi**: [the spike](../docs/spikes/2026-panel-tls.md), then [ADR 0018](../docs/adr/0018-the-panel-traffic-is-private.md). Data and presses on TLS port 8778 with `X-Panel-Key` (SHA-256 then `compare_digest`), 401 without it and 401 on the plain port even with it; `/ping` stays plain, because a certificate problem must never read as a logout; `/app` off by default. **The spike's real finding**: macOS's LibreSSL writes P-256 keys with explicit curve parameters and Android's BoringSSL answers every handshake with `decode_error` — `make_cert.py` passes `ec_param_enc:named_curve` and a test pins it. After that, TLS 1.3 at 4–8 ms a handshake, two a minute. **Off on the owner's desk for now**: the Windows PC has no certificate, and a private APK needs every listed PC private. **Not measured**: a packet capture from a third device, a press over TLS, Windows |
 | T9.5 | **A soft alert before a meeting** | done | 2026-09-30, wave 40. Asked for the same day. `agenda_soon_min` (5) and `agenda_chime_min` (1) in `config.toml` ride `agenda.alerts`; inside the first the AGENDA row gets a bell, the border pulses orange and a "!" sits on the title's line (made stronger twice from the chair), and inside the second one soft chime plays once per meeting, only while the panel is lit. The chime is synthesised by `scripts/make_chime.py` (CC0) and a theme can name its own file. **Measured on the Redmi** with a fake meeting: the visuals, and the app's AudioTrack playing a minute before |
 
+## Resuming after 2026-10-09 (wave 45)
+
+Wave 45 is **T8.8** on `wave/45-mac-volume-stream`, on the Mac. The owner asked for it after a
+support question about a declined login prompt, which turned out to need nothing. The Swift helper
+now sends `v=` and the Mac's bar follows the slider within a second. That closes the last
+platform still on `/quotes`. The note is `docs/harness-notes/2026-10-09-wave-45.md`.
+
+**Next: watch the Redmi's bar while the Mac's volume moves.** It runs wave 43's APK, which takes
+the line, so no rebuild is needed. Then switch the Mac's output to another device and back,
+which T8.8 did not measure. Wave 44's "Next" is still open too: build and install its APK for
+the `PcState` grace, then launch a game on Windows.
+
+### What is still only true on this desk
+
+- The Mac's `server/mac/spectrum-tap` is rebuilt from this wave, and the agent has been restarted
+  on it. Another Mac needs `install_agent.sh`, or the `swiftc` line, re-run.
+- The Mac still runs from `server/config.json` with `spectrum` and `volume` on.
+- `make check` fails at `lint-commits` on main's `d5c4e95` until it ages out of the last 30
+  subjects.
+
 ## Resuming after 2026-10-01 (wave 44)
 
 Wave 44 is **T4.7** on `wave/44-ping-survives-a-busy-pc`, on the Windows PC. It was a bug report

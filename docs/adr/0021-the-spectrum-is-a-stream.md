@@ -102,6 +102,7 @@ the owner turned the knob and the phone took up to three minutes to follow.
   `/quotes`. The Swift helper could do the same read. `parec` cannot.
   - **Superseded for Linux** by the amendment below: `parec` still cannot, and it turned out not
     to have to.
+  - **Superseded for macOS** by the T8.8 amendment: the Swift helper does the read.
 
 ## Amendment, 2026-10-01 (T8.7): Linux reports it too, from a second process
 
@@ -142,7 +143,14 @@ the phone changed; `reports_volume("darwin")` is now True and that is the whole 
   inside a loop it already runs; here there is no such loop to ride.
 - **A device with no main volume sends nothing.** Some HDMI and USB outputs have no such
   control. The bar then keeps the level `/quotes` reads, which is the old behaviour.
-- **An old helper is harmless.** A `spectrum-tap` built before this change sends no `v=` line,
-  so the hub claims a level and never hears one, and `/quotes` still feeds the bar. Re-running
-  `install_agent.sh`, or the `swiftc` line, rebuilds it.
+- **An old helper is stale for up to 20 s, not wrong for good.** A `spectrum-tap` built before
+  this change sends no `v=` line, so the hub keeps only the phone's last set, and a stream that
+  opens later starts on it even if the Mac's keys moved since. `/quotes` corrects it within
+  `VOLUME_TTL_S`. Re-running `install_agent.sh`, or the `swiftc` line, rebuilds it.
+- **The selector is read through the AudioObject API.** `AudioHardwareService.h` documents
+  `VirtualMainVolume` for the `AudioHardwareService*` functions, which are deprecated since
+  macOS 10.11. Reading it with `AudioObjectGetPropertyData` and listening with
+  `AudioObjectAddPropertyListenerBlock` is the path in common use, not the documented one. It
+  was measured on macOS 26.5. If a later macOS drops it, the helper sends no line and the bar
+  is back on `/quotes`.
 
