@@ -43,7 +43,11 @@ extended from one desk chair to two.
 ## Consequences
 
 - The screen sleeps only when **every** listed PC is away, which is the owner's intent. Anyone
-  reading `state=online` in the log should now read it as "some listed PC".
+  reading `state=online` in the log should now read it as "some listed PC" — and since T4.8 the
+  `ping=` line beside it says *which*, on every cycle rather than only on a move. The first time
+  this decision was exercised on the desk, 2026-10-09, nobody could afterwards say which PC the
+  panel had been on or what the other had answered: both facts were written once, on an edge,
+  into a ring buffer that holds six minutes.
 - An offline cycle lasts longer with more hosts, and the dormancy ladder (T5.6) spaces offline
   cycles out, so the battery cost grows with the number of hosts, not with time. `ping=` is one
   line per cycle, so T5.3's count is of cycles and requests are that times N.
