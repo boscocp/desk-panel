@@ -91,6 +91,7 @@ Rows without a task file — T0.0, T0.2, T0.3, T0.4 — are bootstrap work, reco
 | T4.5 | **The panel follows more than one PC** | blocked | 2026-09-29, wave 35. ADR 0016. `PC_IP` is a list; the pin gets one `<domain>` per host; `PcHosts` (12 JVM tests) asks the last host that answered first and stops at the first 200; data and presses follow it. Built with two addresses and the generated pin inspected: two `<domain>`s, no `base-config`; a bad octet fails the build by name. **Half of it ran on the phone, 2026-09-29**: release build with both addresses installed over the old one (same key, settings kept); with the Windows PC off it logged `pc answered at <mac>`, `state=online`, `screen=wake`, `data=ok` within 20 s. Still blocked on the other half: the move *between* two live PCs, which needs the Windows PC on and a logout |
 | T4.6 | **The panel sleeps with the PC's display** | done | 2026-09-30, wave 39. Asked for the same day. [ADR 0020](../docs/adr/0020-the-panel-sleeps-with-the-display.md): `/ping` carries `display: on/off/unknown` and the phone sleeps on "off" — the PC decides when its monitor sleeps, so following it is invariant 3 applied, not a timeout. **"unknown" is the landing place for every failure**, and only the literal "off" darkens the panel. `PcState.IDLE` takes the offline path for the screen but keeps the 2 s cadence, and is dormant on battery. With two PCs a dark one does not end the cycle. **Measured:** macOS's reader on the owner's Mac, and the phone half on the Redmi (`state=idle` → `screen=sleep`, back on the next poll). **Not measured:** the Windows and GNOME readers, which are written from the vendors' docs and unit-tested on their decoding |
 | T4.7 | **A busy PC is not a logout** | done | 2026-10-01, wave 44. Reported from the chair: the panel blinked while Battlefield loaded. The server log showed the 2 s `/ping` cadence breaking into 4–8 s gaps, each followed by the reload burst of an offline-to-online edge, six in ninety seconds. Cause: the Scheduled Task had no `-Priority`, the default 7 is BELOW_NORMAL, and the game starved `/ping` past 1500 ms. Setting the process to Normal by hand stopped it. Now `install_task.ps1` registers priority 4, `verify_login_scope.py` fails anything outside 4–6 (the handwritten "good" fixture had 7), and a new real capture passes. On the phone, `PcState.ONLINE_GRACE_FAILURES = 1` rides out one failed probe while online. **Measured on Windows**: priority 4 read back, both processes at NORMAL. **Not measured**: the grace on the Redmi, which needs an APK this PC cannot build |
+| T4.8 | **The log names the PC it is on** | done | 2026-10-10, wave 46. Reported from the chair: with two PCs listed, the panel "não mudou pro servidor do Mac" and a restart appeared to fix it. The investigation could not say what happened, because the only lines that name a host or a reason are written once per *transition* — `pc answered at <ip>` and `probe failed:` — and the Redmi's `main` ring buffer is 256 KiB, which at one `ping=` every two seconds is **six minutes of history**. Every `ping=` line now carries `host=<ip>` or `hosts=<ip>:<reason>,…`, appended rather than folded into the marker so `MarkersTest`'s one-token rule and T5.2/T5.3/T5.6's prefix greps are untouched. `PcHosts.shortReason` is pure and bounded: `ConnectException` (nothing listening) and `SocketTimeoutException` (dropped, not refused — the `SERVER-SETUP.md` trap) are the two this episode could not tell apart. 8 new JVM tests, one of them sabotaged to prove it fails. **What it does not do is change any behaviour**: no defect was found in the following itself, and none was disproved either — see the wave note for what the evidence did and did not reach |
 | TT.5 | `PcState` extracted + JVM tests | done | 2026-09-16. `PcState.java` is plain Java — no Android imports, no clock read internally, no threads, no sleeps: every time-aware method takes `nowMs` as an argument, so T4.2 can drive it unmodified. It owns the state (`UNKNOWN`/`ONLINE`/`OFFLINE`, starting `UNKNOWN` so the first probe either way is a transition), the consecutive-failure count, `nextIntervalMs()` (2000 online; 2000/4000/8000 doubling, capped at 15000 offline, reset on first success), and `nextProbeAtMs()`/`isDue()` so `PcPoller` can keep no deadline of its own. It decides *that* a transition happened and returns it; emitting `state=online`/`state=offline` stays on the Android side (TT.6). 16 JUnit tests; both acceptance commands exit 0 and `./gradlew test` finishes in seconds. The suite was checked against 10 mutations of `PcState` — flapping, deaf, stuck, uncapped backoff, no reset, flat backoff, backoff one rung too fast, `isDue` off by one, deadline ignoring the backoff, failures uncounted — and every one turned it red |
 | TT.6 | Logcat markers | done | 2026-09-19. `Markers.java` holds the vocabulary — `state=`, `screen=`, `night=`, `tick=`, `ping=`, `data=`, `battery=` and the `DeskPanel` tag — and the grep that no marker string exists anywhere else under `main/java` exits 0. **It builds the strings and does not log them**, against the task file's step 2, because `android/CLAUDE.md` says anything worth testing lives in a class with no Android imports: a contract the E2E suite greps for is exactly that, and `MarkersTest` now asserts all eleven literally on the JVM, which a class holding `Log.i` could not offer. The property the acceptance enforces — one place per string — holds either way, and the two call sites that own a transition do the logging. Only `state=` and `screen=` have emitters today; the rest are the contract their own tasks will wire. **The acceptance's own ordering was wrong and is fixed**: it said kill the server, then `adb logcat -c`, and the app notices within one 2s poll, so the clear usually lands after the transition and wipes the marker being asserted on. It failed exactly that way here, with an empty log and an app that had done everything right — the same trap `am start` cost a session over. All three task files and `docs/TESTING.md` now clear the buffer before touching the PC |
 
@@ -209,6 +210,37 @@ for wave 38; T9.2 is still part of no wave.
 | T9.4 | **Nobody else on the Wi-Fi can read the panel** | done | 2026-09-30, wave 39. **Design 1 shipped, measured on the Redmi**: [the spike](../docs/spikes/2026-panel-tls.md), then [ADR 0018](../docs/adr/0018-the-panel-traffic-is-private.md). Data and presses on TLS port 8778 with `X-Panel-Key` (SHA-256 then `compare_digest`), 401 without it and 401 on the plain port even with it; `/ping` stays plain, because a certificate problem must never read as a logout; `/app` off by default. **The spike's real finding**: macOS's LibreSSL writes P-256 keys with explicit curve parameters and Android's BoringSSL answers every handshake with `decode_error` — `make_cert.py` passes `ec_param_enc:named_curve` and a test pins it. After that, TLS 1.3 at 4–8 ms a handshake, two a minute. **Off on the owner's desk for now**: the Windows PC has no certificate, and a private APK needs every listed PC private. **Not measured**: a packet capture from a third device, a press over TLS, Windows |
 | T9.5 | **A soft alert before a meeting** | done | 2026-09-30, wave 40. Asked for the same day. `agenda_soon_min` (5) and `agenda_chime_min` (1) in `config.toml` ride `agenda.alerts`; inside the first the AGENDA row gets a bell, the border pulses orange and a "!" sits on the title's line (made stronger twice from the chair), and inside the second one soft chime plays once per meeting, only while the panel is lit. The chime is synthesised by `scripts/make_chime.py` (CC0) and a theme can name its own file. **Measured on the Redmi** with a fake meeting: the visuals, and the app's AudioTrack playing a minute before |
 
+## Resuming after 2026-10-10 (wave 46)
+
+Wave 46 is **T4.8** on `wave/46-the-log-names-the-pc`, from a bug report rather than from the
+plan: with two PCs listed the panel did not move to the Mac, and nothing in the log could say
+why. Every `ping=` line now carries `host=<ip>` or `hosts=<ip>:<reason>,...`, so "which PC is
+the panel on, and what did the others answer" is on the per-cycle line instead of on a
+transition line that a 256 KiB ring buffer loses in six minutes. **No behaviour changed.** The
+second complaint in the same report was not a bug and the timestamps say so; the first is still
+unexplained, and T4.5 stays `blocked`. The note is `docs/harness-notes/2026-10-10-wave-46.md`.
+
+**Next: T4.5, the move between two live PCs, is what this wave exists to make legible.** The
+next time the panel is on one of two live PCs and the active one goes away, read the log before
+it ages out -- `adb logcat -b main -G 4M` first, and it is lost on the next reboot. Wave 45's
+"Next" is still open too (watch the Redmi's bar while the Mac's volume moves, then switch the
+Mac's output to another device and back), and so is wave 44's (build and install its APK for the
+`PcState` grace, then launch a game on Windows).
+
+### What is still only true on this desk
+
+- **The Redmi runs a build of this branch**, installed by hand to take the four device
+  acceptance lines, so it is ahead of `main` until this merges.
+- The Mac was off all session. Whether its agent was reachable from the phone during the 4h40m
+  the original report is about is the one fact that would settle it, and it is on the Mac.
+- The phone reports `USB powered: true` with the PC off, so this desk's panel is never dormant
+  (T5.6) -- the ladder, not the alarm, is what recovers it.
+- **`lint-commits` is green again**, and that was the second half of this session: `main`'s
+  lint job had been red since 2026-10-02 over `d5c4e95`, a web-editor commit that no
+  client-side hook could have seen. It is in `PUBLISHED_EXCEPTIONS` with that reason, and the
+  listing failure now says that a subject already on `main` cannot be rewritten. The path
+  itself stays open until `main` has a required status check, which is a repository setting.
+
 ## Resuming after 2026-10-09 (wave 45)
 
 Wave 45 is **T8.8** on `wave/45-mac-volume-stream`, on the Mac. The owner asked for it after a
@@ -226,8 +258,11 @@ the `PcState` grace, then launch a game on Windows.
 - The Mac's `server/mac/spectrum-tap` is rebuilt from this wave, and the agent has been restarted
   on it. Another Mac needs `install_agent.sh`, or the `swiftc` line, re-run.
 - The Mac still runs from `server/config.json` with `spectrum` and `volume` on.
-- `make check` fails at `lint-commits` on main's `d5c4e95` until it ages out of the last 30
-  subjects.
+- **`lint-commits` is green again**, and that was the second half of this session: `main`'s
+  lint job had been red since 2026-10-02 over `d5c4e95`, a web-editor commit that no
+  client-side hook could have seen. It is in `PUBLISHED_EXCEPTIONS` with that reason, and the
+  listing failure now says that a subject already on `main` cannot be rewritten. The path
+  itself stays open until `main` has a required status check, which is a repository setting.
 
 ## Resuming after 2026-10-01 (wave 44)
 

@@ -328,7 +328,18 @@ public final class PcPoller {
         // in deliver(), which fires on edges only, and after the staleness check
         // above so a straggler from a replaced generation cannot inflate the
         // count with polls that are no longer anybody's cadence.
-        Log.i(Markers.TAG, Markers.ping(failure != null ? "err" : cycle.idle ? "idle" : "ok"));
+        //
+        // The marker carries which PC it is about (T4.8). With one PC that was
+        // implied; with two it is the first thing anybody asks of a panel that
+        // is dark with a computer plainly on, and the transition line that used
+        // to be the only answer is hours gone by the time it is asked -- this
+        // device's main log is a 256 KiB ring and this loop writes to it every
+        // two seconds. The detail is appended rather than folded into the
+        // marker: Markers holds single tokens with no spaces in them, and the
+        // greps that count ping= lines match a prefix.
+        Log.i(Markers.TAG,
+                Markers.ping(failure != null ? "err" : cycle.idle ? "idle" : "ok")
+                        + " " + cycle.detail);
 
         // Posted on the difference from what was last *delivered*, not on
         // record()'s boolean. In the steady state the two agree and nothing is

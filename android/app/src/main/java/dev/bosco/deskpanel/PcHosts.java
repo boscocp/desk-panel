@@ -77,6 +77,13 @@ public final class PcHosts {
         boolean now();
     }
 
+    /**
+     * The longest short reason {@link #shortReason} will return. Long enough
+     * for {@code SSLHandshakeException}, short enough that a line carrying one
+     * per host stays a line.
+     */
+    private static final int MAX_REASON = 32;
+
     /** What one cycle found. */
     public static final class Cycle {
         /** Null if some host answered, else every host's failure, for the log. */
@@ -90,13 +97,78 @@ public final class PcHosts {
          * when no listed PC answered with its display on (ADR 0020).
          */
         public final boolean idle;
+        /**
+         * Which PC this cycle was about, for the heartbeat line: {@code
+         * host=<ip>} when one answered, {@code hosts=<ip>:<reason>,...} when
+         * none did (T4.8).
+         *
+         * <p>It rides the per-cycle {@code ping=} line rather than the
+         * per-transition one, because the question it answers — <em>which</em>
+         * of the listed PCs is the panel on, and what did the others say — is
+         * asked hours after the transition that would have answered it, and by
+         * then the transition line is gone: the device's {@code main} log is a
+         * 256 KiB ring and this panel writes to it every two seconds.
+         *
+         * <p>Never null and never contains a space, so it survives the greps
+         * that count {@code ping=} lines (T5.2, T5.3, T5.6).
+         */
+        public final String detail;
 
-        Cycle(String failure, boolean moved, String host, boolean idle) {
+        Cycle(String failure, boolean moved, String host, boolean idle, String detail) {
             this.failure = failure;
             this.moved = moved;
             this.host = host;
             this.idle = idle;
+            this.detail = detail;
         }
+    }
+
+    /**
+     * Pure: one probe failure, shortened to a single token for the heartbeat.
+     *
+     * <p>A probe failure is an exception's {@code toString()} — class, colon,
+     * and a sentence naming both addresses and the timeout, or the class on
+     * its own when the exception carries no message. Printed whole,
+     * once per offline cycle, two hosts of that would be most of the log. The
+     * class alone is what tells the failures apart that have to be told apart:
+     * {@code ConnectException} is a PC that is not listening, {@code
+     * SocketTimeoutException} is a firewall dropping rather than refusing
+     * (the trap in {@code docs/SERVER-SETUP.md}), {@code HTTP-401} is a key
+     * the panel does not have. The whole text still goes out once per
+     * transition, in {@code PcPoller.deliver}.
+     *
+     * @return a token with no whitespace in it, so the line stays greppable
+     */
+    public static String shortReason(String failure) {
+        if (failure == null || failure.isEmpty()) {
+            return "none";
+        }
+        String head = failure;
+        int colon = head.indexOf(':');
+        // A dotted prefix before the colon is a class name: drop the message.
+        // "HTTP 500" has no colon and stays whole.
+        if (colon > 0 && head.lastIndexOf('.', colon) > 0) {
+            head = head.substring(0, colon);
+        }
+        // Then the package, in a second step rather than inside the branch
+        // above: Throwable.toString() omits the colon entirely when the
+        // exception carries no message, and PcPoller.probe stores exactly that
+        // string ("toString(), not getMessage(), so a class with no message
+        // still says something"). Stripping only on the colon left those as
+        // "java.net.SocketTimeoutException" -- and anything longer, such as a
+        // bare SSLHandshakeException, chopped mid-word by MAX_REASON.
+        // Guarded so a head with a space ("HTTP 500") or a trailing dot is
+        // left alone: only a dotted, space-free token is a class name.
+        int dot = head.lastIndexOf('.');
+        if (dot > 0 && dot < head.length() - 1
+                && head.matches("\\S+") && head.indexOf(':') < 0) {
+            head = head.substring(dot + 1);
+        }
+        head = head.trim().replaceAll("\\s+", "-");
+        if (head.isEmpty()) {
+            return "none";
+        }
+        return head.length() > MAX_REASON ? head.substring(0, MAX_REASON) : head;
     }
 
     private final List<String> hosts;
@@ -173,6 +245,9 @@ public final class PcHosts {
      */
     public Cycle cycle(Prober prober, Stopped stopped) {
         StringBuilder failures = new StringBuilder();
+        // The same failures again, one token per host, for the line that is
+        // written every cycle rather than once per transition.
+        StringBuilder brief = new StringBuilder("hosts=");
         String idleHost = null;
         for (String host : probeOrder()) {
             if (stopped.now()) {
@@ -180,7 +255,7 @@ public final class PcHosts {
             }
             String failure = prober.probe(host);
             if (failure == null) {
-                return new Cycle(null, answered(host), host, false);
+                return new Cycle(null, answered(host), host, false, "host=" + host);
             }
             if (DISPLAY_OFF.equals(failure)) {
                 if (idleHost == null) {
@@ -190,14 +265,20 @@ public final class PcHosts {
             }
             if (failures.length() > 0) {
                 failures.append("; ");
+                brief.append(',');
             }
             failures.append(host).append(": ").append(failure);
+            brief.append(host).append(':').append(shortReason(failure));
         }
         if (idleHost != null) {
-            return new Cycle(null, answered(idleHost), idleHost, true);
+            // The idle host is named the same way an online one is: which PC
+            // the panel is on is the question, and a dark panel is when it is
+            // asked.
+            return new Cycle(null, answered(idleHost), idleHost, true, "host=" + idleHost);
         }
         return new Cycle(failures.length() > 0 ? failures.toString() : "not attempted",
-                false, null, false);
+                false, null, false,
+                failures.length() > 0 ? brief.toString() : "hosts=not-attempted");
     }
 
     /**

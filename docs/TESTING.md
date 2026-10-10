@@ -154,6 +154,12 @@ T4.7): a killed server reaches `state=offline` about 4s after the first refused 
 inside scenario 2's window. The 20s allowances exist because the offline backoff caps at 15s (T5.3). Tighter windows
 produce flaky failures that are not bugs.
 
+**Give the ring buffer room before a session that will need history.** `adb logcat -b main -G 4M`,
+which exits at once. The default on the Redmi is 256 KiB, shared with every other app, and this
+panel writes a `ping=` line every two seconds: **six minutes of history**, measured 2026-10-10
+while trying to explain a panel that had been dark since the day before. The size is lost on
+reboot, and `persist.logd.size` is refused to `shell` on this device, so it is a per-session step.
+
 **Clear the buffer before changing the PC's state, never after.** `adb logcat -c` followed by
 killing the server reads naturally and is a race: the app notices within one poll interval —
 2s while online — so the clear usually lands after the transition and wipes the marker the
@@ -171,6 +177,14 @@ them:
   the health: 2s while online, and 2/4/8/15/15 climbing to the cap while offline. A minute
   measured from the moment the PC goes away holds seven, a settled offline minute holds four.
   Give the ladder twenty seconds to finish climbing before asserting a count (T5.3).
+- **Each `ping=` line names the PC it was about** (T4.8), after the marker and separated from
+  it by a space: `ping=ok host=192.168.1.101` for the host that answered, and
+  `ping=err hosts=192.168.1.100:ConnectException,192.168.1.101:SocketTimeoutException` when none
+  did. The marker itself is still one token, so every assertion that matches `ping=` or
+  `ping=ok` as a prefix is unaffected; cut the field with `awk '{print $NF}'` rather than
+  matching the whole line. The two reasons worth telling apart are there on purpose:
+  `ConnectException` is nothing listening on the port, `SocketTimeoutException` is a firewall
+  dropping rather than refusing — the Linux trap `docs/SERVER-SETUP.md` ships no step for.
 - `dormant=on` is the log saying its own silence is deliberate (T5.6). Offline and on battery
   the app hands its schedule to `AlarmManager` and goes quiet for fifteen to twenty-six minutes
   at a time — the alarm is inexact and the platform widens it — so

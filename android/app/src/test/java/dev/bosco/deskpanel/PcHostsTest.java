@@ -178,6 +178,105 @@ public class PcHostsTest {
         assertTrue(cycle.moved);
     }
 
+    // T4.8: which PC the cycle was about, on the line that is written every
+    // cycle rather than once per transition.
+
+    @Test
+    public void theCycleNamesTheHostThatAnswered() {
+        PcHosts hosts = PcHosts.parse(WIN + "," + MAC);
+        PcHosts.Cycle cycle = hosts.cycle(answering(new ArrayList<>(), MAC), RUNNING);
+        assertEquals("host=" + MAC, cycle.detail);
+    }
+
+    @Test
+    public void aDarkPcIsNamedTheSameWayAnOnlineOneIs() {
+        PcHosts hosts = PcHosts.parse(WIN + "," + MAC);
+        PcHosts.Cycle cycle = hosts.cycle(
+                withDark(new ArrayList<>(), Arrays.<String>asList(), MAC), RUNNING);
+        assertEquals("host=" + MAC, cycle.detail);
+    }
+
+    @Test
+    public void noAnswerAnywhereNamesEveryHostAndWhyItFailed() {
+        PcHosts hosts = PcHosts.parse(WIN + "," + MAC);
+        PcHosts.Cycle cycle = hosts.cycle(host -> {
+            return WIN.equals(host)
+                    ? "java.net.ConnectException: failed to connect to the PC (port 8777)"
+                    : "HTTP 500";
+        }, RUNNING);
+        assertEquals("hosts=" + WIN + ":ConnectException," + MAC + ":HTTP-500", cycle.detail);
+    }
+
+    @Test
+    public void aCycleThatWasStoppedBeforeItDialledSaysSo() {
+        PcHosts hosts = PcHosts.parse(WIN + "," + MAC);
+        PcHosts.Cycle cycle = hosts.cycle(answering(new ArrayList<>()), () -> true);
+        assertEquals("hosts=not-attempted", cycle.detail);
+    }
+
+    /**
+     * The whole point of the detail is that it rides a line other assertions
+     * count by prefix and that the shell can cut on. A space in it would end
+     * the token early and could not be told from the next field.
+     */
+    @Test
+    public void theDetailIsAlwaysOneToken() {
+        PcHosts hosts = PcHosts.parse(WIN + "," + MAC);
+        for (PcHosts.Cycle cycle : Arrays.asList(
+                hosts.cycle(answering(new ArrayList<>(), MAC), RUNNING),
+                hosts.cycle(answering(new ArrayList<>()), RUNNING),
+                hosts.cycle(answering(new ArrayList<>()), () -> true),
+                hosts.cycle(withDark(new ArrayList<>(), Arrays.<String>asList(), MAC),
+                        RUNNING))) {
+            assertEquals(cycle.detail, cycle.detail.trim());
+            assertEquals(-1, cycle.detail.indexOf(' '));
+        }
+    }
+
+    @Test
+    public void aFailureShortensToWhatTellsFailuresApart() {
+        assertEquals("ConnectException", PcHosts.shortReason(
+                "java.net.ConnectException: failed to connect to the PC (port 8777)"
+                + " after 1500ms"));
+        assertEquals("SocketTimeoutException", PcHosts.shortReason(
+                "java.net.SocketTimeoutException: failed to connect after 1500ms"));
+        // toString() of an exception with no message is the class and nothing
+        // else -- no colon to cut on. PcPoller.probe stores that verbatim, so
+        // the package has to come off here too, or the two reasons this exists
+        // to tell apart arrive as packages and a long one is chopped mid-word.
+        assertEquals("SocketTimeoutException",
+                PcHosts.shortReason("java.net.SocketTimeoutException"));
+        assertEquals("SSLHandshakeException",
+                PcHosts.shortReason("javax.net.ssl.SSLHandshakeException"));
+        // The cleartext refusal, which is an IOException with the detail in
+        // its message: the class is what survives here, the message is in the
+        // per-transition "probe failed:" line.
+        assertEquals("IOException", PcHosts.shortReason(
+                "java.io.IOException: Cleartext HTTP traffic to the PC not permitted"));
+        // No dotted prefix: kept whole, with the space closed up.
+        assertEquals("HTTP-401", PcHosts.shortReason("HTTP 401"));
+        assertEquals("not-attempted", PcHosts.shortReason("not attempted"));
+        assertEquals("none", PcHosts.shortReason(null));
+        assertEquals("none", PcHosts.shortReason(""));
+    }
+
+    @Test
+    public void aShortReasonIsAlwaysOneBoundedToken() {
+        String[] failures = {
+            "java.net.ConnectException: nope", "HTTP 500", "not attempted", "", null,
+            "a very long failure with no colon in it at all repeated over and over again",
+            ":", "...:", "   ", "java.net.ConnectException", ".", "a.",
+            "org.example.a.very.deeply.nested.package.WithAnExceptionNameOnTheEnd",
+        };
+        for (String failure : failures) {
+            String reason = PcHosts.shortReason(failure);
+            assertEquals(reason, reason.trim());
+            assertEquals(-1, reason.indexOf(' '));
+            assertFalse(reason.isEmpty());
+            assertTrue(reason.length() <= 32);
+        }
+    }
+
     @Test
     public void onlyTheLiteralOffIsDisplayOff() {
         assertTrue(PcHosts.displayOff("{\"ok\": true, \"display\": \"off\"}"));

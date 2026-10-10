@@ -143,6 +143,16 @@ def check_message(lines):
 # The listing only. A new commit is checked by `check_subject` through the
 # commit-msg hook, and this table does not reach it: the same subject written
 # again is refused.
+#
+# Two ways a subject gets here, and they are different failures. A squash
+# merge is the hook running on a subject that was not the one committed:
+# GitHub writes the PR's title and appends " (#NN)" after every check that
+# could have seen it. **The web UI is the hook not running at all** --
+# `.githooks/commit-msg` is a client-side hook on a developer's machine, and
+# a commit written in the browser is made on GitHub's side, where nothing in
+# this repository executes. Nothing in a hook can close that; the gate that
+# can is a required status check on `main`, which is a repository setting and
+# not code.
 PUBLISHED_EXCEPTIONS = {
     'feat(web): AGENDA do neon com até três eventos e o título do segundo inteiro (#63)':
         "squash-merged as #63 on 2026-09-30 with the PR's title, which is 82 characters; "
@@ -150,6 +160,11 @@ PUBLISHED_EXCEPTIONS = {
     'feat: alerta de reunião, barra de volume do PC e umidade no TEMPO (wave 40) (#66)':
         "squash-merged as #66 on 2026-09-30; the PR title was 74 characters and GitHub's "
         "' (#66)' took it to 81, after every check that could have seen it",
+    'Remove panel image from README':
+        "committed through GitHub's web editor on 2026-10-02 (committer GitHub "
+        "<noreply@github.com>), which runs no client-side hook, so nothing checked the "
+        "shape until CI read it back off `main` -- red on `main` and on every branch cut "
+        "from it since",
 }
 
 
@@ -217,6 +232,16 @@ def _self_test():
     ok("a published exception is skipped in the listing", check_subjects([published]) == [])
     ok("a published exception is still refused as a new commit", check_subject(published) != [])
     ok("an exception is exact, not a prefix", check_subjects([published + " more"]) != [])
+    # Over the whole table rather than its first entry, so a new one is
+    # covered by being added. The second is what keeps the table from growing
+    # a subject that never needed to be in it -- an entry that would pass on
+    # its own is a rule quietly switched off for one line of history.
+    ok("every published exception is skipped in the listing",
+       check_subjects(list(PUBLISHED_EXCEPTIONS)) == [])
+    ok("every published exception is a subject that would otherwise fail",
+       all(check_subject(subject) != [] for subject in PUBLISHED_EXCEPTIONS))
+    ok("every published exception says why it stays",
+       all(why.strip() for why in PUBLISHED_EXCEPTIONS.values()))
 
     print(f"\ncheck_commit_msg --self-test: {len(failures)} failure(s)")
     return 1 if failures else 0
@@ -260,6 +285,14 @@ def main(argv):
             print(f"  {line}", file=sys.stderr)
         print("\n  See CONTRIBUTING.md. The rules are about shape, not about what you wrote.",
               file=sys.stderr)
+        if what == "subject(s)":
+            # The listing reads history, so a problem here may be a commit
+            # nobody can edit any more -- and then the fix is the table, not
+            # the message. Saying so costs a line and saved none the day a
+            # web-UI commit turned `main` red: the shape of the failure is
+            # identical to a bad commit somebody is about to make.
+            print("  A subject already on `main` cannot be rewritten: add it to "
+                  "PUBLISHED_EXCEPTIONS\n  in this file, with why it stays.", file=sys.stderr)
         return 1
     return 0
 
