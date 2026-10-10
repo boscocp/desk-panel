@@ -231,6 +231,10 @@ Mac's output to another device and back), and so is wave 44's (build and install
 
 - **The Redmi runs a build of this branch**, installed by hand to take the four device
   acceptance lines, so it is ahead of `main` until this merges.
+- **`main` was unprotected until this session**, though a ruleset said otherwise: it was active
+  with every rule worth having and targeted no ref, so `rules/branches/main` answered `[]`. It
+  now targets `~DEFAULT_BRANCH` with the six CI jobs required, and bypass is the `admin` role --
+  the owner today, and anyone given admin later.
 - The Mac was off all session. Whether its agent was reachable from the phone during the 4h40m
   the original report is about is the one fact that would settle it, and it is on the Mac.
 - The phone reports `USB powered: true` with the PC off, so this desk's panel is never dormant
