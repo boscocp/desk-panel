@@ -127,7 +127,8 @@ public final class PcHosts {
      * Pure: one probe failure, shortened to a single token for the heartbeat.
      *
      * <p>A probe failure is an exception's {@code toString()} — class, colon,
-     * and a sentence naming both addresses and the timeout. Printed whole,
+     * and a sentence naming both addresses and the timeout, or the class on
+     * its own when the exception carries no message. Printed whole,
      * once per offline cycle, two hosts of that would be most of the log. The
      * class alone is what tells the failures apart that have to be told apart:
      * {@code ConnectException} is a PC that is not listening, {@code
@@ -144,11 +145,24 @@ public final class PcHosts {
         }
         String head = failure;
         int colon = head.indexOf(':');
-        // A dotted prefix before the colon is a class name: keep its last
-        // segment and drop the message. "HTTP 500" has no colon and stays.
+        // A dotted prefix before the colon is a class name: drop the message.
+        // "HTTP 500" has no colon and stays whole.
         if (colon > 0 && head.lastIndexOf('.', colon) > 0) {
             head = head.substring(0, colon);
-            head = head.substring(head.lastIndexOf('.') + 1);
+        }
+        // Then the package, in a second step rather than inside the branch
+        // above: Throwable.toString() omits the colon entirely when the
+        // exception carries no message, and PcPoller.probe stores exactly that
+        // string ("toString(), not getMessage(), so a class with no message
+        // still says something"). Stripping only on the colon left those as
+        // "java.net.SocketTimeoutException" -- and anything longer, such as a
+        // bare SSLHandshakeException, chopped mid-word by MAX_REASON.
+        // Guarded so a head with a space ("HTTP 500") or a trailing dot is
+        // left alone: only a dotted, space-free token is a class name.
+        int dot = head.lastIndexOf('.');
+        if (dot > 0 && dot < head.length() - 1
+                && head.matches("\\S+") && head.indexOf(':') < 0) {
+            head = head.substring(dot + 1);
         }
         head = head.trim().replaceAll("\\s+", "-");
         if (head.isEmpty()) {

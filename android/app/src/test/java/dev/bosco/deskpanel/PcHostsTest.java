@@ -240,6 +240,14 @@ public class PcHostsTest {
                 + " after 1500ms"));
         assertEquals("SocketTimeoutException", PcHosts.shortReason(
                 "java.net.SocketTimeoutException: failed to connect after 1500ms"));
+        // toString() of an exception with no message is the class and nothing
+        // else -- no colon to cut on. PcPoller.probe stores that verbatim, so
+        // the package has to come off here too, or the two reasons this exists
+        // to tell apart arrive as packages and a long one is chopped mid-word.
+        assertEquals("SocketTimeoutException",
+                PcHosts.shortReason("java.net.SocketTimeoutException"));
+        assertEquals("SSLHandshakeException",
+                PcHosts.shortReason("javax.net.ssl.SSLHandshakeException"));
         // The cleartext refusal, which is an IOException with the detail in
         // its message: the class is what survives here, the message is in the
         // per-transition "probe failed:" line.
@@ -257,7 +265,8 @@ public class PcHostsTest {
         String[] failures = {
             "java.net.ConnectException: nope", "HTTP 500", "not attempted", "", null,
             "a very long failure with no colon in it at all repeated over and over again",
-            ":", "...:", "   ",
+            ":", "...:", "   ", "java.net.ConnectException", ".", "a.",
+            "org.example.a.very.deeply.nested.package.WithAnExceptionNameOnTheEnd",
         };
         for (String failure : failures) {
             String reason = PcHosts.shortReason(failure);
