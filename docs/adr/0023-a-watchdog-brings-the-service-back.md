@@ -33,6 +33,13 @@ kill.
   the allowlist, Android 12 refuses a foreground service started from the background.
 - **`onDestroy` cancels it.** A deliberate stop, when the panel finishes, reaches
   `onDestroy`. A kill does not. That difference is what the watchdog relies on.
+- **The app holds `SYSTEM_ALERT_WINDOW`**, granted by hand like the MIUI app-ops. A kill like
+  this one also removes the panel's task. A revived service that sees the PC come up then has
+  nothing to raise, and Android 12 refused the fresh `startActivity`. It was measured at 14:03:
+  `Abort background activity starts`, `inVisibleTask: false`, `callingUidProcState:
+  FOREGROUND_SERVICE`, with `state=online` logged and the screen dark. A foreground service is
+  not an exemption from background activity starts. "Display over other apps" is the documented
+  one, and nothing is drawn with it.
 - A revival logs `service revived by watchdog`, plain text and not a marker, because no state
   changed.
 
