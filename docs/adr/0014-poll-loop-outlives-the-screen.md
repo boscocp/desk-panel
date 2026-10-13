@@ -3,6 +3,8 @@
 Status: accepted · 2026-09-19 · power-aware branch written and measured 2026-09-19 (T5.6)
 Amends [ADR 0005](0005-real-screen-sleep.md), which describes the screen policy and says
 nothing about who stays awake to enforce it.
+Amended by [ADR 0023](0023-a-watchdog-brings-the-service-back.md): `START_STICKY` does not survive
+a WebView update, and a watchdog alarm does.
 
 ## Context
 

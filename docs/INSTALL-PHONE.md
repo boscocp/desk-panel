@@ -70,6 +70,13 @@ will look like a bug in the code.
    else looks perfect: `state=online` and `screen=wake` are both logged, and the screen stays
    dark. Measured on the device, 2026-09-19.
 
+   **Display over other apps** as well, from Settings → Apps → desk-panel → Other permissions,
+   or `adb shell appops set dev.bosco.deskpanel SYSTEM_ALERT_WINDOW allow`. Unlike the two
+   above, this one is AOSP's. It lets a service that the watchdog revived
+   ([ADR 0023](adr/0023-a-watchdog-brings-the-service-back.md)) open the panel when no task is
+   left to raise. Without it, Android 12 logs `Abort background activity starts` and the panel
+   stays dark with `state=online` logged and no `screen=wake`. Measured 2026-10-13.
+
 5. **Stay awake OFF** — Developer options → **Stay awake** must be **off**. This one *is*
    Android's, and [PHONE-SETUP.md](PHONE-SETUP.md#developer-options-and-adb-over-wi-fi) says why
    it matters. It is on by default on a phone that has been used for development.
@@ -118,6 +125,7 @@ the UI or from the host:
 ```bash
 adb shell appops set dev.bosco.deskpanel 10020 allow   # Show on Lock screen
 adb shell appops set dev.bosco.deskpanel 10008 allow   # background pop-up
+adb shell appops set dev.bosco.deskpanel SYSTEM_ALERT_WINDOW allow   # display over other apps
 adb shell appops get dev.bosco.deskpanel | grep MIUIOP
 ```
 

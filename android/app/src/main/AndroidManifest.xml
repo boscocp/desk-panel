@@ -24,6 +24,15 @@
          notification and the system eventually loses the service. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- "Display over other apps", granted by hand (INSTALL-PHONE step 4). It is
+         the documented exemption from Android 12's background activity start
+         restrictions, and nothing draws over anything with it. Without it a
+         service revived by the watchdog (ADR 0023) after a kill that removed the
+         panel's task sees the PC come up and cannot bring the panel back:
+         measured 2026-10-13, "Abort background activity starts", inVisibleTask
+         false. MIUI's own background pop-up op (10008) is not enough. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
     <application
         android:label="Desk Panel"
         android:allowBackup="false"

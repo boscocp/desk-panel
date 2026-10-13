@@ -172,6 +172,25 @@ public final class PanelService extends Service implements PcPoller.Listener {
     private static final String ACTION_DORMANT_PROBE = "dev.bosco.deskpanel.DORMANT_PROBE";
 
     /**
+     * The watchdog's start command (T4.10, ADR 0023). Addressed to this service
+     * by class, not broadcast: the point of it is to arrive when there is no
+     * process, and so no registered receiver, to hear a broadcast.
+     */
+    private static final String ACTION_WATCHDOG = "dev.bosco.deskpanel.WATCHDOG";
+
+    /**
+     * How often the watchdog asks for the service. A WebView update kills this
+     * app as a dependent, the kill does not allow a restart, so {@code
+     * START_STICKY} does nothing -- measured 2026-10-13, and reproduced with
+     * {@code am force-stop com.google.android.webview}. The panel is then back
+     * at most this long after such a kill. Fifteen minutes, like the dormant
+     * alarm: an inexact allow-while-idle alarm is spaced out by the platform in
+     * Doze anyway, and while the service is alive each firing is one redundant
+     * start command.
+     */
+    private static final long WATCHDOG_MS = 15 * 60 * 1000L;
+
+    /**
      * How long to hold the CPU for one dormant probe, as a timeout rather than
      * a matching release.
      *
@@ -396,6 +415,9 @@ public final class PanelService extends Service implements PcPoller.Listener {
     /** Keeps the sparse offline probe's time while this process is asleep (T5.6). */
     private AlarmManager alarms;
 
+    /** True from onCreate until the first start command: says a start revived us. */
+    private boolean fresh;
+
     /**
      * Registers the Activity that owns the window, and immediately replays the
      * current PC state to it if one is known. See {@link #lastOnline} for why a
@@ -452,6 +474,7 @@ public final class PanelService extends Service implements PcPoller.Listener {
         createNotificationChannel();
 
         alarms = getSystemService(AlarmManager.class);
+        fresh = true;
 
         // Reset, because the poller this service is about to build starts from
         // UNKNOWN and is therefore not dormant. The flag is static so that it
@@ -849,9 +872,20 @@ public final class PanelService extends Service implements PcPoller.Listener {
                 buildNotification(),
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
 
+        if (fresh && intent != null && ACTION_WATCHDOG.equals(intent.getAction())) {
+            // Plain text, like "pc answered at": no state changed, but this is
+            // the one line that says the panel was dead and came back.
+            Log.i(Markers.TAG, "service revived by watchdog");
+        }
+        fresh = false;
+
         // start() is idempotent, so a redelivered or repeated command cannot
         // leave two loops running.
         poller.start();
+
+        // Re-armed on every start command, its own firings included, which is
+        // what makes a one-shot alarm a chain.
+        armWatchdog();
 
         // START_STICKY: if MIUI kills the process anyway, the panel should come
         // back watching rather than stay dark with the PC on. The intent is
@@ -870,6 +904,10 @@ public final class PanelService extends Service implements PcPoller.Listener {
         // was arming a probe for would wake the phone every fifteen minutes to
         // deliver a broadcast nothing is listening to.
         cancelDormantAlarm();
+        // A deliberate stop -- the panel finishing -- reaches here, and must
+        // not be undone fifteen minutes later. A kill does not reach here,
+        // which is the whole distinction the watchdog rests on (ADR 0023).
+        alarms.cancel(watchdogIntent());
         releaseOfflineWakeLock();
         releaseProbeWakeLock();
         instance = null;
@@ -1064,6 +1102,29 @@ public final class PanelService extends Service implements PcPoller.Listener {
                 AlarmManager.ELAPSED_REALTIME_WAKEUP,
                 SystemClock.elapsedRealtime() + PcState.DORMANT_ALARM_MS,
                 dormantProbeIntent());
+    }
+
+    /**
+     * Books the next watchdog start (T4.10). The same alarm call as the dormant
+     * probe, for the same reasons; what differs is the target, a foreground
+     * service start rather than a broadcast, so it needs no process to land
+     * in. Starting a foreground service from the background is allowed here
+     * because the app is on the battery-optimisation allowlist, which
+     * INSTALL-PHONE.md step 6 sets and checks after every install.
+     */
+    private void armWatchdog() {
+        alarms.setAndAllowWhileIdle(
+                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                SystemClock.elapsedRealtime() + WATCHDOG_MS,
+                watchdogIntent());
+    }
+
+    private PendingIntent watchdogIntent() {
+        return PendingIntent.getForegroundService(
+                this,
+                1,
+                new Intent(this, PanelService.class).setAction(ACTION_WATCHDOG),
+                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
     }
 
     private void cancelDormantAlarm() {
