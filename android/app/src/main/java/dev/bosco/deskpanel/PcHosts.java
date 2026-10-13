@@ -19,9 +19,14 @@ import org.json.JSONObject;
  *
  * <p>The host that answered last is asked first, and is the one data and
  * actions go to. That is what keeps the cost of a second PC near zero while one
- * is up — one probe per cycle, the same as before — and what stops the panel
- * flapping between two PCs that are both on: it moves only when the one it is
- * on stops answering.
+ * is up — one probe per cycle, the same as before.
+ *
+ * <p>The list is also a priority order (ADR 0022): the first host listed is the
+ * PC, and it wins whenever somebody is at it. While the panel is on a lower
+ * host, every {@link #PRIORITY_EVERY}th cycle asks in listed order instead, so
+ * the PC takes over within a few cycles of answering with its display on. Not
+ * every cycle: a PC that is off does not refuse, it times out, and paying that
+ * on every cycle spent on the Mac would nearly double the cycle.
  *
  * <p>Plain Java, no Android imports, so {@code ./gradlew test} covers it. The
  * active host is read by the data poller's thread and written by the PC
@@ -37,6 +42,15 @@ public final class PcHosts {
      * build enforces the same number (found by review).
      */
     public static final int MAX_HOSTS = 3;
+
+    /**
+     * While the panel is not on the first listed host, one cycle in this many
+     * asks the hosts in listed order (ADR 0022). At the 2 s online interval
+     * that is about every 10 s, and it costs one connect timeout -- 1.5 s,
+     * measured against a PC that was off -- once in five cycles rather than
+     * on every one.
+     */
+    public static final int PRIORITY_EVERY = 5;
 
     /**
      * What a prober returns for a PC that answered and said its display is off
@@ -175,6 +189,14 @@ public final class PcHosts {
 
     private volatile String active;
 
+    /**
+     * Cycles since the last one asked in listed order. Touched only inside
+     * {@link #cycle}, which one poller thread calls at a time -- except a
+     * straggler from a stopped generation, still blocked in a probe, hence
+     * volatile. A lost increment costs one priority cycle early or late.
+     */
+    private volatile int sincePriority;
+
     private PcHosts(List<String> hosts) {
         this.hosts = Collections.unmodifiableList(hosts);
         this.active = hosts.get(0);
@@ -233,10 +255,33 @@ public final class PcHosts {
     }
 
     /**
+     * Whether this cycle asks in listed order rather than active-first: never
+     * while the active host is the first listed, since the two orders are then
+     * the same, and otherwise once every {@link #PRIORITY_EVERY} cycles.
+     */
+    private boolean byPriority() {
+        if (active.equals(hosts.get(0))) {
+            sincePriority = 0;
+            return false;
+        }
+        if (++sincePriority < PRIORITY_EVERY) {
+            return false;
+        }
+        sincePriority = 0;
+        return true;
+    }
+
+    /**
      * One poll cycle: each host in {@link #probeOrder()}, stopping at the first
      * that answers with its display on and making it the active one. The loop
      * lives here rather than in {@code PcPoller} so the order and the move are
      * covered on the JVM; the poller only supplies the socket.
+     *
+     * <p>One cycle in {@link #PRIORITY_EVERY}, while the panel is on a lower
+     * host, asks in listed order instead, which is how the first listed PC
+     * takes the panel back (ADR 0022). A PC that answers dark does not end the
+     * cycle, so a host further down with its display on still wins; only when
+     * every host that answers is dark does the first dark one found take it.
      *
      * <p>A PC that answers with its display off does not end the cycle: another
      * listed PC may have somebody at it, and that one should win (ADR 0020).
@@ -249,7 +294,7 @@ public final class PcHosts {
         // written every cycle rather than once per transition.
         StringBuilder brief = new StringBuilder("hosts=");
         String idleHost = null;
-        for (String host : probeOrder()) {
+        for (String host : byPriority() ? hosts : probeOrder()) {
             if (stopped.now()) {
                 break;
             }

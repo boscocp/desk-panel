@@ -4,7 +4,8 @@ Status: accepted · 2026-09-29 (T4.5)
 Amends [ADR 0004](0004-server-is-login-signal-and-proxy.md) and
 [ADR 0013](0013-local-configuration-boundaries.md), which assume exactly one PC and one
 `PC_IP`. Amended by [ADR 0020](0020-the-panel-sleeps-with-the-display.md): a host that answers
-with its display off does not end a cycle.
+with its display off does not end a cycle. Amended by
+[ADR 0022](0022-the-first-pc-comes-first.md): the first listed host takes the panel back.
 
 ## Context
 
@@ -27,7 +28,8 @@ extended from one desk chair to two.
   is still no `base-config` and no manifest-wide flag. The pin widens by exactly the hosts
   listed and no further.
 - **Online means some host answered.** `PcHosts` (plain Java, JVM-tested) keeps the list and the
-  host that answered last. Each cycle asks that host first and stops at the first 200. While a PC
+  host that answered last. Each cycle asks that host first and stops at the first 200 (since
+  ADR 0022, one cycle in five on a lower host asks in listed order instead). While a PC
   is up, a cycle is one probe, as before. Offline, a cycle asks every host, so its worst case is
   N × 3 s. N is capped at 3, by the build and by `PcHosts`, because the dormant probe runs
   under a 10 s wake lock.
@@ -36,7 +38,7 @@ extended from one desk chair to two.
   `server/config.toml`, and when the panel moves between PCs, what it shows moves too, at the
   next data refresh, up to a minute later. Until then, a button drawn from the old PC's payload
   acts on the new PC.
-- **No flapping.** With both PCs on, the panel stays on the one it has until that one stops
+- **No flapping.** *(Superseded by ADR 0022: the first listed PC now takes the panel back.)* With both PCs on, the panel stays on the one it has until that one stops
   answering. A move is logged as plain text (`pc answered at <ip>`), not as a marker, because
   the state did not change.
 

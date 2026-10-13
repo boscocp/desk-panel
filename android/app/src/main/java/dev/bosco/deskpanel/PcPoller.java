@@ -99,7 +99,10 @@ public final class PcPoller {
     /**
      * The PCs to ask, and which one answered last (ADR 0016). One cycle asks
      * the active host first and stops at the first 200, so while a PC is up a
-     * cycle costs one probe however many are listed. Offline, a cycle asks
+     * cycle costs one probe however many are listed -- except one cycle in
+     * {@link PcHosts#PRIORITY_EVERY} while the panel is on a lower host,
+     * which asks the first listed PC first so it can take the panel back
+     * (ADR 0022). Offline, a cycle asks
      * every host in turn, and its worst case is that many times 3000 ms --
      * {@link #TIMEOUT_MS} twice, connect and read -- which is why
      * {@link PcHosts#MAX_HOSTS} exists and why the {@link #generation} guard

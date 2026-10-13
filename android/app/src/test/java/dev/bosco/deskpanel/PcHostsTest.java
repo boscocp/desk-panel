@@ -130,6 +130,101 @@ public class PcHostsTest {
         assertThrows(UnsupportedOperationException.class, () -> hosts.all().add("pc-unlisted"));
     }
 
+    // --- the first listed PC comes first (ADR 0022) ------------------------
+
+    /** Runs {@code n} cycles against {@code prober} and returns the last. */
+    private static PcHosts.Cycle cycles(PcHosts hosts, int n, PcHosts.Prober prober) {
+        PcHosts.Cycle last = null;
+        for (int i = 0; i < n; i++) {
+            last = hosts.cycle(prober, RUNNING);
+        }
+        return last;
+    }
+
+    @Test
+    public void theFirstListedPcTakesThePanelBackOnAPriorityCycle() {
+        PcHosts hosts = PcHosts.parse(WIN + "," + MAC);
+        hosts.answered(MAC);
+        List<String> dialled = new ArrayList<>();
+        PcHosts.Prober bothUp = answering(dialled, WIN, MAC);
+        cycles(hosts, PcHosts.PRIORITY_EVERY - 1, bothUp);
+        assertEquals(MAC, hosts.active());
+        PcHosts.Cycle cycle = hosts.cycle(bothUp, RUNNING);
+        assertTrue(cycle.moved);
+        assertEquals(WIN, hosts.active());
+    }
+
+    @Test
+    public void onlyOneCycleInPriorityEveryPaysForAPcThatIsOff() {
+        PcHosts hosts = PcHosts.parse(WIN + "," + MAC);
+        hosts.answered(MAC);
+        List<String> dialled = new ArrayList<>();
+        cycles(hosts, PcHosts.PRIORITY_EVERY * 3, answering(dialled, MAC));
+        assertEquals(3, dialled.stream().filter(WIN::equals).count());
+        assertEquals(MAC, hosts.active());
+    }
+
+    @Test
+    public void aDarkFirstPcLeavesThePanelOnTheOneInUse() {
+        PcHosts hosts = PcHosts.parse(WIN + "," + MAC);
+        hosts.answered(MAC);
+        PcHosts.Cycle cycle = cycles(hosts, PcHosts.PRIORITY_EVERY * 2,
+                withDark(new ArrayList<>(), Arrays.asList(MAC), WIN));
+        assertFalse(cycle.idle);
+        assertEquals(MAC, hosts.active());
+    }
+
+    @Test
+    public void onTheFirstListedPcEveryCycleIsOneProbe() {
+        PcHosts hosts = PcHosts.parse(WIN + "," + MAC);
+        List<String> dialled = new ArrayList<>();
+        cycles(hosts, PcHosts.PRIORITY_EVERY * 2, answering(dialled, WIN, MAC));
+        assertEquals(PcHosts.PRIORITY_EVERY * 2, dialled.size());
+        assertFalse(dialled.contains(MAC));
+    }
+
+    @Test
+    public void twoDarkPcsSettleOnTheFirstListedAndStay() {
+        PcHosts hosts = PcHosts.parse(WIN + "," + MAC);
+        hosts.answered(MAC);
+        PcHosts.Prober bothDark = withDark(new ArrayList<>(), Arrays.<String>asList(), WIN, MAC);
+        int moves = 0;
+        for (int i = 0; i < PcHosts.PRIORITY_EVERY * 4; i++) {
+            PcHosts.Cycle cycle = hosts.cycle(bothDark, RUNNING);
+            assertTrue(cycle.idle);
+            moves += cycle.moved ? 1 : 0;
+        }
+        assertEquals(1, moves);
+        assertEquals(WIN, hosts.active());
+    }
+
+    @Test
+    public void afterFallingOverTheFirstPcWaitsAFullRoundBeforeItIsAskedFirst() {
+        PcHosts hosts = PcHosts.parse(WIN + "," + MAC);
+        hosts.answered(MAC);
+        List<String> dialled = new ArrayList<>();
+        cycles(hosts, 2, answering(dialled, MAC));
+        // The Mac goes and the PC answers on an ordinary cycle, mid-count.
+        hosts.cycle(answering(dialled, WIN), RUNNING);
+        hosts.cycle(answering(dialled, WIN), RUNNING);
+        assertEquals(WIN, hosts.active());
+        // Then the PC goes and the Mac is back: the count starts again.
+        hosts.cycle(answering(dialled, MAC), RUNNING);
+        assertEquals(MAC, hosts.active());
+        dialled.clear();
+        cycles(hosts, PcHosts.PRIORITY_EVERY - 1, answering(dialled, WIN, MAC));
+        assertEquals(MAC, hosts.active());
+        assertFalse(dialled.contains(WIN));
+    }
+
+    @Test
+    public void whenTheFirstPcGoesThePanelStillMovesOnTheNextCycle() {
+        PcHosts hosts = PcHosts.parse(WIN + "," + MAC);
+        PcHosts.Cycle cycle = hosts.cycle(answering(new ArrayList<>(), MAC), RUNNING);
+        assertTrue(cycle.moved);
+        assertEquals(MAC, hosts.active());
+    }
+
     // --- the display (ADR 0020) --------------------------------------------
 
     /** Answers as {@code answering} does, but idle for the hosts in {@code dark}. */

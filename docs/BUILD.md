@@ -78,7 +78,10 @@ the project works that way, and that is exactly why the address is here and not 
 
 **More than one PC** is a comma-separated list, `PC_IP=192.168.15.3,192.168.15.7`
 ([ADR 0016](adr/0016-more-than-one-pc.md)). Each address gets its own `<domain>` in the pin. The
-panel is online while any of them answers, and it takes data from whichever one answered last.
+panel is online while any of them answers, and it takes data from the one it is on.
+The order is the priority: the first address listed takes the panel back within about 10 s of
+answering with its display on, and the others are where it goes while that one is away
+([ADR 0022](adr/0022-the-first-pc-comes-first.md)).
 Every one of them needs its own reservation.
 
 The committed `res/xml/network_security_config.xml` keeps the placeholder `192.168.1.100`.
