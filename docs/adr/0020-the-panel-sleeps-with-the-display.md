@@ -3,7 +3,8 @@
 Status: accepted · 2026-09-30 (T4.6)
 Amends [ADR 0004](0004-server-is-login-signal-and-proxy.md), which made "the server answers" the
 whole signal, and [ADR 0016](0016-more-than-one-pc.md), whose "online means some host answered"
-now reads "some host answered with its display on".
+now reads "some host answered with its display on". Amended by
+[ADR 0022](0022-the-first-pc-comes-first.md) on which dark PC two dark PCs settle on.
 
 ## Context
 
@@ -54,6 +55,8 @@ ADR 0010 forbids is wrong.
 - **With more than one PC, a dark PC does not end the cycle.** Another listed PC may have
   somebody at it, and that one wins. The cycle is idle only when no PC answers with its display
   on, and it stays on the active PC if that one is idle, so two dark PCs do not flap either.
+  *(Since ADR 0022, a priority cycle finds the first listed PC first, so two dark PCs settle on
+  that one, once, and stay there.)*
 - **`follow_display = false`** in `config.toml` turns it off, per PC. The server then answers
   `"unknown"`.
 
