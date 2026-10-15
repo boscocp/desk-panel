@@ -123,6 +123,60 @@ or not. Open an issue and pick the **Device report** form ([its questions](.gith
 [CONTRIBUTING.md](CONTRIBUTING.md) says what else the project accepts, and
 [SECURITY.md](SECURITY.md) how to report anything private.
 
+## Troubleshooting
+
+### The panel stays black although a PC is on
+
+Restarting the app does not help, and the phone's log repeats one line for every PC:
+
+```
+ping=err hosts=<pc-ip>:SocketTimeoutException,<pc-ip>:SocketTimeoutException
+```
+
+The app is behaving correctly: it cannot reach any PC, so it reports offline and lets the screen
+sleep. Before suspecting the code, check the network.
+
+1. **Is the server answering?** On the PC, `curl http://localhost:8777/ping` should return
+   `{"ok": true, ...}`. If it does, the server is fine and the problem is between the phone and
+   the PC.
+2. **Is the phone polling it?** The server logs every request with the caller's address (on macOS
+   in `~/Library/Logs/desk-panel.log`). If the phone's requests stopped at some moment and never
+   came back, the phone lost its way to the PC at that moment.
+3. **Is the phone on the same network as the PC?** Compare the phone's address
+   (`adb shell ip -4 addr show wlan0`, or Wi-Fi → network details) with the PC's. A different
+   subnet is the answer, even when both show the same Wi-Fi name.
+
+**Same Wi-Fi name, different subnet.** A mesh router can hand a device an address on a separate,
+isolated subnet — a guest or IoT network — while it shows the same Wi-Fi name. A device there
+reaches the internet and the router itself, but not the PCs on the main LAN. It can happen after
+any Wi-Fi reconnection, with nothing changed on your side; this is what "it worked yesterday and
+I changed nothing" usually means.
+
+- **Fix now:** turn the phone's Wi-Fi off and on, check that it got an address on the PC's
+  subnet, and reopen the app.
+- **Prevent it:** in the router's LAN / DHCP settings, add a static IP binding (DHCP reservation)
+  for the phone *and* for every PC in `PC_IP`. Bind by the MAC address each device uses on that
+  network. Turn off any guest or IoT network you do not use, so there is nowhere else to land.
+- **Do not** type the address into the router's *Internet* / WAN page. That page sets how the
+  router itself reaches the internet; a LAN address there cuts the connection for everyone.
+
+**Private (randomized) MAC addresses.** A reservation only holds while the MAC stays the same.
+Android keeps one random MAC per saved network, which is stable until you forget and re-add the
+network; Wi-Fi → network → Privacy → *Use device MAC* makes it permanent. On macOS, set
+*Private Wi-Fi address* to **Fixed** or **Off** for that network — **Rotating** breaks the
+reservation. A PC on a cable keeps its real MAC under Windows and Linux by default, so one
+reservation covers a dual-boot machine; on Wi-Fi, turn off *Random hardware addresses* in each
+system.
+
+**A PC behind another router.** With a mesh in router mode behind the ISP's router, the PC may
+sit on the upstream network while the phone sits behind the mesh. That works — the phone reaches
+it through the mesh — as long as the PC's reservation is made on **the router that hands out its
+address**, not on the mesh. Each system on a dual-boot PC must also be on automatic (DHCP), not
+a manually typed IP, or it overrides the reservation.
+
+Any address change still means updating `PC_IP` and rebuilding the APK
+([SERVER-SETUP.md](docs/SERVER-SETUP.md#static-ip)).
+
 ## License
 
 MIT
