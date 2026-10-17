@@ -553,7 +553,7 @@ def check_macos_agent(plist, printed, plist_path):
         "macos.agent.session-type",
         PASS if session_types == ["Aqua"] else FAIL,
         f"LimitLoadToSessionType={session_types or '(unset)'}, must be exactly 'Aqua'; "
-        f"unset also loads in LoginWindow and Background, i.e. at the login screen",
+        f"the key is required so the session scope is written explicitly in the plist rather than left to an undocumented default",
     ))
 
     checks.append(Check(
