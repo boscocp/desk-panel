@@ -239,7 +239,9 @@ public final class PanelService extends Service implements PcPoller.Listener {
     private static volatile Boolean lastOnline;
 
     /**
-     * True while another app's window is in front of the panel's (T4.11).
+     * True while the panel is stopped with the screen on (T4.11): another
+     * app in front, Home, Recents, or the lock screen over a panel that has
+     * just gone offline. Read only while online, so the last case is inert.
      *
      * <p>Online, the PC never makes a transition, so nothing raises the panel
      * again: found on 2026-10-19, when a Play Services sign-in screen opened
@@ -821,7 +823,9 @@ public final class PanelService extends Service implements PcPoller.Listener {
      * panel back over them would make that impossible. The screen going out
      * is the moment they have stopped. Online, the screen is supposed to be
      * on (invariant 3), so this is the PC's state being applied again rather
-     * than a timeout of ours.
+     * than a timeout of ours. It also means the power button pressed in
+     * another app, with a PC online, lights the screen onto the panel, which
+     * is what the same press over the panel already did.
      *
      * <p>Not for a panel that was in front. {@code FLAG_KEEP_SCREEN_ON} stops
      * the timeout, so that screen went out by the power button, and what
@@ -843,7 +847,10 @@ public final class PanelService extends Service implements PcPoller.Listener {
                 return;
             }
             // Plain text, like "service revived by watchdog": no state changed.
-            Log.i(Markers.TAG, "panel was covered; brought back");
+            // "Raising", not "raised": startActivity only queues the request,
+            // and Android can still drop it (MIUI's background pop-up op).
+            // The proof it landed is panel=rendered and the screen awake.
+            Log.i(Markers.TAG, "panel was covered; raising it");
             // The online wake's rule: the CPU is held from the decision to
             // wake until panelVisible() sees the window, because startActivity
             // only queues the request and the screen has just gone out.
