@@ -3,6 +3,7 @@ package dev.bosco.deskpanel;
 import android.app.Activity;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
 import android.util.Log;
 import android.view.WindowManager;
 import android.webkit.WebResourceRequest;
@@ -192,6 +193,22 @@ public class MainActivity extends Activity implements PanelService.Panel {
         // the window is all this class owns.
         PanelService.setPanel(this);
         PanelService.start(this);
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        PanelService.panelCovered(false);
+    }
+
+    @Override
+    protected void onStop() {
+        // A relaunch stops this instance while the screen is on, and is not
+        // another app in front: its replacement's onStart follows at once.
+        if (!isChangingConfigurations()) {
+            PanelService.panelCovered(getSystemService(PowerManager.class).isInteractive());
+        }
+        super.onStop();
     }
 
     @Override
