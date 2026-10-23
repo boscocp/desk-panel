@@ -12,7 +12,9 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.ServiceInfo;
 import android.os.BatteryManager;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.os.SystemClock;
 import android.provider.Settings;
@@ -435,6 +437,19 @@ public final class PanelService extends Service implements PcPoller.Listener {
     private boolean fresh;
 
     /**
+     * Whether the panel's window has focus, as {@code MainActivity} last
+     * reported it. Half of what {@link WakeRetry#next} needs to tell a wake
+     * that landed from one Android dropped (T4.12).
+     */
+    private static volatile boolean panelFocused;
+
+    /** Runs {@link #checkWake}; the main looper, like every other callback here. */
+    private final Handler main = new Handler(Looper.getMainLooper());
+
+    /** Posted {@link WakeRetry#RETRY_MS} after each wake request, removed when it lands. */
+    private final Runnable wakeCheck = this::checkWake;
+
+    /**
      * Registers the Activity that owns the window, and immediately replays the
      * current PC state to it if one is known. See {@link #lastOnline} for why a
      * replay is not optional.
@@ -839,13 +854,9 @@ public final class PanelService extends Service implements PcPoller.Listener {
             }
             // Another app's task is in front, so none of the exemptions the
             // online wake rides applies: Android 12 refuses the start without
-            // "Display over other apps", logging nothing the panel can see.
-            // Measured on 2026-10-19 with the app-op found reset to ignore.
-            if (!Settings.canDrawOverlays(context)) {
-                Log.w(Markers.TAG,
-                        "panel was covered; cannot raise it without Display over other apps");
-                return;
-            }
+            // "Display over other apps" (measured 2026-10-19). Asked anyway:
+            // bringPanelToFront logs overlay=denied and its check asks again
+            // every 30 s, so a grant restored later lights the panel (T4.12).
             // Plain text, like "service revived by watchdog": no state changed.
             // "Raising", not "raised": startActivity only queues the request,
             // and Android can still drop it (MIUI's background pop-up op).
@@ -981,6 +992,7 @@ public final class PanelService extends Service implements PcPoller.Listener {
         // not be undone fifteen minutes later. A kill does not reach here,
         // which is the whole distinction the watchdog rests on (ADR 0023).
         alarms.cancel(watchdogIntent());
+        main.removeCallbacks(wakeCheck);
         releaseOfflineWakeLock();
         releaseProbeWakeLock();
         instance = null;
@@ -1109,6 +1121,9 @@ public final class PanelService extends Service implements PcPoller.Listener {
         } else {
             dataPoller.stop();
             spectrumStream.stop();
+            // Nothing is supposed to be lit any more, so a wake still waiting
+            // to be checked has nothing left to check.
+            main.removeCallbacks(wakeCheck);
             // Dropped, not kept. It is only ever written by a successful
             // fetch, so holding it would mean the wake after a night offline
             // replays last night's prices and weather -- with stale:false,
@@ -1237,10 +1252,52 @@ public final class PanelService extends Service implements PcPoller.Listener {
      * to allow for it (ADR 0014).
      */
     private void bringPanelToFront() {
+        // Logged, not acted on: there is nothing the app can do about a
+        // revoked grant but say so, next to the screen=wake it will undermine.
+        if (!Settings.canDrawOverlays(this)) {
+            Log.i(Markers.TAG, Markers.overlayDenied());
+        }
         Intent panelIntent = new Intent(this, MainActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
                         | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
         startActivity(panelIntent);
+        main.removeCallbacks(wakeCheck);
+        // Already up on a lit display -- the PC went idle and came back before
+        // the screen timed out -- so no focus will change and there is nothing
+        // to wait for. Settled now, and not by a check thirty seconds out that
+        // would find the screen off if the owner pressed the power key in
+        // between, and light it again (found by review).
+        if (WakeRetry.showing(panelFocused, isInteractive())) {
+            releaseOfflineWakeLock();
+            return;
+        }
+        // Android 12 may drop that start without telling the app (T4.12), so
+        // check back rather than trust it. Replaces any check still pending.
+        main.postDelayed(wakeCheck, WakeRetry.RETRY_MS);
+    }
+
+    private boolean isInteractive() {
+        return getSystemService(PowerManager.class).isInteractive();
+    }
+
+    /**
+     * Whether the last wake request showed the panel, and if not, another one
+     * (T4.12, ADR 0024). The CPU is awake for it: {@link #offlineWakeLock} is
+     * held from the wake request until {@link #panelVisible()}.
+     *
+     * <p>Settling here as well as in {@code panelVisible} is not redundant:
+     * focus can arrive while the display is still dark, and {@code
+     * panelVisible} then leaves the check to this.
+     */
+    private void checkWake() {
+        WakeRetry.Step step = WakeRetry.next(
+                Boolean.TRUE.equals(lastOnline), isInteractive());
+        if (step == WakeRetry.Step.SETTLED) {
+            releaseOfflineWakeLock();
+        } else if (step == WakeRetry.Step.RETRY) {
+            Log.i(Markers.TAG, Markers.wakeRetry());
+            bringPanelToFront();
+        }
     }
 
     /**
@@ -1304,8 +1361,9 @@ public final class PanelService extends Service implements PcPoller.Listener {
     }
 
     /**
-     * Called when the panel's window actually has focus, which is the first
-     * moment anything can be sure the display is on.
+     * Called when the panel's window gains focus. With the display on, that
+     * is the wake landing; with it dark, it is not, and the check booked by
+     * {@link #bringPanelToFront} stays (T4.12).
      *
      * <p>This is where the offline wake lock is dropped, rather than at the
      * {@code startActivity} that asked for the wake. {@code startActivity} only
@@ -1319,7 +1377,12 @@ public final class PanelService extends Service implements PcPoller.Listener {
      */
     public static void panelVisible() {
         PanelService service = instance;
-        if (service != null && Boolean.TRUE.equals(lastOnline)) {
+        // Focus on a dark display is not a wake -- a window keeps or regains
+        // focus while the display dozes under it -- so then the pending check
+        // stays, and keeps the lock until the display is on (found by review).
+        if (service != null && Boolean.TRUE.equals(lastOnline)
+                && WakeRetry.showing(true, service.isInteractive())) {
+            service.main.removeCallbacks(service.wakeCheck);
             service.releaseOfflineWakeLock();
         }
     }
@@ -1336,6 +1399,11 @@ public final class PanelService extends Service implements PcPoller.Listener {
      */
     public static void panelCovered(boolean covered) {
         panelCovered = covered;
+    }
+
+    /** The panel's window gaining or losing focus, for {@link #checkWake}. */
+    public static void panelFocus(boolean hasFocus) {
+        panelFocused = hasFocus;
     }
 
     /** The volume bar's press (T8.4), with invokeAction's checks. */

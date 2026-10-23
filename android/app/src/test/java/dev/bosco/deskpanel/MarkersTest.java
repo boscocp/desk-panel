@@ -64,7 +64,8 @@ public class MarkersTest {
                 Markers.screen(true), Markers.thermal(true),
                 Markers.thermal(false), Markers.night(true), Markers.dormant(true),
                 Markers.ping("ok"), Markers.data(true), Markers.battery(87),
-                Markers.tick(1758240000L)}) {
+                Markers.tick(1758240000L), Markers.wakeRetry(),
+                Markers.overlayDenied()}) {
             assertEquals(marker, marker.trim());
             assertEquals(-1, marker.indexOf(' '));
         }
@@ -74,6 +75,12 @@ public class MarkersTest {
     public void nightMarkers() {
         assertEquals("night=on", Markers.night(true));
         assertEquals("night=off", Markers.night(false));
+    }
+
+    @Test
+    public void wakeMarkers() {
+        assertEquals("wake=retry", Markers.wakeRetry());
+        assertEquals("overlay=denied", Markers.overlayDenied());
     }
 
     @Test
