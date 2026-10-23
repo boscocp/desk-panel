@@ -152,6 +152,30 @@ public final class Markers {
         return on ? "dormant=on" : "dormant=off";
     }
 
+    /**
+     * A wake that has not shown the panel {@link WakeRetry#RETRY_MS} after it
+     * was asked for, being asked for again (T4.11). At most two retries a
+     * minute, and only while the PC is online and the display is dark.
+     *
+     * <p>Before it, a refused wake left {@code screen=wake} as the last line of
+     * a dark panel, which reads as the product working.
+     */
+    public static String wakeRetry() {
+        return "wake=retry";
+    }
+
+    /**
+     * The app has lost "Display over other apps" (T4.11), logged on every wake
+     * request that finds it so. It is the exemption Android 12 needs to let
+     * {@code PanelService} raise the panel from the background (ADR 0023), and
+     * on 2026-10-23 something on the phone switched it off with nothing in the
+     * log to say so. This line is the only place the loss shows before a
+     * morning with a dark panel.
+     */
+    public static String overlayDenied() {
+        return "overlay=denied";
+    }
+
     /** Battery level, on broadcast (T5.4). */
     public static String battery(int level) {
         return "battery=" + level;

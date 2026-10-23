@@ -131,7 +131,7 @@ Two kinds, defined in `Markers.java` (TT.6). **Transitions** — `state=online|o
 `screen=wake|sleep`, `screen=thermal|thermal-clear`, `night=on|off`, `dormant=on|off` — fire
 only when something changes; a
 steady state logs nothing, and T4.2 asserts exactly that. **Heartbeats** — `tick=`, `ping=`,
-`data=ok|err`, `battery=` — fire per cycle at a bounded rate, because "still running" and "at
+`data=ok|err`, `battery=`, `wake=retry` — fire per cycle at a bounded rate, because "still running" and "at
 most four polls a minute" cannot be asserted any other way.
 
 **This table is the source.** `e2e/README.md` and `tasks/TT.8-e2e-suite.md` link here rather
@@ -185,6 +185,11 @@ them:
   matching the whole line. The two reasons worth telling apart are there on purpose:
   `ConnectException` is nothing listening on the port, `SocketTimeoutException` is a firewall
   dropping rather than refusing — the Linux trap `docs/SERVER-SETUP.md` ships no step for.
+- **`wake=retry` means the last wake request left the display dark** (T4.11, ADR 0024): 30 s
+  after it the PC was still online and the screen was off, so the request is made again.
+  `overlay=denied` is logged on every wake request, retries included, that finds "Display over
+  other apps" switched off, which is the usual reason. A `wake=retry` is only logged while the
+  PC is still online, so its absence proves nothing if the PC left within those 30 s.
 - `dormant=on` is the log saying its own silence is deliberate (T5.6). Offline and on battery
   the app hands its schedule to `AlarmManager` and goes quiet for fifteen to twenty-six minutes
   at a time — the alarm is inexact and the platform widens it — so

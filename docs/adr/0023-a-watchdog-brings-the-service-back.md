@@ -2,7 +2,8 @@
 
 Status: accepted · 2026-10-13 (T4.10)
 Amends [ADR 0014](0014-poll-loop-outlives-the-screen.md), which relied on `START_STICKY` for
-the case where the process is killed anyway.
+the case where the process is killed anyway. Amended by
+[ADR 0024](0024-a-refused-wake-is-asked-again.md): a refused wake is asked for again.
 
 ## Context
 

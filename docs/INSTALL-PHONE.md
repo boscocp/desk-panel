@@ -77,6 +77,12 @@ will look like a bug in the code.
    left to raise. Without it, Android 12 logs `Abort background activity starts` and the panel
    stays dark with `state=online` logged and no `screen=wake`. Measured 2026-10-13.
 
+   **It can also disappear with no install.** On 2026-10-23 it was `ignore` on a phone last
+   installed on 10-19, and a wake after 70 minutes dark was refused. The app logs
+   `overlay=denied` on every wake request that finds it missing, and retries a refused wake
+   every 30 s with `wake=retry` (ADR 0024). Check it with
+   `adb shell appops get dev.bosco.deskpanel SYSTEM_ALERT_WINDOW`.
+
 5. **Stay awake OFF** — Developer options → **Stay awake** must be **off**. This one *is*
    Android's, and [PHONE-SETUP.md](PHONE-SETUP.md#developer-options-and-adb-over-wi-fi) says why
    it matters. It is on by default on a phone that has been used for development.
