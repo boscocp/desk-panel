@@ -58,5 +58,13 @@ A refused start is dropped by the system, not reported to the app.
 - While the display stays dark and the PC online, the retries do not end, and the offline wake
   lock is held throughout, as it already was for a wake that had not landed. Each retry is one
   `startActivity` and one log line.
+- The covered panel (T4.11) joins the same loop. Since T4.12 its screen-off receiver asks even
+  without the grant, so a power press inside another app while the PC is online holds the CPU
+  and retries every 30 s until the screen is lit, the PC goes away or the grant comes back. On
+  this rig the phone is on mains while a PC is on, so that is accepted.
+- Focus that arrives while the display is still dark leaves the check pending, and no later
+  focus settles it. A power press to put the screen out in the 30 s that follow is then met by
+  a retry that lights it again. Online, the screen is supposed to be on (invariant 3), so this
+  is left as is.
 - `overlay=denied` makes a lost grant visible in the log before a dark morning. It does not
   fix it. Re-granting is still INSTALL-PHONE step 4.
