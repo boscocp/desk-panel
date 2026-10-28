@@ -15,6 +15,7 @@ import android.os.BatteryManager;
 import android.os.IBinder;
 import android.os.PowerManager;
 import android.os.SystemClock;
+import android.provider.Settings;
 import android.util.Log;
 
 import androidx.core.app.ServiceCompat;
@@ -236,6 +237,21 @@ public final class PanelService extends Service implements PcPoller.Listener {
      * whole wave exists to enforce.
      */
     private static volatile Boolean lastOnline;
+
+    /**
+     * True while the panel is stopped with the screen on (T4.11): another
+     * app in front, Home, Recents, or the lock screen over a panel that has
+     * just gone offline. Read only while online, so the last case is inert.
+     *
+     * <p>Online, the PC never makes a transition, so nothing raises the panel
+     * again: found on 2026-10-19, when a Play Services sign-in screen opened
+     * over it at 13:26 and the screen timed out behind that screen, because
+     * {@code FLAG_KEEP_SCREEN_ON} only holds while the panel's window is the
+     * one showing. The PC stayed on, the log said {@code state=online}, and
+     * the phone dozed for the rest of the afternoon. See
+     * {@link #screenOffReceiver} for what this flag is for.
+     */
+    private static volatile boolean panelCovered;
 
     /**
      * The thermal authority (T5.5), fed from the battery broadcast below.
@@ -520,6 +536,14 @@ public final class PanelService extends Service implements PcPoller.Listener {
         wakeFilter.addAction(ACTION_DORMANT_PROBE);
         ContextCompat.registerReceiver(
                 this, wakeReceiver, wakeFilter, ContextCompat.RECEIVER_NOT_EXPORTED);
+
+        // Dynamic only: the platform does not deliver ACTION_SCREEN_OFF to a
+        // receiver declared in the manifest.
+        ContextCompat.registerReceiver(
+                this,
+                screenOffReceiver,
+                new IntentFilter(Intent.ACTION_SCREEN_OFF),
+                ContextCompat.RECEIVER_NOT_EXPORTED);
     }
 
     /**
@@ -790,6 +814,54 @@ public final class PanelService extends Service implements PcPoller.Listener {
     };
 
     /**
+     * The screen going out while the PC is online and another app covers the
+     * panel (T4.11). Raises the panel, and its {@code setTurnScreenOn} lights
+     * the screen again, over the lock screen.
+     *
+     * <p>Screen-off rather than the cover itself, because the phone is still
+     * a phone: somebody who opens another app is using it, and pulling the
+     * panel back over them would make that impossible. The screen going out
+     * is the moment they have stopped. Online, the screen is supposed to be
+     * on (invariant 3), so this is the PC's state being applied again rather
+     * than a timeout of ours. It also means the power button pressed in
+     * another app, with a PC online, lights the screen onto the panel, which
+     * is what the same press over the panel already did.
+     *
+     * <p>Not for a panel that was in front. {@code FLAG_KEEP_SCREEN_ON} stops
+     * the timeout, so that screen went out by the power button, and what
+     * follows is the window's own business, as it was before this receiver.
+     */
+    private final BroadcastReceiver screenOffReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (!panelCovered || !Boolean.TRUE.equals(lastOnline)) {
+                return;
+            }
+            // Another app's task is in front, so none of the exemptions the
+            // online wake rides applies: Android 12 refuses the start without
+            // "Display over other apps", logging nothing the panel can see.
+            // Measured on 2026-10-19 with the app-op found reset to ignore.
+            if (!Settings.canDrawOverlays(context)) {
+                Log.w(Markers.TAG,
+                        "panel was covered; cannot raise it without Display over other apps");
+                return;
+            }
+            // Plain text, like "service revived by watchdog": no state changed.
+            // "Raising", not "raised": startActivity only queues the request,
+            // and Android can still drop it (MIUI's background pop-up op).
+            // The proof it landed is panel=rendered and the screen awake.
+            Log.i(Markers.TAG, "panel was covered; raising it");
+            // The online wake's rule: the CPU is held from the decision to
+            // wake until panelVisible() sees the window, because startActivity
+            // only queues the request and the screen has just gone out.
+            if (!offlineWakeLock.isHeld()) {
+                offlineWakeLock.acquire();
+            }
+            bringPanelToFront();
+        }
+    };
+
+    /**
      * One power state, from wherever it was learned. Idempotent, so both
      * receivers can call it on every broadcast without comparing edges.
      *
@@ -900,6 +972,7 @@ public final class PanelService extends Service implements PcPoller.Listener {
         spectrumStream.stop();
         unregisterReceiver(batteryReceiver);
         unregisterReceiver(wakeReceiver);
+        unregisterReceiver(screenOffReceiver);
         // Before the lock, and not optional: an alarm outliving the service it
         // was arming a probe for would wake the phone every fifteen minutes to
         // deliver a broadcast nothing is listening to.
@@ -1249,6 +1322,20 @@ public final class PanelService extends Service implements PcPoller.Listener {
         if (service != null && Boolean.TRUE.equals(lastOnline)) {
             service.releaseOfflineWakeLock();
         }
+    }
+
+    /**
+     * The panel's window started or stopped (T4.11).
+     *
+     * <p>A stop with the screen still on means another app's window came in
+     * front of it; a stop with the screen going out is the screen. The screen
+     * turning off makes the device non-interactive before the stop is
+     * delivered, so the two cannot be confused.
+     *
+     * @param covered true for a stop while interactive, false for a start
+     */
+    public static void panelCovered(boolean covered) {
+        panelCovered = covered;
     }
 
     /** The volume bar's press (T8.4), with invokeAction's checks. */

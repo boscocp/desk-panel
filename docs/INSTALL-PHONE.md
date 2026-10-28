@@ -117,16 +117,23 @@ minutes, untouched.
 
 ### These settings do not survive a reinstall
 
-The two permissions in step 4 are vendor app-ops, and `adb install -r` resets them to denied.
+The two vendor permissions in step 4 are app-ops, and `adb install -r` resets them to denied.
 That is worth knowing because nothing announces it: the panel keeps logging `screen=wake`
-perfectly and simply stops turning the screen on. After every install, either set them again in
-the UI or from the host:
+perfectly and simply stops turning the screen on. **Display over other apps goes too**: on
+2026-10-19 an install reset `SYSTEM_ALERT_WINDOW` to `ignore`, and it had been off since wave 48's
+install without anyone noticing. Without it, a panel covered by another app cannot come back
+(T4.11), and the log says
+`panel was covered; cannot raise it without Display over other apps`. The reset can land a
+few seconds *after* `adb install` prints `Success`, so a set made straight away may be undone:
+read it back once the app is running. After every install,
+either set all three again in the UI or from the host:
 
 ```bash
 adb shell appops set dev.bosco.deskpanel 10020 allow   # Show on Lock screen
 adb shell appops set dev.bosco.deskpanel 10008 allow   # background pop-up
 adb shell appops set dev.bosco.deskpanel SYSTEM_ALERT_WINDOW allow   # display over other apps
 adb shell appops get dev.bosco.deskpanel | grep MIUIOP
+adb shell appops get dev.bosco.deskpanel SYSTEM_ALERT_WINDOW | grep -q allow
 ```
 
 **The numeric ops are the vendor's own and Xiaomi documents none of them; they were read off
