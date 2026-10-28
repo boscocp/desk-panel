@@ -558,13 +558,14 @@ public class MainActivity extends Activity implements PanelService.Panel {
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
+        PanelService.panelFocus(hasFocus);
         // Transient bars are shown again whenever the window loses and regains
         // focus, so the request has to be repeated rather than made once.
         if (hasFocus) {
             enterImmersiveMode();
-            // Focus is the first moment anything can be sure the display is
-            // actually on, which is why the service drops its offline wake lock
-            // here and not at the startActivity that asked for the wake.
+            // Focus is where the service drops its offline wake lock, rather
+            // than at the startActivity that asked for the wake -- provided
+            // the display is on, which focus alone does not prove (T4.12).
             PanelService.panelVisible();
         }
     }

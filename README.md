@@ -177,6 +177,21 @@ a manually typed IP, or it overrides the reservation.
 Any address change still means updating `PC_IP` and rebuilding the APK
 ([SERVER-SETUP.md](docs/SERVER-SETUP.md#static-ip)).
 
+### The panel stays black, and the PC answers
+
+The log says `ping=ok`, `state=online` and `screen=wake`, and then `wake=retry` every 30 s with
+`overlay=denied` next to it. The PC is fine. Android is refusing to bring the panel up from the
+background, because the app has lost **Display over other apps**. A reinstall resets it, and it
+has also been seen to go away with no install. Grant it again and the next retry lights the
+panel, with no hand on the phone:
+
+```bash
+adb shell appops set dev.bosco.deskpanel SYSTEM_ALERT_WINDOW allow
+```
+
+Or Settings → Apps → desk-panel → Other permissions → Display over other apps. The other
+grants this needs are in [INSTALL-PHONE.md](docs/INSTALL-PHONE.md) step 4.
+
 ## License
 
 MIT
