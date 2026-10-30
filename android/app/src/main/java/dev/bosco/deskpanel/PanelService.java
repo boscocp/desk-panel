@@ -11,6 +11,11 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.ServiceInfo;
+import android.net.ConnectivityManager;
+import android.net.LinkAddress;
+import android.net.LinkProperties;
+import android.net.Network;
+import android.net.RouteInfo;
 import android.os.BatteryManager;
 import android.os.Handler;
 import android.os.IBinder;
@@ -23,7 +28,10 @@ import android.util.Log;
 import androidx.core.app.ServiceCompat;
 import androidx.core.content.ContextCompat;
 
+import java.net.Inet4Address;
+import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.List;
 
 /**
  * Owns the poll loop, so that the loop outlives the screen (ADR 0014).
@@ -530,7 +538,7 @@ public final class PanelService extends Service implements PcPoller.Listener {
         // comma-separated; one PcHosts is shared so the data poller follows
         // whichever PC the PC poller last heard from (ADR 0016).
         PcHosts hosts = PcHosts.parse(getString(R.string.pc_host));
-        poller = new PcPoller(hosts, this);
+        poller = new PcPoller(hosts, this, this::describeLink);
         dataPoller = new DataPoller(hosts, new PanelLink(BuildConfig.PANEL_KEY), this::onData);
         spectrumStream = new SpectrumStream(hosts, new PanelLink(BuildConfig.PANEL_KEY),
                 this::onSpectrum, this::onVolume);
@@ -559,6 +567,33 @@ public final class PanelService extends Service implements PcPoller.Listener {
                 screenOffReceiver,
                 new IntentFilter(Intent.ACTION_SCREEN_OFF),
                 ContextCompat.RECEIVER_NOT_EXPORTED);
+    }
+
+    /**
+     * The phone's address and gateway on its active network, for a {@code
+     * ping=err} line (T4.13). Called on the poller thread, only on a cycle no
+     * PC answered; {@code ConnectivityManager} is safe to call from there.
+     */
+    private String describeLink() {
+        ConnectivityManager connectivity = getSystemService(ConnectivityManager.class);
+        Network network = connectivity == null ? null : connectivity.getActiveNetwork();
+        LinkProperties link = network == null ? null : connectivity.getLinkProperties(network);
+        if (link == null) {
+            return LinkSummary.describe(null, null);
+        }
+        List<String> addresses = new ArrayList<>();
+        for (LinkAddress address : link.getLinkAddresses()) {
+            addresses.add(address.toString());
+        }
+        String gateway = null;
+        for (RouteInfo route : link.getRoutes()) {
+            // IPv4 only, like the addresses: the PCs are dialled over IPv4.
+            if (route.isDefaultRoute() && route.getGateway() instanceof Inet4Address) {
+                gateway = route.getGateway().getHostAddress();
+                break;
+            }
+        }
+        return LinkSummary.describe(addresses, gateway);
     }
 
     /**

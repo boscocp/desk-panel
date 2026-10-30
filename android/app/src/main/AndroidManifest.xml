@@ -5,6 +5,11 @@
          makes a request. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Read only on a failing poll, to log the phone's own address and
+         gateway beside the PCs it could not reach (T4.13). A normal
+         permission: granted at install, nothing to toggle by hand. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
     <!-- The poll loop outlives the screen, so it lives in a foreground service
          (ADR 0014). specialUse is the honest type: this is not media, not a
          download, not a location fix - it is a desk panel watching for a login,

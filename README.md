@@ -130,7 +130,7 @@ or not. Open an issue and pick the **Device report** form ([its questions](.gith
 Restarting the app does not help, and the phone's log repeats one line for every PC:
 
 ```
-ping=err hosts=<pc-ip>:SocketTimeoutException,<pc-ip>:SocketTimeoutException
+ping=err hosts=<pc-ip>:SocketTimeoutException,<pc-ip>:SocketTimeoutException self=<phone-ip>/24 gw=<router-ip>
 ```
 
 The app is behaving correctly: it cannot reach any PC, so it reports offline and lets the screen
@@ -142,9 +142,10 @@ sleep. Before suspecting the code, check the network.
 2. **Is the phone polling it?** The server logs every request with the caller's address (on macOS
    in `~/Library/Logs/desk-panel.log`). If the phone's requests stopped at some moment and never
    came back, the phone lost its way to the PC at that moment.
-3. **Is the phone on the same network as the PC?** Compare the phone's address
-   (`adb shell ip -4 addr show wlan0`, or Wi-Fi → network details) with the PC's. A different
-   subnet is the answer, even when both show the same Wi-Fi name.
+3. **Is the phone on the same network as the PC?** The `self=` and `gw=` on that line are the
+   phone's own address and gateway. Compare them with the PC's, and with the router you expect
+   the phone to be on. A different subnet is the answer, even when both show the same Wi-Fi
+   name.
 
 **Same Wi-Fi name, different subnet.** A mesh router can hand a device an address on a separate,
 isolated subnet — a guest or IoT network — while it shows the same Wi-Fi name. A device there
@@ -159,6 +160,14 @@ I changed nothing" usually means.
   network. Turn off any guest or IoT network you do not use, so there is nowhere else to land.
 - **Do not** type the address into the router's *Internet* / WAN page. That page sets how the
   router itself reaches the internet; a LAN address there cuts the connection for everyone.
+
+**A mesh satellite that came back as a router.** After a power cut, a satellite that boots
+before the main unit can come up handing out its own subnet under the same Wi-Fi name. Seen on
+2026-10-30 with a HUAWEI WiFi Mesh 3: the main unit on `192.168.3.1`, the phone on
+`self=192.168.4.7/24 gw=192.168.4.1`, and the gateway's MAC was the satellite's. Clients on it
+reached neither the PCs nor the internet. Power the satellite off and on with the main unit
+already up; if it does it again, reset it and pair it again. A UPS on the modem and the mesh
+stops the race from happening at all.
 
 **Private (randomized) MAC addresses.** A reservation only holds while the MAC stays the same.
 Android keeps one random MAC per saved network, which is stable until you forget and re-add the
