@@ -40,16 +40,6 @@ public final class PcPoller {
      * marker, the wake lock, the screen — which is why it does not log the
      * state itself.
      */
-    /**
-     * Where the phone itself is on the network, as {@link LinkSummary} words
-     * it. Asked only on a cycle no PC answered (T4.13): that is when the
-     * question is whether the PCs are gone or the phone is, and asking on
-     * every healthy cycle would be a binder call every two seconds for nothing.
-     */
-    public interface Link {
-        String describe();
-    }
-
     public interface Listener {
         /**
          * @param state ONLINE when a PC answered with its display on, IDLE when
@@ -71,6 +61,16 @@ public final class PcPoller {
          * once-only edge would leave the phone asleep for good.
          */
         void onDormant();
+    }
+
+    /**
+     * Where the phone itself is on the network, as {@link LinkSummary} words
+     * it. Asked only on a cycle no PC answered (T4.13): that is when the
+     * question is whether the PCs are gone or the phone is, and asking on
+     * every healthy cycle would be a binder call every two seconds for nothing.
+     */
+    public interface Link {
+        String describe();
     }
 
     /**
@@ -377,14 +377,15 @@ public final class PcPoller {
     }
 
     /**
-     * The phone's own link, or {@code self=unknown} if reading it threw: a
+     * The phone's own link, or {@code self=unknown gw=unknown} if reading it
+     * threw: a
      * diagnostic must not be what stops the loop it is diagnosing.
      */
     private String whereAmI() {
         try {
             return link.describe();
         } catch (RuntimeException e) {
-            return "self=unknown";
+            return "self=unknown gw=unknown";
         }
     }
 

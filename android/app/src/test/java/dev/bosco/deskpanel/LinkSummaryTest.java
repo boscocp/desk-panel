@@ -12,16 +12,16 @@ public class LinkSummaryTest {
 
     @Test
     public void theAddressAndGatewayAreNamed() {
-        assertEquals("self=192.168.4.7/24 gw=192.168.4.1",
-                LinkSummary.describe(Arrays.asList("192.168.4.7/24"), "192.168.4.1"));
+        assertEquals("self=10.0.4.7/24 gw=10.0.4.1",
+                LinkSummary.describe(Arrays.asList("10.0.4.7/24"), "10.0.4.1"));
     }
 
     @Test
     public void ipv6AddressesAreLeftOut() {
-        assertEquals("self=192.168.3.107/24 gw=192.168.3.1",
+        assertEquals("self=10.0.3.107/24 gw=10.0.3.1",
                 LinkSummary.describe(Arrays.asList(
-                        "fe80::8a46:4ff:fe29:7432/64", "192.168.3.107/24",
-                        "fd85:5464:5fac:b629::7/64"), "192.168.3.1"));
+                        "fe80::8a46:4ff:fe29:7432/64", "10.0.3.107/24",
+                        "fd85:5464:5fac:b629::7/64"), "10.0.3.1"));
     }
 
     @Test
@@ -34,8 +34,8 @@ public class LinkSummaryTest {
     @Test
     public void moreThanOneAddressStaysOneToken() {
         String line = LinkSummary.describe(
-                Arrays.asList("192.168.3.107/24", "10.0.0.2/8"), "192.168.3.1");
-        assertEquals("self=192.168.3.107/24,10.0.0.2/8 gw=192.168.3.1", line);
+                Arrays.asList("10.0.3.107/24", "10.0.0.2/8"), "10.0.3.1");
+        assertEquals("self=10.0.3.107/24,10.0.0.2/8 gw=10.0.3.1", line);
         assertEquals(2, line.split(" ").length);
     }
 }

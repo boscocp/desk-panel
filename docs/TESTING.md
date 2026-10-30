@@ -186,7 +186,8 @@ them:
   `ConnectException` is nothing listening on the port, `SocketTimeoutException` is a firewall
   dropping rather than refusing — the Linux trap `docs/SERVER-SETUP.md` ships no step for.
 - **A `ping=err` line also says where the phone is** (T4.13): `self=<ip>/<prefix> gw=<ip>`
-  after the hosts, from the active network, IPv4 only, `none` for a half that is missing. Every
+  after the hosts, from the Wi-Fi network (the default one only when there is no Wi-Fi), IPv4
+  only, `none` for a half that is missing, `self=unknown gw=unknown` if reading it failed. Every
   host timing out reads the same whether the PCs are off or the phone is on a network that
   cannot reach them; a `self=` on a different subnet from the one it had yesterday is the
   second. Only failing cycles carry it, so an `ok` or `idle` line ends at `host=`.

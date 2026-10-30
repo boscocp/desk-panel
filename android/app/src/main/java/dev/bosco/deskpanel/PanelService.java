@@ -15,6 +15,7 @@ import android.net.ConnectivityManager;
 import android.net.LinkAddress;
 import android.net.LinkProperties;
 import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.RouteInfo;
 import android.os.BatteryManager;
 import android.os.Handler;
@@ -570,25 +571,48 @@ public final class PanelService extends Service implements PcPoller.Listener {
     }
 
     /**
-     * The phone's address and gateway on its active network, for a {@code
-     * ping=err} line (T4.13). Called on the poller thread, only on a cycle no
-     * PC answered; {@code ConnectivityManager} is safe to call from there.
+     * The phone's address and gateway on Wi-Fi, for a {@code ping=err} line
+     * (T4.13). Called on the poller thread, only on a cycle no PC answered;
+     * {@code ConnectivityManager} is safe to call from there.
+     *
+     * <p>The Wi-Fi network, not the default one. A Wi-Fi with no internet --
+     * the 2026-10-30 satellite -- loses the default to mobile data when there
+     * is any, and the default's address would then be the carrier's, saying
+     * nothing about the LAN the PCs are on. The default is the fallback only
+     * when there is no Wi-Fi at all.
      */
+    @SuppressWarnings("deprecation") // getAllNetworks: a callback is a lot of
+    // machinery for a read made once every fifteen seconds while offline.
     private String describeLink() {
         ConnectivityManager connectivity = getSystemService(ConnectivityManager.class);
-        Network network = connectivity == null ? null : connectivity.getActiveNetwork();
-        LinkProperties link = network == null ? null : connectivity.getLinkProperties(network);
+        if (connectivity == null) {
+            return LinkSummary.describe(null, null);
+        }
+        Network chosen = connectivity.getActiveNetwork();
+        for (Network network : connectivity.getAllNetworks()) {
+            NetworkCapabilities caps = connectivity.getNetworkCapabilities(network);
+            if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                chosen = network;
+                break;
+            }
+        }
+        LinkProperties link = chosen == null ? null : connectivity.getLinkProperties(chosen);
         if (link == null) {
             return LinkSummary.describe(null, null);
         }
+        // IPv4 only, addresses and gateway alike: the PCs are dialled over IPv4.
         List<String> addresses = new ArrayList<>();
         for (LinkAddress address : link.getLinkAddresses()) {
-            addresses.add(address.toString());
+            if (address.getAddress() instanceof Inet4Address) {
+                addresses.add(address.getAddress().getHostAddress()
+                        + "/" + address.getPrefixLength());
+            }
         }
         String gateway = null;
         for (RouteInfo route : link.getRoutes()) {
-            // IPv4 only, like the addresses: the PCs are dialled over IPv4.
-            if (route.isDefaultRoute() && route.getGateway() instanceof Inet4Address) {
+            // A point-to-point default route reports 0.0.0.0, which is no gateway.
+            if (route.isDefaultRoute() && route.getGateway() instanceof Inet4Address
+                    && !route.getGateway().isAnyLocalAddress()) {
                 gateway = route.getGateway().getHostAddress();
                 break;
             }

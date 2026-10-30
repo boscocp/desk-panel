@@ -6,8 +6,9 @@ import java.util.List;
  * Where the phone itself is on the network, for a {@code ping=err} line (T4.13).
  *
  * <p>On 2026-10-30 a power cut brought a mesh satellite back as a router of its
- * own: the phone took {@code 192.168.4.7} from it and could reach neither PC,
- * and for hours the log said only {@code SocketTimeoutException} for both. A PC
+ * own: the phone took an address on the satellite's own subnet and could reach
+ * neither PC, and for hours the log said only {@code SocketTimeoutException}
+ * for both. A PC
  * that is off and a phone that is on the wrong network read the same from the
  * PC's side; they do not read the same from the phone's. So a failing cycle
  * also says which address and gateway the phone has, and the wrong subnet is
