@@ -11,6 +11,12 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.ServiceInfo;
+import android.net.ConnectivityManager;
+import android.net.LinkAddress;
+import android.net.LinkProperties;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.RouteInfo;
 import android.os.BatteryManager;
 import android.os.Handler;
 import android.os.IBinder;
@@ -23,7 +29,10 @@ import android.util.Log;
 import androidx.core.app.ServiceCompat;
 import androidx.core.content.ContextCompat;
 
+import java.net.Inet4Address;
+import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.List;
 
 /**
  * Owns the poll loop, so that the loop outlives the screen (ADR 0014).
@@ -530,7 +539,7 @@ public final class PanelService extends Service implements PcPoller.Listener {
         // comma-separated; one PcHosts is shared so the data poller follows
         // whichever PC the PC poller last heard from (ADR 0016).
         PcHosts hosts = PcHosts.parse(getString(R.string.pc_host));
-        poller = new PcPoller(hosts, this);
+        poller = new PcPoller(hosts, this, this::describeLink);
         dataPoller = new DataPoller(hosts, new PanelLink(BuildConfig.PANEL_KEY), this::onData);
         spectrumStream = new SpectrumStream(hosts, new PanelLink(BuildConfig.PANEL_KEY),
                 this::onSpectrum, this::onVolume);
@@ -559,6 +568,56 @@ public final class PanelService extends Service implements PcPoller.Listener {
                 screenOffReceiver,
                 new IntentFilter(Intent.ACTION_SCREEN_OFF),
                 ContextCompat.RECEIVER_NOT_EXPORTED);
+    }
+
+    /**
+     * The phone's address and gateway on Wi-Fi, for a {@code ping=err} line
+     * (T4.13). Called on the poller thread, only on a cycle no PC answered;
+     * {@code ConnectivityManager} is safe to call from there.
+     *
+     * <p>The Wi-Fi network, not the default one. A Wi-Fi with no internet --
+     * the 2026-10-30 satellite -- loses the default to mobile data when there
+     * is any, and the default's address would then be the carrier's, saying
+     * nothing about the LAN the PCs are on. The default is the fallback only
+     * when there is no Wi-Fi at all.
+     */
+    @SuppressWarnings("deprecation") // getAllNetworks: a callback is a lot of
+    // machinery for a read made once every fifteen seconds while offline.
+    private String describeLink() {
+        ConnectivityManager connectivity = getSystemService(ConnectivityManager.class);
+        if (connectivity == null) {
+            return LinkSummary.describe(null, null);
+        }
+        Network chosen = connectivity.getActiveNetwork();
+        for (Network network : connectivity.getAllNetworks()) {
+            NetworkCapabilities caps = connectivity.getNetworkCapabilities(network);
+            if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                chosen = network;
+                break;
+            }
+        }
+        LinkProperties link = chosen == null ? null : connectivity.getLinkProperties(chosen);
+        if (link == null) {
+            return LinkSummary.describe(null, null);
+        }
+        // IPv4 only, addresses and gateway alike: the PCs are dialled over IPv4.
+        List<String> addresses = new ArrayList<>();
+        for (LinkAddress address : link.getLinkAddresses()) {
+            if (address.getAddress() instanceof Inet4Address) {
+                addresses.add(address.getAddress().getHostAddress()
+                        + "/" + address.getPrefixLength());
+            }
+        }
+        String gateway = null;
+        for (RouteInfo route : link.getRoutes()) {
+            // A point-to-point default route reports 0.0.0.0, which is no gateway.
+            if (route.isDefaultRoute() && route.getGateway() instanceof Inet4Address
+                    && !route.getGateway().isAnyLocalAddress()) {
+                gateway = route.getGateway().getHostAddress();
+                break;
+            }
+        }
+        return LinkSummary.describe(addresses, gateway);
     }
 
     /**

@@ -64,6 +64,16 @@ public final class PcPoller {
     }
 
     /**
+     * Where the phone itself is on the network, as {@link LinkSummary} words
+     * it. Asked only on a cycle no PC answered (T4.13): that is when the
+     * question is whether the PCs are gone or the phone is, and asking on
+     * every healthy cycle would be a binder call every two seconds for nothing.
+     */
+    public interface Link {
+        String describe();
+    }
+
+    /**
      * The PC server's plain port (T3.1). {@code /ping} stays here even when
      * data moves to TLS, because it is the login signal (ADR 0018).
      */
@@ -111,6 +121,8 @@ public final class PcPoller {
     private final PcHosts hosts;
 
     private final Listener listener;
+
+    private final Link link;
 
     /** The state machine, kept across pause/resume so a stop is not a reset. */
     private final PcState state = new PcState();
@@ -167,10 +179,13 @@ public final class PcPoller {
      *              cleartext, one {@code <domain>} each inside a single
      *              {@code domain-config} (ADR 0016).
      * @param listener told about transitions, on the main thread
+     * @param link     the phone's own address and gateway, for a failing
+     *                 cycle's line; called on the poller thread
      */
-    public PcPoller(PcHosts hosts, Listener listener) {
+    public PcPoller(PcHosts hosts, Listener listener, Link link) {
         this.hosts = hosts;
         this.listener = listener;
+        this.link = link;
     }
 
     /**
@@ -340,9 +355,15 @@ public final class PcPoller {
         // two seconds. The detail is appended rather than folded into the
         // marker: Markers holds single tokens with no spaces in them, and the
         // greps that count ping= lines match a prefix.
+        //
+        // A failing cycle also says where the phone is (T4.13). Every host
+        // timing out reads the same whether the PCs are off or the phone is on
+        // a network that cannot reach them, and on 2026-10-30 it was the second:
+        // a mesh satellite back from a power cut handing out its own subnet.
         Log.i(Markers.TAG,
                 Markers.ping(failure != null ? "err" : cycle.idle ? "idle" : "ok")
-                        + " " + cycle.detail);
+                        + " " + cycle.detail
+                        + (failure != null ? " " + whereAmI() : ""));
 
         // Posted on the difference from what was last *delivered*, not on
         // record()'s boolean. In the steady state the two agree and nothing is
@@ -352,6 +373,19 @@ public final class PcPoller {
         PcState.State observed = state.state();
         if (observed != delivered) {
             main.post(() -> deliver(observed, failure, booked));
+        }
+    }
+
+    /**
+     * The phone's own link, or {@code self=unknown gw=unknown} if reading it
+     * threw: a
+     * diagnostic must not be what stops the loop it is diagnosing.
+     */
+    private String whereAmI() {
+        try {
+            return link.describe();
+        } catch (RuntimeException e) {
+            return "self=unknown gw=unknown";
         }
     }
 

@@ -181,10 +181,16 @@ them:
   it by a space: `ping=ok host=192.168.1.101` for the host that answered, and
   `ping=err hosts=192.168.1.100:ConnectException,192.168.1.101:SocketTimeoutException` when none
   did. The marker itself is still one token, so every assertion that matches `ping=` or
-  `ping=ok` as a prefix is unaffected; cut the field with `awk '{print $NF}'` rather than
-  matching the whole line. The two reasons worth telling apart are there on purpose:
+  `ping=ok` as a prefix is unaffected; cut the field with `grep -oE 'hosts?=[^ ]+'` rather
+  than matching the whole line. The two reasons worth telling apart are there on purpose:
   `ConnectException` is nothing listening on the port, `SocketTimeoutException` is a firewall
   dropping rather than refusing — the Linux trap `docs/SERVER-SETUP.md` ships no step for.
+- **A `ping=err` line also says where the phone is** (T4.13): `self=<ip>/<prefix> gw=<ip>`
+  after the hosts, from the Wi-Fi network (the default one only when there is no Wi-Fi), IPv4
+  only, `none` for a half that is missing, `self=unknown gw=unknown` if reading it failed. Every
+  host timing out reads the same whether the PCs are off or the phone is on a network that
+  cannot reach them; a `self=` on a different subnet from the one it had yesterday is the
+  second. Only failing cycles carry it, so an `ok` or `idle` line ends at `host=`.
 - **`wake=retry` means the last wake request left the display dark** (T4.12, ADR 0024): 30 s
   after it the PC was still online and the screen was off, so the request is made again.
   `overlay=denied` is logged on every wake request, retries included, that finds "Display over
