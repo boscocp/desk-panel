@@ -36,10 +36,11 @@ PROSE_VERDICT = [
 # A command that blocks forever, hanging whoever runs the acceptance.
 NON_TERMINATING = [
     (
-        # -d dumps and exits; -c clears the buffer and exits. Everything else
-        # follows the log forever and hangs whoever runs the acceptance.
-        re.compile(r"\badb\s+logcat\b(?![^\n]*\s-[dc]\b)"),
-        "`adb logcat` without -d or -c never returns - use `adb logcat -d | grep -q ...`",
+        # -d dumps and exits; -c clears the buffer and exits; -G sets the
+        # buffer size and exits (T4.14). Everything else follows the log
+        # forever and hangs whoever runs the acceptance.
+        re.compile(r"\badb\s+logcat\b(?![^\n]*\s-[dcG]\b)"),
+        "`adb logcat` without -d, -c or -G never returns - use `adb logcat -d | grep -q ...`",
     ),
     (
         re.compile(r"\bpython3?\s+server/server\.py\s*(&\s*)?$", re.M),

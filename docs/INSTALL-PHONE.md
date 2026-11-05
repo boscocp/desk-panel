@@ -46,9 +46,12 @@ These are not optional polish. Without them the system will kill the app within 
 will look like a bug in the code.
 
 1. **Autostart** — Settings → Apps → Manage apps → desk-panel → **Autostart on**.
-   Without it the app does not come back after a reboot. **This list is the vendor's and has no
-   AOSP equivalent**; the app declares no boot receiver of its own, so on a phone without such a
-   list you open the app by hand after a reboot.
+   Without it MIUI does not deliver `BOOT_COMPLETED`, and the app does not come back after a
+   reboot. **This list is the vendor's and has no AOSP equivalent.** It only allows the start.
+   The app's own boot receiver makes it ([ADR 0025](adr/0025-the-app-starts-itself-at-boot.md)).
+   Before that receiver existed, Autostart was on, the phone rebooted, and the app never ran.
+   **Do not clear the app from recents or force-stop it**: a force-stopped app receives no
+   `BOOT_COMPLETED` until it is opened by hand (`stopped=true` in `dumpsys package`).
 
 2. **Battery saver → No restrictions** — same screen, Battery saver → **No restrictions**.
    The vendor battery manager will otherwise freeze the Activity and the panel silently stops
@@ -118,8 +121,13 @@ will look like a bug in the code.
 7. **Auto-rotate off**, phone in landscape. The app locks orientation itself, but this avoids
    fighting the system during setup.
 
-Verify with a reboot: the panel should return to the foreground on its own within about two
-minutes, untouched.
+Verify with a reboot: with a PC logged in, the panel should return to the foreground on its own
+within about a minute of the first unlock, and the log should say `service started at boot`.
+**With a PIN on the lock screen nothing runs until that unlock**: Android sends
+`BOOT_COMPLETED` only then ([ADR 0025](adr/0025-the-app-starts-itself-at-boot.md)). Without a
+PIN it is a minute or two after the boot, untouched. It needs
+step 1 and "Display over other apps" from step 4. Without the second, the service starts but
+cannot raise the panel, and the log shows `overlay=denied` next to `wake=retry`.
 
 ### These settings do not survive a reinstall
 
