@@ -25,10 +25,13 @@ nothing to the device.
 | `WAKE_LOCK` | A `PARTIAL_WAKE_LOCK` held **only while the PC is away**, so the device can suspend the screen and still notice a login |
 | `POST_NOTIFICATIONS` | The foreground service's own notification. See the note below — on API 33 and up this one is not granted by declaring it |
 
-There is **no `RECEIVE_BOOT_COMPLETED` receiver** in this app. Coming back after a reboot is not
-something it arranges for itself; on the development device it is a vendor autostart list that
-does it, and that is in the other document. If your phone has no such list, expect to open the
-app once after a reboot.
+`RECEIVE_BOOT_COMPLETED` lets the app start its service after a reboot
+([ADR 0025](adr/0025-the-app-starts-itself-at-boot.md)). Until 2026-11-04 there was no boot
+receiver, and the documentation said a vendor Autostart list would bring the app back. It does
+not. On the development device Autostart was allowed, the phone rebooted, and the app never ran.
+Autostart decides whether the broadcast is delivered. It does not start an app that is not
+listening for it. On a vendor skin with such a list, the app still has to be on it (the other
+document, step 1).
 
 **`POST_NOTIFICATIONS` is a runtime permission on API 33+**, and nothing in the app requests it
 yet — the development device is API 31, where the notification simply appears. On Android 13 or

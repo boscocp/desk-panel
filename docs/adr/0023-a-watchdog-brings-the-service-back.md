@@ -53,9 +53,11 @@ kill.
 - A swipe from recents that finishes the Activity is a deliberate stop. `stopIfUnclaimed`
   reaches `onDestroy`, the watchdog is cancelled, and the panel stays away, as before.
 - `am force-stop dev.bosco.deskpanel`, or *Force stop* in Settings, clears the app's alarms
-  and the app stays dead, as Android intends. A reboot clears alarms too. The app has no boot
-  receiver. Whatever brings the panel back after a reboot (`INSTALL-PHONE.md` expects it to,
-  and it was not re-measured here) also re-arms the watchdog, because it goes through
-  `onStartCommand`.
+  and the app stays dead, as Android intends. A reboot clears alarms too. Since 2026-11-04 a
+  boot receiver starts the service after a reboot, which re-arms the watchdog because it goes
+  through `onStartCommand` ([ADR 0025](0025-the-app-starts-itself-at-boot.md)). A force-stop
+  also keeps that boot start from happening, until the app is opened by hand. Before that,
+  nothing brought the panel back after a reboot. The Autostart list `INSTALL-PHONE.md` relied
+  on only allows a start.
 - On battery with the PC away, the phone wakes once per 15 minutes for the watchdog, on top of
   the dormant probe's 15 minutes. Each wakeup is one start command and no network.

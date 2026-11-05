@@ -191,6 +191,12 @@ public final class PanelService extends Service implements PcPoller.Listener {
     private static final String ACTION_WATCHDOG = "dev.bosco.deskpanel.WATCHDOG";
 
     /**
+     * The boot receiver's start command (T4.14, ADR 0025). Only so the log can
+     * say why the service started; the command does nothing else differently.
+     */
+    private static final String ACTION_BOOT = "dev.bosco.deskpanel.BOOT";
+
+    /**
      * How often the watchdog asks for the service. A WebView update kills this
      * app as a dependent, the kill does not allow a restart, so {@code
      * START_STICKY} does nothing -- measured 2026-10-13, and reproduced with
@@ -1018,6 +1024,10 @@ public final class PanelService extends Service implements PcPoller.Listener {
             // Plain text, like "pc answered at": no state changed, but this is
             // the one line that says the panel was dead and came back.
             Log.i(Markers.TAG, "service revived by watchdog");
+        } else if (fresh && intent != null && ACTION_BOOT.equals(intent.getAction())) {
+            // The same kind of line: the phone rebooted and the panel came
+            // back without a hand on it (ADR 0025).
+            Log.i(Markers.TAG, "service started at boot");
         }
         fresh = false;
 
@@ -1400,6 +1410,12 @@ public final class PanelService extends Service implements PcPoller.Listener {
     /** Starts the service, from wherever the panel is being brought up. */
     public static void start(Context context) {
         context.startForegroundService(new Intent(context, PanelService.class));
+    }
+
+    /** Starts the service from {@link BootReceiver}, which is the whole difference. */
+    static void startAtBoot(Context context) {
+        context.startForegroundService(
+                new Intent(context, PanelService.class).setAction(ACTION_BOOT));
     }
 
     /**

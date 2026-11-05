@@ -38,6 +38,12 @@
          false. MIUI's own background pop-up op (10008) is not enough. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
+    <!-- The panel comes back by itself after a reboot (ADR 0025). MIUI's
+         Autostart list was believed to do that alone; on 2026-11-04 the phone
+         rebooted with Autostart allowed and the app never ran. A normal
+         permission, granted at install. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <application
         android:label="Desk Panel"
         android:allowBackup="false"
@@ -84,7 +90,8 @@
 
         <!-- Not exported: nothing outside the app has any business starting it.
              MainActivity does, in onCreate, and stops it only when the panel is
-             actually finishing. -->
+             actually finishing. The watchdog alarm (ADR 0023) and BootReceiver
+             (ADR 0025) start it too, both from inside the app. -->
         <service
             android:name=".PanelService"
             android:exported="false"
@@ -93,6 +100,17 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Watches the PC login session so the phone screen can follow it." />
         </service>
+
+        <!-- Not exported: BOOT_COMPLETED comes from the system, which reaches a
+             receiver that is not exported, and nothing else should be able to
+             start the service through it. -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>
