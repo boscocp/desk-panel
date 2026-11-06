@@ -201,6 +201,11 @@ adb shell appops set dev.bosco.deskpanel SYSTEM_ALERT_WINDOW allow
 Or Settings → Apps → desk-panel → Other permissions → Display over other apps. The other
 grants this needs are in [INSTALL-PHONE.md](docs/INSTALL-PHONE.md) step 4.
 
+## Support
+
+If the panel is useful on your desk, you can support its development through
+[GitHub Sponsors](https://github.com/sponsors/boscocp).
+
 ## License
 
 MIT
