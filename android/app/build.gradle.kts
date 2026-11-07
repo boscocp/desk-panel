@@ -388,7 +388,7 @@ dependencies {
     // system bars on every API level the panel runs on (T2.3). It arrives
     // transitively through webkit, but the immersive code is ours and so is the
     // dependency on it.
-    implementation("androidx.core:core:1.13.1")
+    implementation("androidx.core:core:1.19.1")
 
     // JVM unit tests only — PcState and friends are plain Java with no Android
     // imports precisely so `./gradlew test` covers them without a device.
@@ -401,7 +401,7 @@ dependencies {
     // — so without this the one class worth testing here could only be tested
     // on a device. Test classpath only: `implementation` would ship a second
     // copy of a library the platform already has.
-    testImplementation("org.json:json:20240303")
+    testImplementation("org.json:json:20260814")
 }
 
 // Every other task (`make apk`, T3.6, CI) expects the APK at the repository
