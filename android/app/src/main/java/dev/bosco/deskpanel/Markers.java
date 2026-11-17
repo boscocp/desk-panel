@@ -176,6 +176,23 @@ public final class Markers {
         return "overlay=denied";
     }
 
+    /**
+     * "Display over other apps" has just gone (T4.15, ADR 0026), logged once,
+     * at the moment the service notices: when the app-op changes, or on the
+     * first reading of a service that starts without it. {@link
+     * #overlayDenied()} says the same thing on every wake; this one says
+     * <em>when</em>, which is the question nobody could answer on 2026-11-17
+     * -- the change had happened somewhere in ten days and no log kept it.
+     */
+    public static String overlayLost() {
+        return "overlay=lost";
+    }
+
+    /** The grant is back (T4.15), once, at the moment the service notices. */
+    public static String overlayBack() {
+        return "overlay=back";
+    }
+
     /** Battery level, on broadcast (T5.4). */
     public static String battery(int level) {
         return "battery=" + level;

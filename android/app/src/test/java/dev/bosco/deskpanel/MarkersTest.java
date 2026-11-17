@@ -65,7 +65,8 @@ public class MarkersTest {
                 Markers.thermal(false), Markers.night(true), Markers.dormant(true),
                 Markers.ping("ok"), Markers.data(true), Markers.battery(87),
                 Markers.tick(1758240000L), Markers.wakeRetry(),
-                Markers.overlayDenied()}) {
+                Markers.overlayDenied(), Markers.overlayLost(),
+                Markers.overlayBack()}) {
             assertEquals(marker, marker.trim());
             assertEquals(-1, marker.indexOf(' '));
         }

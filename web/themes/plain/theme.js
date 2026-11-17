@@ -429,7 +429,10 @@
         if (!text) {
             return;
         }
-        const line = el('div', null, tempClass(battery.tempC));
+        // A lost overlay grant (T4.15) outranks the temperature band: it is
+        // the line's only alarm, and the text already names it.
+        const lost = batteryFields(battery).overlayOff;
+        const line = el('div', null, lost ? 'hot' : tempClass(battery.tempC));
         line.textContent = text;
         els.battery.appendChild(line);
     }

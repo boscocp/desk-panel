@@ -86,6 +86,11 @@ will look like a bug in the code.
    every 30 s with `wake=retry` (ADR 0024). Check it with
    `adb shell appops get dev.bosco.deskpanel SYSTEM_ALERT_WINDOW`.
 
+   Since T4.15 the panel shows the loss itself: the battery line under the date ends in red
+   **sem sobrepor apps**, and the log has `overlay=lost` at the moment it went
+   ([ADR 0026](adr/0026-a-lost-overlay-grant-is-shown.md)). Grant it again and the note goes
+   within a second.
+
 5. **Stay awake OFF** — Developer options → **Stay awake** must be **off**. This one *is*
    Android's, and [PHONE-SETUP.md](PHONE-SETUP.md#developer-options-and-adb-over-wi-fi) says why
    it matters. It is on by default on a phone that has been used for development.

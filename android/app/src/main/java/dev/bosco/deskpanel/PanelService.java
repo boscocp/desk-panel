@@ -1,6 +1,7 @@
 package dev.bosco.deskpanel;
 
 import android.app.AlarmManager;
+import android.app.AppOpsManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -382,6 +383,23 @@ public final class PanelService extends Service implements PcPoller.Listener {
     private static volatile String lastBattery;
 
     /**
+     * "Display over other apps", as last read (T4.15, ADR 0026). Null before
+     * the first reading. Folded into the battery object by {@link #publish},
+     * so a panel that is lit today says that it will not come back after the
+     * next kill.
+     */
+    private static volatile Boolean overlayGranted;
+
+    /**
+     * How long after an app-op change to read the grant. The callback can run
+     * before the new mode is what {@code canDrawOverlays} answers, and a read
+     * that sees the old value would log nothing and miss the change until the
+     * next battery broadcast; half a second costs nothing on a change that
+     * happens once a fortnight.
+     */
+    private static final long OVERLAY_SETTLE_MS = 500L;
+
+    /**
      * Whether the charger is connected, from {@code EXTRA_PLUGGED} (T5.4).
      * True until the first broadcast says otherwise, which is the same safe
      * default {@code PcPoller} starts from: no broadcast means behave as the
@@ -463,6 +481,19 @@ public final class PanelService extends Service implements PcPoller.Listener {
 
     /** Posted {@link WakeRetry#RETRY_MS} after each wake request, removed when it lands. */
     private final Runnable wakeCheck = this::checkWake;
+
+    /** Reads the grant on the main thread; see {@link #checkOverlay}. */
+    private final Runnable overlayCheck = this::checkOverlay;
+
+    /**
+     * Told by the system when this app's "Display over other apps" app-op
+     * changes, whoever changes it (T4.15). Runs on a binder thread, so it only
+     * posts.
+     */
+    private final AppOpsManager.OnOpChangedListener overlayWatcher = (op, pkg) -> {
+        main.removeCallbacks(overlayCheck);
+        main.postDelayed(overlayCheck, OVERLAY_SETTLE_MS);
+    };
 
     /**
      * Registers the Activity that owns the window, and immediately replays the
@@ -574,6 +605,38 @@ public final class PanelService extends Service implements PcPoller.Listener {
                 screenOffReceiver,
                 new IntentFilter(Intent.ACTION_SCREEN_OFF),
                 ContextCompat.RECEIVER_NOT_EXPORTED);
+
+        // T4.15: the grant a revived service needs to raise the panel. Read
+        // now, so a service that starts without it says so before its first
+        // wake, and watched, so the moment it goes is in the log -- the one
+        // fact four losses have not left behind. The battery receiver reads
+        // it again on every broadcast, as a backstop for a change the
+        // watcher is not told about.
+        AppOpsManager appOps = getSystemService(AppOpsManager.class);
+        if (appOps != null) {
+            appOps.startWatchingMode(
+                    AppOpsManager.OPSTR_SYSTEM_ALERT_WINDOW, getPackageName(), overlayWatcher);
+        }
+        checkOverlay();
+    }
+
+    /**
+     * Reads "Display over other apps", logs {@code overlay=lost} or {@code
+     * overlay=back} if that is news (T4.15, ADR 0026), and puts the reading
+     * on the panel. On the main thread, like {@link #publish}, which it calls.
+     */
+    private void checkOverlay() {
+        boolean now = Settings.canDrawOverlays(this);
+        OverlayGrant.Change change = OverlayGrant.change(overlayGranted, now);
+        overlayGranted = now;
+        if (change == OverlayGrant.Change.LOST) {
+            Log.w(Markers.TAG, Markers.overlayLost());
+        } else if (change == OverlayGrant.Change.BACK) {
+            Log.i(Markers.TAG, Markers.overlayBack());
+        }
+        if (change != OverlayGrant.Change.NONE) {
+            publish();
+        }
     }
 
     /**
@@ -719,7 +782,9 @@ public final class PanelService extends Service implements PcPoller.Listener {
      * unchanged pixels cost nothing (ADR 0008).
      */
     private void publish() {
-        String folded = DataPayload.withBattery(lastServerPayload, lastBattery);
+        Boolean granted = overlayGranted;
+        String folded = DataPayload.withBattery(lastServerPayload,
+                DataPayload.withOverlay(lastBattery, granted == null || granted));
         if (folded == null || folded.equals(lastPayload)) {
             return;
         }
@@ -854,6 +919,9 @@ public final class PanelService extends Service implements PcPoller.Listener {
             // half that is rate-limited.
             Log.i(Markers.TAG, Markers.battery(BatteryReading.percent(level, scale)));
             lastBattery = reading;
+            // Before publish, so a grant lost since the last broadcast is on
+            // this render rather than the next one (T4.15).
+            checkOverlay();
             publish();
         }
     };
@@ -1062,6 +1130,11 @@ public final class PanelService extends Service implements PcPoller.Listener {
         // which is the whole distinction the watchdog rests on (ADR 0023).
         alarms.cancel(watchdogIntent());
         main.removeCallbacks(wakeCheck);
+        main.removeCallbacks(overlayCheck);
+        AppOpsManager appOps = getSystemService(AppOpsManager.class);
+        if (appOps != null) {
+            appOps.stopWatchingMode(overlayWatcher);
+        }
         releaseOfflineWakeLock();
         releaseProbeWakeLock();
         instance = null;
