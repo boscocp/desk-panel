@@ -196,6 +196,10 @@ them:
   `overlay=denied` is logged on every wake request, retries included, that finds "Display over
   other apps" switched off, which is the usual reason. A `wake=retry` is only logged while the
   PC is still online, so its absence proves nothing if the PC left within those 30 s.
+- **`overlay=lost` is the moment "Display over other apps" went** (T4.15, ADR 0026), logged
+  once, when the app-op changes or when a service starts without it. `overlay=back` is its
+  return. The panel shows the loss as a red note on the battery line. The phone keeps no
+  record of who changed the grant, so read the log around an `overlay=lost` within the hour.
 - `dormant=on` is the log saying its own silence is deliberate (T5.6). Offline and on battery
   the app hands its schedule to `AlarmManager` and goes quiet for fifteen to twenty-six minutes
   at a time — the alarm is inexact and the platform widens it — so

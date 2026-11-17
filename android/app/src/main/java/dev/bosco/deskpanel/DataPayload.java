@@ -291,6 +291,45 @@ public final class DataPayload {
         }
     }
 
+    /**
+     * The battery object with {@code "overlay": false} added when the phone
+     * has lost "Display over other apps" (T4.15, ADR 0026), so the panel can
+     * say so on the line that already describes the phone.
+     *
+     * <p>Nothing is added while the grant is held: the resting state costs
+     * the payload nothing, and a page that has never heard of the key reads
+     * its absence as "fine". Like {@link #withBattery}, a battery that will
+     * not parse is handed back untouched -- the warning is a decoration on a
+     * decoration, and it must never cost the reading it rides on.
+     *
+     * @param battery a JSON object literal from {@link BatteryReading}, or null
+     * @param granted whether the grant is held
+     * @return the battery object, with the flag when it is not
+     */
+    public static String withOverlay(String battery, boolean granted) {
+        if (battery == null || granted) {
+            return battery;
+        }
+        try {
+            return new JSONObject(battery).put("overlay", false).toString();
+        } catch (JSONException malformed) {
+            return battery;
+        }
+    }
+
+    /**
+     * Both device halves folded into the server payload: the battery, with the
+     * overlay flag when the grant is known to be missing (T4.15). What
+     * {@code PanelService.publish} hands the page, here so the decision that
+     * "no reading yet" is not a loss is covered on the JVM (found by review:
+     * it sat in the service, where no test reached it).
+     *
+     * @param granted the last reading of the grant, or null before the first
+     */
+    public static String fold(String payload, String battery, Boolean granted) {
+        return withBattery(payload, withOverlay(battery, granted == null || granted));
+    }
+
     /** Whether the raw weather body claimed staleness, read before it was stripped. */
     private static boolean hasStale(String weatherJson) {
         try {
