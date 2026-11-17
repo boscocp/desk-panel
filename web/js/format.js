@@ -1393,6 +1393,17 @@ const BATTERY_HOT_C = 43;
 // An absent or unusable temperature is 'normal', never 'hot'. A panel that
 // reddened because a sensor stopped answering would teach its owner to ignore
 // the colour, which costs more than the reading is worth.
+// The class for a battery line drawn as one string (the plain theme): a lost
+// overlay grant (T4.15, ADR 0026) outranks the temperature band, because the
+// text already names it and it is the warning that costs a dark morning.
+function batteryLineClass(battery) {
+    const fields = batteryFields(battery);
+    if (fields && fields.overlayOff) {
+        return 'hot';
+    }
+    return tempClass(battery && battery.tempC);
+}
+
 function tempClass(tempC) {
     if (typeof tempC !== 'number' || !Number.isFinite(tempC)) {
         return 'normal';
@@ -1735,7 +1746,8 @@ if (typeof module !== 'undefined' && module.exports) {
         overflowsBy, scrollPlan, worthScrolling,
         SCROLL_SECONDS_PER_ROW, SCROLL_MIN_TRAVEL_PX, SCROLL_MIN_HIDDEN_ROWS,
         sparklinePath,
-        formatBattery, batteryFields, tempClass, BATTERY_WARN_C, BATTERY_HOT_C,
+        formatBattery, batteryFields, tempClass, batteryLineClass,
+        BATTERY_WARN_C, BATTERY_HOT_C,
         shortcutsFor,
         nextEvent, untilText, agendaFields, agendaRows, agendaSegments, agendaAlert,
         marketClosed,

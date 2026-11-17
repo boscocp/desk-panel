@@ -6,7 +6,7 @@ package dev.bosco.deskpanel;
  *
  * <p>The grant is what lets a service revived by the watchdog raise the panel
  * (ADR 0023). It has gone from {@code allow} to {@code ignore} on this phone
- * at least four times with no install near it, and every time the first sign
+ * five times with no install near it, and every time the first sign
  * was a dark morning: on 2026-11-16 a WebView update killed the app at 15:49,
  * the watchdog revived the service at 16:19, and every {@code state=online}
  * after that, through two logins at the PC and one at the Mac, left the

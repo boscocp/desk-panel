@@ -317,6 +317,19 @@ public final class DataPayload {
         }
     }
 
+    /**
+     * Both device halves folded into the server payload: the battery, with the
+     * overlay flag when the grant is known to be missing (T4.15). What
+     * {@code PanelService.publish} hands the page, here so the decision that
+     * "no reading yet" is not a loss is covered on the JVM (found by review:
+     * it sat in the service, where no test reached it).
+     *
+     * @param granted the last reading of the grant, or null before the first
+     */
+    public static String fold(String payload, String battery, Boolean granted) {
+        return withBattery(payload, withOverlay(battery, granted == null || granted));
+    }
+
     /** Whether the raw weather body claimed staleness, read before it was stripped. */
     private static boolean hasStale(String weatherJson) {
         try {

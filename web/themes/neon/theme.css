@@ -1303,7 +1303,8 @@ body {
 
 /* A lost "Display over other apps" (T4.15, ADR 0026). --down, like .hot,
  * because it is the same kind of thing: the last warning before a dark panel.
- * Declared after .b-note so it wins over the dim colour that word carries. */
+ * Scoped under #battery, which outranks the bare .b-note and its dim colour by
+ * specificity -- keep the #battery, the source order does not matter. */
 #battery .b-alarm {
     color: var(--down);
 }

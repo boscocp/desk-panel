@@ -82,6 +82,9 @@ public class MarkersTest {
     public void wakeMarkers() {
         assertEquals("wake=retry", Markers.wakeRetry());
         assertEquals("overlay=denied", Markers.overlayDenied());
+        // T4.15: the moment the grant goes and comes back.
+        assertEquals("overlay=lost", Markers.overlayLost());
+        assertEquals("overlay=back", Markers.overlayBack());
     }
 
     @Test
