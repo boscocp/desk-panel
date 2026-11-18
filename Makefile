@@ -1,7 +1,7 @@
 # Entry point for humans, CI and agents alike. Every target exits non-zero on failure.
 DC := docker compose -f docker/compose.yml run --rm build
 
-.PHONY: help wave-start check hooks lint-tasks lint-notes lint-status lint-permissions lint-workflow lint-ci-hygiene lint-selftests lint-links lint-secrets lint-requirements lint-commits test-server test-web test-android connected build apk contract e2e clean
+.PHONY: help wave-start check hooks lint-tasks lint-notes lint-status lint-permissions lint-workflow lint-ci-hygiene lint-selftests lint-links lint-secrets lint-requirements lint-commits test-server test-web test-android connected build apk contract e2e install-phone clean
 
 help:
 	@echo "wave-start    fetch, prove main is current, cut BRANCH=wave/NN-slug"
@@ -13,6 +13,7 @@ help:
 	@echo "contract      hit the real upstream APIs (network, opt-in)"
 	@echo "connected     Espresso tests on the phone (container + host adb)"
 	@echo "e2e           full end-to-end, needs the phone on adb"
+	@echo "install-phone install APK= (default: release) and restore the MIUI grants"
 	@echo "lint-tasks    every acceptance criterion is a command with an exit code"
 	@echo "lint-notes    every finished wave left a note in docs/harness-notes/"
 	@echo "lint-status   STATUS.md and tasks/*.md still agree"
@@ -189,6 +190,37 @@ contract:
 
 e2e:
 	python e2e/run_e2e.py
+
+# `adb install -r` resets the two MIUI app-ops and SYSTEM_ALERT_WINDOW to
+# denied, and nothing announces it: the panel logs `screen=wake` and the screen
+# stays dark (T4.11, docs/INSTALL-PHONE.md "These settings do not survive a
+# reinstall"). The reset can land seconds after `Success`, so the grants are set
+# once the app is running and read back after a pause, up to three times.
+# MIUI may ask for confirmation on the phone itself; someone has to tap it.
+PKG := dev.bosco.deskpanel
+APK ?= out/desk-panel-release.apk
+
+install-phone:
+	@test -f "$(APK)" || { echo "no $(APK); build it first (docs/BUILD.md)"; exit 2; }
+	adb install -r "$(APK)"
+	adb shell am start -n $(PKG)/.MainActivity
+	@for try in 1 2 3; do \
+	  sleep 5; \
+	  adb shell appops set $(PKG) 10020 allow; \
+	  adb shell appops set $(PKG) 10008 allow; \
+	  adb shell appops set $(PKG) SYSTEM_ALERT_WINDOW allow; \
+	  adb shell dumpsys deviceidle whitelist +$(PKG) > /dev/null; \
+	  sleep 5; \
+	  ops=$$(adb shell appops get $(PKG) | tr -d '\r'); \
+	  if echo "$$ops" | grep -q 'MIUIOP(10020): allow' \
+	    && echo "$$ops" | grep -q 'MIUIOP(10008): allow' \
+	    && echo "$$ops" | grep -q 'SYSTEM_ALERT_WINDOW: allow' \
+	    && adb shell dumpsys deviceidle whitelist | grep -q $(PKG); then \
+	    echo "install-phone: grants hold (try $$try)"; exit 0; \
+	  fi; \
+	  echo "install-phone: grants not holding yet (try $$try)"; \
+	done; \
+	echo "install-phone: grants did not hold; set them in Settings (docs/INSTALL-PHONE.md step 4)"; exit 1
 
 clean:
 	$(DC) ./gradlew clean
