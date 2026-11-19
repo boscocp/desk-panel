@@ -197,6 +197,11 @@ e2e:
 # reinstall"). The reset can land seconds after `Success`, so the grants are set
 # once the app is running and read back after a pause, up to three times.
 # MIUI may ask for confirmation on the phone itself; someone has to tap it.
+# SYSTEM_ALERT_WINDOW is not set from adb: MIUI's permission service
+# (com.lbe.security.miui) keeps its own record and re-applies it over app-ops,
+# so an `appops set` reads back `allow` and is `ignore` again hours later
+# (2026-11-18 21:14: `overlay=lost` 0.6 s after its doApplyAppPermissionConfig).
+# The Settings screen is opened instead, and someone flips the toggle.
 PKG := dev.bosco.deskpanel
 APK ?= out/desk-panel-release.apk
 
@@ -208,19 +213,32 @@ install-phone:
 	  sleep 5; \
 	  adb shell appops set $(PKG) 10020 allow; \
 	  adb shell appops set $(PKG) 10008 allow; \
-	  adb shell appops set $(PKG) SYSTEM_ALERT_WINDOW allow; \
 	  adb shell dumpsys deviceidle whitelist +$(PKG) > /dev/null; \
 	  sleep 5; \
 	  ops=$$(adb shell appops get $(PKG) | tr -d '\r'); \
 	  if echo "$$ops" | grep -q 'MIUIOP(10020): allow' \
 	    && echo "$$ops" | grep -q 'MIUIOP(10008): allow' \
-	    && echo "$$ops" | grep -q 'SYSTEM_ALERT_WINDOW: allow' \
 	    && adb shell dumpsys deviceidle whitelist | grep -q $(PKG); then \
-	    echo "install-phone: grants hold (try $$try)"; exit 0; \
+	    echo "install-phone: MIUI grants hold (try $$try)"; break; \
 	  fi; \
 	  echo "install-phone: grants not holding yet (try $$try)"; \
-	done; \
-	echo "install-phone: grants did not hold; set them in Settings (docs/INSTALL-PHONE.md step 4)"; exit 1
+	  if [ $$try = 3 ]; then \
+	    echo "install-phone: grants did not hold; set them in Settings (docs/INSTALL-PHONE.md step 4)"; exit 1; \
+	  fi; \
+	done
+	@if ! adb shell appops get $(PKG) SYSTEM_ALERT_WINDOW | grep -q allow; then \
+	  adb shell input keyevent KEYCODE_WAKEUP; \
+	  adb shell am start -a android.settings.action.MANAGE_OVERLAY_PERMISSION -d package:$(PKG) > /dev/null; \
+	  echo "install-phone: on the phone, turn on 'Display over other apps' (waiting up to 2 min)"; \
+	  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24; do \
+	    sleep 5; \
+	    adb shell appops get $(PKG) SYSTEM_ALERT_WINDOW | grep -q allow && break; \
+	  done; \
+	  adb shell appops get $(PKG) SYSTEM_ALERT_WINDOW | grep -q allow \
+	    || { echo "install-phone: 'Display over other apps' is still off"; exit 1; }; \
+	fi
+	adb shell am start -n $(PKG)/.MainActivity
+	@echo "install-phone: grants hold"
 
 clean:
 	$(DC) ./gradlew clean

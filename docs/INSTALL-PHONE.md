@@ -74,7 +74,9 @@ will look like a bug in the code.
    dark. Measured on the device, 2026-09-19.
 
    **Display over other apps** as well, from Settings → Apps → desk-panel → Other permissions,
-   or `adb shell appops set dev.bosco.deskpanel SYSTEM_ALERT_WINDOW allow`. Unlike the two
+   or straight to the toggle with
+   `adb shell am start -a android.settings.action.MANAGE_OVERLAY_PERMISSION -d package:dev.bosco.deskpanel`.
+   **Not with `adb shell appops set`**: see "An adb grant does not last" below. Unlike the two
    above, this one is AOSP's. It lets a service that the watchdog revived
    ([ADR 0023](adr/0023-a-watchdog-brings-the-service-back.md)) open the panel when no task is
    left to raise. Without it, Android 12 logs `Abort background activity starts` and the panel
@@ -139,16 +141,27 @@ install without anyone noticing. Without it, a panel covered by another app cann
 (T4.11), and the log says `overlay=denied` next to `wake=retry` every 30 s until it is
 granted again (T4.12). The reset can land a
 few seconds *after* `adb install` prints `Success`, so a set made straight away may be undone:
-read it back once the app is running. After every install,
-either set all three again in the UI or from the host:
+read it back once the app is running. After every install, `make install-phone` does it:
+it sets the two vendor ops from the host and opens the Settings toggle for the third. By hand:
 
 ```bash
 adb shell appops set dev.bosco.deskpanel 10020 allow   # Show on Lock screen
 adb shell appops set dev.bosco.deskpanel 10008 allow   # background pop-up
-adb shell appops set dev.bosco.deskpanel SYSTEM_ALERT_WINDOW allow   # display over other apps
 adb shell appops get dev.bosco.deskpanel | grep MIUIOP
-adb shell appops get dev.bosco.deskpanel SYSTEM_ALERT_WINDOW | grep -q allow
+adb shell am start -a android.settings.action.MANAGE_OVERLAY_PERMISSION -d package:dev.bosco.deskpanel
+adb shell appops get dev.bosco.deskpanel SYSTEM_ALERT_WINDOW | grep -q allow   # after the tap
 ```
+
+### An adb grant does not last
+
+MIUI's permission service, `com.lbe.security.miui`, keeps its own record of every app's
+permissions and writes it back over Android's app-ops: every 30 minutes
+(`AppOpsAdapter: start apply permission record!`) and on other triggers. An
+`appops set … SYSTEM_ALERT_WINDOW allow` changes app-ops and not that record, so it reads back
+`allow` and is undone later. Measured 2026-11-18: back at 10:57 (`overlay=back`), in use at 19:12,
+and gone at 21:14:35 — `overlay=lost` was logged 0.6 s after the service's
+`doApplyAppPermissionConfig`. Grant it in the Settings UI. The two vendor ops set from adb
+read `allow` the next morning; whether they are safe from the same pass is not yet measured.
 
 **The numeric ops are the vendor's own and Xiaomi documents none of them; they were read off
 this device.** They are not stable across skins or versions, and on a stock Android build the
