@@ -401,7 +401,7 @@ dependencies {
     // — so without this the one class worth testing here could only be tested
     // on a device. Test classpath only: `implementation` would ship a second
     // copy of a library the platform already has.
-    testImplementation("org.json:json:20240303")
+    testImplementation("org.json:json:20260814")
 }
 
 // Every other task (`make apk`, T3.6, CI) expects the APK at the repository
