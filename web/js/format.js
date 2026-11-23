@@ -352,6 +352,10 @@ const LANGUAGES = {
         // first as a network having dropped -- the wrong alarm entirely on a
         // panel whose other states are about the PC being away.
         unplugged: 'na bateria',
+        // The phone has lost "Sobrepor a outros apps" (T4.15, ADR 0026): named
+        // the way MIUI's own settings screen names it, so the words on the
+        // panel are the words to look for on the phone.
+        overlayOff: 'sem sobrepor apps',
         // `agenda` names a card that holds nothing yet: the reserved box T9.1
         // will fill with the next meeting (T6.12). The word is here rather
         // than in the theme for the same reason every other title is -- a
@@ -443,6 +447,7 @@ const LANGUAGES = {
         stale: 'STALE',
         marketClosed: 'CLOSED',
         unplugged: 'unplugged',
+        overlayOff: 'no overlay grant',
         // SCHEDULE, not AGENDA: in English an agenda is the list of items
         // for one meeting, and what this card will show is the next one.
         titles: { quotes: 'B3', fx: 'FX', crypto: 'CRYPTO', weather: 'WEATHER',
@@ -1326,6 +1331,13 @@ function batteryFields(battery) {
         // all has not said the phone is on battery, and the corner must not
         // claim it has.
         unplugged: battery.charging === false,
+        // The phone has lost "Display over other apps" (T4.15, ADR 0026). It
+        // rides this line because it is the phone's own state, like the
+        // charger, and because the panel is lit and readable for days before
+        // the grant's absence costs anything: the morning the app is killed
+        // and cannot come back. `=== false` for the same reason as above: a
+        // payload that does not mention the grant has not said it is gone.
+        overlayOff: battery.overlay === false,
     };
 }
 
@@ -1343,6 +1355,9 @@ function formatBattery(battery, language) {
     }
     if (fields.unplugged) {
         parts.push(strings(language).unplugged);
+    }
+    if (fields.overlayOff) {
+        parts.push(strings(language).overlayOff);
     }
     return parts.join(' · ');
 }
@@ -1378,6 +1393,17 @@ const BATTERY_HOT_C = 43;
 // An absent or unusable temperature is 'normal', never 'hot'. A panel that
 // reddened because a sensor stopped answering would teach its owner to ignore
 // the colour, which costs more than the reading is worth.
+// The class for a battery line drawn as one string (the plain theme): a lost
+// overlay grant (T4.15, ADR 0026) outranks the temperature band, because the
+// text already names it and it is the warning that costs a dark morning.
+function batteryLineClass(battery) {
+    const fields = batteryFields(battery);
+    if (fields && fields.overlayOff) {
+        return 'hot';
+    }
+    return tempClass(battery && battery.tempC);
+}
+
 function tempClass(tempC) {
     if (typeof tempC !== 'number' || !Number.isFinite(tempC)) {
         return 'normal';
@@ -1720,7 +1746,8 @@ if (typeof module !== 'undefined' && module.exports) {
         overflowsBy, scrollPlan, worthScrolling,
         SCROLL_SECONDS_PER_ROW, SCROLL_MIN_TRAVEL_PX, SCROLL_MIN_HIDDEN_ROWS,
         sparklinePath,
-        formatBattery, batteryFields, tempClass, BATTERY_WARN_C, BATTERY_HOT_C,
+        formatBattery, batteryFields, tempClass, batteryLineClass,
+        BATTERY_WARN_C, BATTERY_HOT_C,
         shortcutsFor,
         nextEvent, untilText, agendaFields, agendaRows, agendaSegments, agendaAlert,
         marketClosed,

@@ -1,6 +1,7 @@
 package dev.bosco.deskpanel;
 
 import android.app.AlarmManager;
+import android.app.AppOpsManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -382,6 +383,24 @@ public final class PanelService extends Service implements PcPoller.Listener {
     private static volatile String lastBattery;
 
     /**
+     * "Display over other apps", as last read (T4.15, ADR 0026). Null before
+     * the first reading. Folded into the battery object by {@link #publish},
+     * so a panel that is lit today says that it will not come back after the
+     * next kill.
+     */
+    private static volatile Boolean overlayGranted;
+
+    /**
+     * How long after an app-op change to read the grant. A precaution, not a
+     * measured race: the platform documents neither the callback's thread nor
+     * whether {@code canDrawOverlays} already answers the new mode when it
+     * runs, and a read that saw the old value would log nothing until the next
+     * battery broadcast. Half a second costs nothing on a change that happens
+     * once a fortnight.
+     */
+    private static final long OVERLAY_SETTLE_MS = 500L;
+
+    /**
      * Whether the charger is connected, from {@code EXTRA_PLUGGED} (T5.4).
      * True until the first broadcast says otherwise, which is the same safe
      * default {@code PcPoller} starts from: no broadcast means behave as the
@@ -464,6 +483,21 @@ public final class PanelService extends Service implements PcPoller.Listener {
     /** Posted {@link WakeRetry#RETRY_MS} after each wake request, removed when it lands. */
     private final Runnable wakeCheck = this::checkWake;
 
+    /** Reads the grant on the main thread; see {@link #checkOverlay}. */
+    private final Runnable overlayCheck = this::checkOverlay;
+
+    /**
+     * Told by the system when this app's "Display over other apps" app-op
+     * changes, whoever changes it (T4.15). The platform does not say which
+     * thread this runs on, so it only posts to the main one. The package
+     * argument is ignored: on API 35 it can be empty for a change that is not
+     * package-specific, and any change is worth a read.
+     */
+    private final AppOpsManager.OnOpChangedListener overlayWatcher = (op, pkg) -> {
+        main.removeCallbacks(overlayCheck);
+        main.postDelayed(overlayCheck, OVERLAY_SETTLE_MS);
+    };
+
     /**
      * Registers the Activity that owns the window, and immediately replays the
      * current PC state to it if one is known. See {@link #lastOnline} for why a
@@ -528,6 +562,11 @@ public final class PanelService extends Service implements PcPoller.Listener {
         // recreate it would swallow the next `dormant=on` — the one line
         // TESTING.md scenario 6 and T5.6's acceptance both grep for.
         dormant = false;
+        // The same reasoning for the overlay grant (T4.15): a static left from
+        // a previous service in this process would make this service's first
+        // reading look like old news, and a start without the grant is exactly
+        // the line overlay=lost exists for.
+        overlayGranted = null;
 
         PowerManager power = getSystemService(PowerManager.class);
         offlineWakeLock = power.newWakeLock(
@@ -574,6 +613,43 @@ public final class PanelService extends Service implements PcPoller.Listener {
                 screenOffReceiver,
                 new IntentFilter(Intent.ACTION_SCREEN_OFF),
                 ContextCompat.RECEIVER_NOT_EXPORTED);
+
+        // T4.15: the grant a revived service needs to raise the panel. Read
+        // now, so a service that starts without it says so before its first
+        // wake, and watched, so the moment it goes is in the log -- the one
+        // fact five losses have not left behind. The battery receiver reads
+        // it again on every broadcast, as a backstop for a change the
+        // watcher is not told about.
+        AppOpsManager appOps = getSystemService(AppOpsManager.class);
+        if (appOps != null) {
+            appOps.startWatchingMode(
+                    AppOpsManager.OPSTR_SYSTEM_ALERT_WINDOW, getPackageName(), overlayWatcher);
+        }
+        checkOverlay();
+    }
+
+    /**
+     * Reads "Display over other apps", logs {@code overlay=lost} or {@code
+     * overlay=back} if that is news (T4.15, ADR 0026), and puts the reading
+     * on the panel. On the main thread, like {@link #publish}, which it calls.
+     */
+    private void checkOverlay() {
+        // A check posted by a callback that landed during teardown must not
+        // log, or write the static, on behalf of a service that is gone.
+        if (instance != this) {
+            return;
+        }
+        boolean now = Settings.canDrawOverlays(this);
+        OverlayGrant.Change change = OverlayGrant.change(overlayGranted, now);
+        overlayGranted = now;
+        if (change == OverlayGrant.Change.LOST) {
+            Log.w(Markers.TAG, Markers.overlayLost());
+        } else if (change == OverlayGrant.Change.BACK) {
+            Log.i(Markers.TAG, Markers.overlayBack());
+        }
+        if (change != OverlayGrant.Change.NONE) {
+            publish();
+        }
     }
 
     /**
@@ -719,7 +795,7 @@ public final class PanelService extends Service implements PcPoller.Listener {
      * unchanged pixels cost nothing (ADR 0008).
      */
     private void publish() {
-        String folded = DataPayload.withBattery(lastServerPayload, lastBattery);
+        String folded = DataPayload.fold(lastServerPayload, lastBattery, overlayGranted);
         if (folded == null || folded.equals(lastPayload)) {
             return;
         }
@@ -843,6 +919,10 @@ public final class PanelService extends Service implements PcPoller.Listener {
             if (BatteryReading.plausible(tenths)) {
                 onThermalReading(BatteryReading.celsius(tenths));
             }
+
+            // The overlay backstop (T4.15), before the return below: a
+            // broadcast with an unusable level is still a moment to look.
+            checkOverlay();
 
             String reading = BatteryReading.json(level, scale, tenths, plugged);
             if (reading == null) {
@@ -1062,6 +1142,13 @@ public final class PanelService extends Service implements PcPoller.Listener {
         // which is the whole distinction the watchdog rests on (ADR 0023).
         alarms.cancel(watchdogIntent());
         main.removeCallbacks(wakeCheck);
+        // Stop the watcher first, then drop what it may have posted: the other
+        // order lets a callback in between re-post the check (found by review).
+        AppOpsManager appOps = getSystemService(AppOpsManager.class);
+        if (appOps != null) {
+            appOps.stopWatchingMode(overlayWatcher);
+        }
+        main.removeCallbacks(overlayCheck);
         releaseOfflineWakeLock();
         releaseProbeWakeLock();
         instance = null;

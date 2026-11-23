@@ -1525,6 +1525,14 @@
             note.textContent = words.unplugged;
             line.appendChild(note);
         }
+        // An alarm beside .hot, the other one in this corner (T4.15, ADR
+        // 0026): the panel is fine today and will not come back after the
+        // next kill.
+        if (fields.overlayOff) {
+            const alarm = el('span', null, 'b-note b-alarm');
+            alarm.textContent = words.overlayOff;
+            line.appendChild(alarm);
+        }
         els.battery.appendChild(line);
     }
 

@@ -73,8 +73,13 @@ and `screen=wake` in place of the offline pair. The count is the point: each mar
 once per transition, not on every poll.
 
 ```bash
-! grep -rnE '"[^"]*(state=|screen=|night=|dormant=|tick=|ping=|data=|battery=)' android/app/src/main/java --include=*.java | grep -v 'Markers.java'
+! grep -rnE '"[^"]*(state=|screen=|night=|dormant=|tick=|ping=|data=|battery=|overlay=|wake=)' android/app/src/main/java --include=*.java | grep -v 'Markers.java' | grep -vE ':[0-9]+:\s*(\*|//)'
 ```
+
+`overlay=` and `wake=` joined the list in wave 53 (T4.15): the guard had never covered them,
+so an inline `overlay=lost` would have passed. They need the last filter, which drops comment
+lines: two javadocs open a quoted setting name earlier on a line that later names a marker
+(`PanelService.java`, `WakeRetry.java`), and the pattern reads that as a literal.
 
 The strings live in exactly one place. This is what makes the E2E suite's assertions stable
 ([ADR 0009](../docs/adr/0009-testing-strategy.md)).

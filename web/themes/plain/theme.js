@@ -429,7 +429,9 @@
         if (!text) {
             return;
         }
-        const line = el('div', null, tempClass(battery.tempC));
+        // A lost overlay grant (T4.15) turns the line red whatever the
+        // temperature; see batteryLineClass in format.js.
+        const line = el('div', null, batteryLineClass(battery));
         line.textContent = text;
         els.battery.appendChild(line);
     }

@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 
 const {
     formatPrice, formatRate, formatPair, formatChange, changeClass, weatherLabel, isNight,
-    sparklinePath, formatTemp, formatBattery, batteryFields, tempClass,
+    sparklinePath, formatTemp, formatBattery, batteryFields, tempClass, batteryLineClass,
     BATTERY_WARN_C, BATTERY_HOT_C,
     formatRange, weatherGlyph, strings, LANGUAGES, FALLBACK_LANGUAGE,
     moonFields, formatPercent, chanceOfRain, MOON_PHASES,
@@ -311,7 +311,35 @@ test('formatTemp keeps one decimal and does not round a real zero away', () => {
 // disagreeing about what the line says.
 test('batteryFields hands a theme the three pieces of the line', () => {
     assert.deepEqual(batteryFields({ level: 87, tempC: 31.5, charging: true }),
-                     { level: '87%', temp: '31.5\u00B0C', unplugged: false });
+                     { level: '87%', temp: '31.5\u00B0C', unplugged: false,
+                       overlayOff: false });
+});
+
+// T4.15: the grant that lets a revived service raise the panel. Only an
+// explicit false is a loss -- every payload before T4.15 has no such key.
+test('batteryFields reports a lost overlay grant only when the phone said so', () => {
+    assert.equal(batteryFields({ level: 50, overlay: false }).overlayOff, true);
+    assert.equal(batteryFields({ level: 50, overlay: true }).overlayOff, false);
+    assert.equal(batteryFields({ level: 50 }).overlayOff, false);
+});
+
+test('formatBattery names the lost grant in the panel language', () => {
+    assert.equal(formatBattery({ level: 80, charging: true, overlay: false }, 'pt-BR'),
+                 'BAT 80% · sem sobrepor apps');
+    assert.equal(formatBattery({ level: 80, charging: true, overlay: false }, 'en'),
+                 'BAT 80% · no overlay grant');
+    assert.equal(formatBattery({ level: 80, charging: true }, 'en'), 'BAT 80%');
+    // The likeliest night it matters: the PC off, the phone on battery, the
+    // grant gone. Both warnings, charger first.
+    assert.equal(formatBattery({ level: 80, charging: false, overlay: false }, 'pt-BR'),
+                 'BAT 80% · na bateria · sem sobrepor apps');
+});
+
+test('batteryLineClass turns the line red for a lost grant, whatever the heat', () => {
+    assert.equal(batteryLineClass({ level: 50, tempC: 20, overlay: false }), 'hot');
+    assert.equal(batteryLineClass({ level: 50, tempC: 20 }), 'normal');
+    assert.equal(batteryLineClass({ level: 50, tempC: 20, overlay: true }), 'normal');
+    assert.equal(batteryLineClass({ level: 50, tempC: 44 }), tempClass(44));
 });
 
 test('batteryFields reports unplugged only when the phone said so', () => {

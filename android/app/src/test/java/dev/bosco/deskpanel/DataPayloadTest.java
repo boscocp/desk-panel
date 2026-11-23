@@ -432,4 +432,44 @@ public class DataPayloadTest {
         assertEquals("unknown", DataPayload.actionState("{\"state\":\"101\"}"));
         assertEquals("unknown", DataPayload.actionState("{\"state\":\"4');alert(1)//\"}"));
     }
+
+    // --- T4.15: the overlay grant rides the battery object -----------------
+
+    private static final String GRANT_BATTERY = "{\"level\":50,\"tempC\":30,\"charging\":true}";
+
+    @Test
+    public void aMissingGrantRidesTheBatteryObject() throws Exception {
+        JSONObject lost = new JSONObject(DataPayload.withOverlay(GRANT_BATTERY, false));
+        assertEquals(false, lost.getBoolean("overlay"));
+        assertEquals(50, lost.getInt("level"));
+        assertEquals(30, lost.getInt("tempC"));
+        assertEquals(true, lost.getBoolean("charging"));
+    }
+
+    @Test
+    public void aHeldGrantLeavesTheBatteryObjectAsItWas() {
+        // The resting state adds nothing, so every fixture written before
+        // T4.15 still describes what the page gets.
+        assertEquals(GRANT_BATTERY, DataPayload.withOverlay(GRANT_BATTERY, true));
+    }
+
+    @Test
+    public void noBatteryYetStaysNoBatteryAndABadOneIsLeftAlone() {
+        assertEquals(null, DataPayload.withOverlay(null, false));
+        assertEquals("{not json", DataPayload.withOverlay("{not json", false));
+    }
+
+    @Test
+    public void foldFlagsOnlyAReadingThatFoundTheGrantMissing() throws Exception {
+        String payload = DataPayload.merge(Contract.quotes(), Contract.weather());
+        JSONObject lost = new JSONObject(DataPayload.fold(payload, GRANT_BATTERY, false))
+                .getJSONObject("battery");
+        assertEquals(false, lost.getBoolean("overlay"));
+        // No reading yet is not a loss: a service that has not looked must
+        // not put the warning on the panel.
+        assertFalse(new JSONObject(DataPayload.fold(payload, GRANT_BATTERY, null))
+                .getJSONObject("battery").has("overlay"));
+        assertFalse(new JSONObject(DataPayload.fold(payload, GRANT_BATTERY, true))
+                .getJSONObject("battery").has("overlay"));
+    }
 }
