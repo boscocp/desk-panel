@@ -271,6 +271,15 @@ public final class PanelService extends Service implements PcPoller.Listener {
     private static volatile boolean panelCovered;
 
     /**
+     * {@code elapsedRealtime} of the panel's last stop while interactive, 0
+     * while it is in front, and the last USB connect's (T4.15). Together they
+     * tell MIUI's USB chooser from a person opening an app: see
+     * {@link UsbCover}.
+     */
+    private static volatile long coveredAt;
+    private static volatile long usbConnectedAt;
+
+    /**
      * The thermal authority (T5.5), fed from the battery broadcast below.
      *
      * <p>Static, and therefore outliving a {@code START_STICKY} restart of this
@@ -573,6 +582,14 @@ public final class PanelService extends Service implements PcPoller.Listener {
                 this,
                 screenOffReceiver,
                 new IntentFilter(Intent.ACTION_SCREEN_OFF),
+                ContextCompat.RECEIVER_NOT_EXPORTED);
+
+        // Not in the SDK's constants, and a protected broadcast: only the
+        // system sends it (UsbManager.ACTION_USB_STATE is @hide).
+        ContextCompat.registerReceiver(
+                this,
+                usbReceiver,
+                new IntentFilter(ACTION_USB_STATE),
                 ContextCompat.RECEIVER_NOT_EXPORTED);
     }
 
@@ -937,6 +954,52 @@ public final class PanelService extends Service implements PcPoller.Listener {
         }
     };
 
+    /** {@code UsbManager.ACTION_USB_STATE}, which the SDK hides. */
+    private static final String ACTION_USB_STATE = "android.hardware.usb.action.USB_STATE";
+
+    /**
+     * USB becoming configured, which is the moment MIUI opens its USB chooser
+     * over whatever is in front (T4.15). Recorded, and checked against the
+     * panel's last cover: either can arrive first.
+     *
+     * <p>The sticky copy delivered at registration is skipped. It describes a
+     * connection made before the service started, not a cable plugged now.
+     */
+    private final BroadcastReceiver usbReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (isInitialStickyBroadcast()) {
+                return;
+            }
+            if (intent.getBooleanExtra("connected", false)
+                    && intent.getBooleanExtra("configured", false)) {
+                usbConnectedAt = SystemClock.elapsedRealtime();
+                reclaimFromUsbChooser();
+            }
+        }
+    };
+
+    /**
+     * Raises the panel over MIUI's USB chooser, if that is what covered it
+     * (T4.15, {@link UsbCover}). The screen is on, so there is no wake lock to
+     * take: this is T4.11's raise without the screen going out first.
+     *
+     * <p>Both times are consumed, so one USB connect raises the panel at most
+     * once. A second cover inside the window -- a person reopening the app
+     * the raise went over, or MIUI showing the chooser again -- is left alone
+     * and comes back the T4.11 way, at the screen timeout (found by review:
+     * clearing only the cover let every new cover re-arm it).
+     */
+    private void reclaimFromUsbChooser() {
+        if (!UsbCover.reclaim(Boolean.TRUE.equals(lastOnline), coveredAt, usbConnectedAt)) {
+            return;
+        }
+        coveredAt = 0;
+        usbConnectedAt = 0;
+        Log.i(Markers.TAG, Markers.usbChooserReclaim());
+        bringPanelToFront();
+    }
+
     /**
      * One power state, from wherever it was learned. Idempotent, so both
      * receivers can call it on every broadcast without comparing edges.
@@ -1053,6 +1116,7 @@ public final class PanelService extends Service implements PcPoller.Listener {
         unregisterReceiver(batteryReceiver);
         unregisterReceiver(wakeReceiver);
         unregisterReceiver(screenOffReceiver);
+        unregisterReceiver(usbReceiver);
         // Before the lock, and not optional: an alarm outliving the service it
         // was arming a probe for would wake the phone every fifteen minutes to
         // deliver a broadcast nothing is listening to.
@@ -1474,6 +1538,11 @@ public final class PanelService extends Service implements PcPoller.Listener {
      */
     public static void panelCovered(boolean covered) {
         panelCovered = covered;
+        coveredAt = covered ? SystemClock.elapsedRealtime() : 0;
+        PanelService service = instance;
+        if (covered && service != null) {
+            service.reclaimFromUsbChooser();
+        }
     }
 
     /** The panel's window gaining or losing focus, for {@link #checkWake}. */

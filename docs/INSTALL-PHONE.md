@@ -91,8 +91,12 @@ will look like a bug in the code.
    it matters. It is on by default on a phone that has been used for development.
 
    ```bash
-   adb shell settings get global stay_on_while_plugged_in   # must be 0
+   make phone-settings   # fails, with the fix, unless stay_on_while_plugged_in is 0
    ```
+
+   `make install-phone` and `make e2e` run it first. It was found on on 2026-11-26, as `7`,
+   the value `scrcpy --stay-awake` sets (the cause is not confirmed), and the panel stayed lit
+   and dimmed on the lock screen in front of a sleeping monitor (T4.16).
 
    An earlier version of this document recommended turning it **on**. That advice belonged to
    the abandoned design where the screen never slept and offline was faked with
