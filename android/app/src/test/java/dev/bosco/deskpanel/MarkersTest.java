@@ -65,7 +65,7 @@ public class MarkersTest {
                 Markers.thermal(false), Markers.night(true), Markers.dormant(true),
                 Markers.ping("ok"), Markers.data(true), Markers.battery(87),
                 Markers.tick(1758240000L), Markers.wakeRetry(),
-                Markers.overlayDenied()}) {
+                Markers.overlayDenied(), Markers.usbChooserReclaim()}) {
             assertEquals(marker, marker.trim());
             assertEquals(-1, marker.indexOf(' '));
         }
@@ -81,6 +81,7 @@ public class MarkersTest {
     public void wakeMarkers() {
         assertEquals("wake=retry", Markers.wakeRetry());
         assertEquals("overlay=denied", Markers.overlayDenied());
+        assertEquals("usb=reclaim", Markers.usbChooserReclaim());
     }
 
     @Test

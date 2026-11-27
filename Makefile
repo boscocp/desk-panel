@@ -1,7 +1,7 @@
 # Entry point for humans, CI and agents alike. Every target exits non-zero on failure.
 DC := docker compose -f docker/compose.yml run --rm build
 
-.PHONY: help wave-start check hooks lint-tasks lint-notes lint-status lint-permissions lint-workflow lint-ci-hygiene lint-selftests lint-links lint-secrets lint-requirements lint-commits test-server test-web test-android connected build apk contract e2e install-phone clean
+.PHONY: help wave-start check hooks lint-tasks lint-notes lint-status lint-permissions lint-workflow lint-ci-hygiene lint-selftests lint-links lint-secrets lint-requirements lint-commits test-server test-web test-android connected build apk contract e2e install-phone phone-settings clean
 
 help:
 	@echo "wave-start    fetch, prove main is current, cut BRANCH=wave/NN-slug"
@@ -14,6 +14,7 @@ help:
 	@echo "connected     Espresso tests on the phone (container + host adb)"
 	@echo "e2e           full end-to-end, needs the phone on adb"
 	@echo "install-phone install APK= (default: release) and restore the MIUI grants"
+	@echo "phone-settings fail if the phone has Stay awake (or another known breaker) on"
 	@echo "lint-tasks    every acceptance criterion is a command with an exit code"
 	@echo "lint-notes    every finished wave left a note in docs/harness-notes/"
 	@echo "lint-status   STATUS.md and tasks/*.md still agree"
@@ -188,7 +189,11 @@ connected:
 contract:
 	RUN_CONTRACT_TESTS=1 python -m unittest discover -s server/tests -t . -p "contract_*.py"
 
-e2e:
+# Settings on the phone that break the panel with no error anywhere (T4.16).
+phone-settings:
+	python scripts/check_phone_settings.py
+
+e2e: phone-settings
 	python e2e/run_e2e.py
 
 # `adb install -r` resets the two MIUI app-ops and SYSTEM_ALERT_WINDOW to
@@ -200,7 +205,7 @@ e2e:
 PKG := dev.bosco.deskpanel
 APK ?= out/desk-panel-release.apk
 
-install-phone:
+install-phone: phone-settings
 	@test -f "$(APK)" || { echo "no $(APK); build it first (docs/BUILD.md)"; exit 2; }
 	adb install -r "$(APK)"
 	adb shell am start -n $(PKG)/.MainActivity

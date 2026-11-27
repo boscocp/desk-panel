@@ -176,6 +176,15 @@ public final class Markers {
         return "overlay=denied";
     }
 
+    /**
+     * The panel raised over MIUI's USB chooser (T4.15): covered within
+     * {@code UsbCover.WINDOW_MS} of USB becoming configured. "Raising", as
+     * startActivity only queues it; the proof is the panel resumed.
+     */
+    public static String usbChooserReclaim() {
+        return "usb=reclaim";
+    }
+
     /** Battery level, on broadcast (T5.4). */
     public static String battery(int level) {
         return "battery=" + level;
